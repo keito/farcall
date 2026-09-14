@@ -32,6 +32,20 @@ enum StepResult {
     Interrupt(u8),
 }
 
+#[derive(Clone, Copy)]
+#[allow(dead_code)]
+enum Flag {
+    Carry = 0,           // CF
+    Parity = 2,          // PF
+    AuxiliaryCarry = 4,  // AF
+    Zero = 6,            // ZF
+    Sign = 7,            // SF
+    Overflow = 11,       // OF
+    InterruptEnable = 9, // IF
+    Direction = 10,      // DF
+    Trap = 8,            // TF
+}
+
 impl Cpu {
     fn new() -> Self {
         Cpu {
@@ -44,45 +58,76 @@ impl Cpu {
         }
     }
 
+    fn set_flag(&mut self, flag: Flag, value: bool) {
+        let mask = 1 << (flag as u8);
+        self.flags = (self.flags & !mask) | ((value as u16) << (flag as u8));
+    }
+
     /// Fetch, decode, and execute one instruction
     fn step(&mut self, memory: &mut [u8]) -> Result<StepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
         let mut result = StepResult::Continue;
         // Table 4-13
         match byte {
+            // Arithmetic
+            0x49 => {
+                print_instruction(byte, &format_args!("dec cx"));
+                let old_cx = self.cx;
+                self.cx = self.cx.wrapping_sub(1);
+                // Set or clear the zero flag
+                self.set_flag(Flag::Zero, self.cx == 0);
+                // Overflow: 0x8000 became 0x7FFF, meaning -32768 became +32767
+                self.set_flag(Flag::Overflow, old_cx == 0x8000);
+                // Is bit 15 set (i.e., negative)
+                self.set_flag(Flag::Sign, self.cx & (1 << 15) != 0);
+                // Parity (even number of 1s in the lower byte)
+                self.set_flag(Flag::Parity, (self.cx as u8).count_ones() % 2 == 0);
+                // Did decrementing borrowing into lower nibble (was it 0)
+                self.set_flag(Flag::AuxiliaryCarry, old_cx & 0x0F == 0);
+            }
+            // Jumps
+            0x75 => {
+                // Signed byte
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jnz short {:X}h", operand));
+                // If zero flag is not set, then jump
+                if self.flags & 0x40 == 0 {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                print_instruction(byte, "mov al,", operand);
+                print_instruction(byte, &format_args!("mov al, {:X}h", operand));
                 // Move the u8 operand into the low byte of AX
                 self.ax = operand as u16 | (self.ax & 0xFF00);
             }
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                print_instruction(byte, "mov ah,", operand);
+                print_instruction(byte, &format_args!("mov ah, {:X}h", operand));
                 // Move the u8 operand into the high byte of AX
                 self.ax = ((operand as u16) << 8) | (self.ax & 0b11111111);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
             0xBA => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                print_instruction(byte, "mov dx,", operand);
+                print_instruction(byte, &format_args!("mov dx, {:X}h", operand));
                 self.dx = operand;
             }
             0xBB => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                print_instruction(byte, "mov bx,", operand);
+                print_instruction(byte, &format_args!("mov bx, {:X}h", operand));
                 self.bx = operand;
             }
             0xB9 => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                print_instruction(byte, "mov cx,", operand);
+                print_instruction(byte, &format_args!("mov cx, {:X}h", operand));
                 self.cx = operand;
             }
             // Interrupts
             0xCD => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                print_instruction(byte, "int", operand);
+                print_instruction(byte, &format_args!("int {:X}h", operand));
                 result = StepResult::Interrupt(operand);
             }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
@@ -119,7 +164,7 @@ impl Debug for Cpu {
             .field("cx", &format_args!("{:#06X}", self.cx))
             .field("dx", &format_args!("{:#06X}", self.dx))
             .field("ip", &format_args!("{:#06X}", self.ip))
-            .field("flags", &format_args!("{:#06X}", self.flags))
+            .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
     }
 }
@@ -227,11 +272,6 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     }
 }
 
-fn print_instruction(op: u8, instruction: &str, operand: impl Into<u16>) {
-    eprintln!(
-        "{:#X} \x1b[96m({} {:X}h)\x1b[0m",
-        op,
-        instruction,
-        operand.into()
-    );
+fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
+    eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
 }
