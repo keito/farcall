@@ -1,5 +1,6 @@
 use core::fmt::{self, Debug};
 use std::fs;
+use std::io::{self, Write};
 use thiserror::Error;
 
 pub struct Cpu {
@@ -24,6 +25,11 @@ enum CpuError {
     UnsupportedInstruction(u8),
 }
 
+enum StepResult {
+    Continue,
+    Interrupt(u8),
+}
+
 impl Cpu {
     fn new() -> Self {
         Cpu {
@@ -37,36 +43,44 @@ impl Cpu {
     }
 
     /// Fetch, decode, and execute one instruction
-    fn step(&mut self, memory: &mut [u8]) -> Result<(), CpuError> {
+    fn step(&mut self, memory: &mut [u8]) -> Result<StepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
+        let mut result = StepResult::Continue;
+        // Table 4-13
         match byte {
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                println!("0xB4 (mov ah, {:X}h)", operand);
+                eprintln!("0xB4 (mov ah, {:X}h)", operand);
                 // Move the u8 operand into the high byte of AX
                 self.ax = ((operand as u16) << 8) | (self.ax & 0b11111111);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
             0xBA => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                println!("0xBA (mov dx, {:X}h)", operand);
+                eprintln!("0xBA (mov dx, {:X}h)", operand);
                 self.dx = operand;
             }
             0xBB => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                println!("0xBB (mov bx, {:X}h)", operand);
+                eprintln!("0xBB (mov bx, {:X}h)", operand);
                 self.bx = operand;
             }
             0xB9 => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                println!("0xB9 (mov cx, {:X}h)", operand);
+                eprintln!("0xB9 (mov cx, {:X}h)", operand);
                 self.cx = operand;
+            }
+            // Interrupts
+            0xCD => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                eprintln!("0xCD (int {:X}h)", operand);
+                result = StepResult::Interrupt(operand);
             }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
         self.trace();
-        Ok(())
+        Ok(result)
     }
 
     fn fetch_next_byte_and_advance_ip(&mut self, memory: &[u8]) -> u8 {
@@ -85,7 +99,7 @@ impl Cpu {
     }
 
     fn trace(&self) {
-        println!("{:?}", self);
+        eprintln!("{:?}", self);
     }
 }
 
@@ -99,6 +113,60 @@ impl Debug for Cpu {
             .field("ip", &format_args!("{:#06X}", self.ip))
             .field("flags", &format_args!("{:#06X}", self.flags))
             .finish()
+    }
+}
+
+#[derive(Error, Debug)]
+enum MachineError {
+    #[error("Unsupported interrupt: {0:X}")]
+    UnsupportedInterrupt(u8),
+    #[error("Unsupported service: {0:X}")]
+    UnsupportedService(u8),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Write Service error: {0}")]
+    WriteServiceError(String),
+}
+
+impl Machine {
+    /// Emulates the DOS write service
+    fn write_service(&mut self) -> Result<(), MachineError> {
+        eprintln!("Write service invoked");
+        let num_bytes = self.cpu.cx as usize;
+        let start_pos = self.cpu.dx as usize;
+        let dest = self.cpu.bx;
+        if dest != 1 {
+            return Err(MachineError::WriteServiceError(
+                "Unsupported destination in bx".to_string(),
+            ));
+        }
+
+        if let Some(buffer) = self.memory.get(start_pos..start_pos + num_bytes) {
+            io::stdout().write_all(buffer)?;
+            // Successfully written bytes
+            self.cpu.ax = num_bytes as u16;
+            // Clear the carry flag (least significant bit of `flags`)
+            self.cpu.flags = self.cpu.flags & !0x01;
+            Ok(())
+        } else {
+            Err(MachineError::WriteServiceError(
+                "Buffer out of bounds".to_string(),
+            ))
+        }
+    }
+
+    fn handle_interrupt(&mut self, interrupt: u8) -> Result<(), MachineError> {
+        match interrupt {
+            0x21 => {
+                // AH contains the service
+                let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
+                match service {
+                    0x40 => self.write_service(),
+                    _ => Err(MachineError::UnsupportedService(service)),
+                }
+            }
+            _ => Err(MachineError::UnsupportedInterrupt(interrupt)),
+        }
     }
 }
 
@@ -116,10 +184,18 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<()> {
     machine.cpu.ip = 0x100;
 
     machine.cpu.trace();
-    machine.cpu.step(&mut machine.memory)?;
-    machine.cpu.step(&mut machine.memory)?;
-    machine.cpu.step(&mut machine.memory)?;
-    machine.cpu.step(&mut machine.memory)?;
+    loop {
+        let result = machine.cpu.step(&mut machine.memory)?;
+        match result {
+            StepResult::Continue => continue,
+            StepResult::Interrupt(interrupt) => {
+                eprintln!("Interrupted: {interrupt:X}");
+                machine.handle_interrupt(interrupt)?;
+                machine.cpu.trace();
+                break;
+            }
+        }
+    }
 
     Ok(())
 }
