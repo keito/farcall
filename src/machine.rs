@@ -126,6 +126,8 @@ impl Debug for Cpu {
 
 #[derive(Error, Debug)]
 enum MachineError {
+    #[error("Not enough memory")]
+    NotEnoughMemory,
     #[error("Unsupported interrupt: {0:X}")]
     UnsupportedInterrupt(u8),
     #[error("Unsupported service: {0:X}")]
@@ -191,17 +193,21 @@ impl Machine {
 }
 
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
+    let memory_size = 512;
+    let begin_offset = 0x100;
     let mut machine = Machine {
         cpu: Cpu::new(),
-        memory: vec![0; 512],
+        memory: vec![0; memory_size],
     };
 
     let data: Vec<u8> = fs::read(file_path)?;
     // Load binary into memory at offset 0x100
-    // TODO: Check machine.memory is long enough
-    machine.memory[0x100..0x100 + data.len()].copy_from_slice(&data);
-    // Start executing at 0x100
-    machine.cpu.ip = 0x100;
+    if begin_offset + data.len() > memory_size {
+        return Err(MachineError::NotEnoughMemory.into());
+    }
+    machine.memory[begin_offset..begin_offset + data.len()].copy_from_slice(&data);
+    // Start executing at begin_offset
+    machine.cpu.ip = begin_offset as u16;
 
     machine.cpu.trace();
     loop {
