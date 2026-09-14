@@ -8,7 +8,6 @@ pub struct Cpu {
     bx: u16,
     cx: u16,
     dx: u16,
-    // Other registers...
     ip: u16,
     flags: u16,
 }
@@ -51,30 +50,30 @@ impl Cpu {
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                eprintln!("0xB4 (mov ah, {:X}h)", operand);
+                print_instruction(byte, "mov ah,", operand);
                 // Move the u8 operand into the high byte of AX
                 self.ax = ((operand as u16) << 8) | (self.ax & 0b11111111);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
             0xBA => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                eprintln!("0xBA (mov dx, {:X}h)", operand);
+                print_instruction(byte, "mov dx,", operand);
                 self.dx = operand;
             }
             0xBB => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                eprintln!("0xBB (mov bx, {:X}h)", operand);
+                print_instruction(byte, "mov bx,", operand);
                 self.bx = operand;
             }
             0xB9 => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                eprintln!("0xB9 (mov cx, {:X}h)", operand);
+                print_instruction(byte, "mov cx,", operand);
                 self.cx = operand;
             }
             // Interrupts
             0xCD => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                eprintln!("0xCD (int {:X}h)", operand);
+                print_instruction(byte, "int", operand);
                 result = StepResult::Interrupt(operand);
             }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
@@ -198,4 +197,13 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn print_instruction(op: u8, instruction: &str, operand: impl Into<u16>) {
+    eprintln!(
+        "{:#X} \x1b[37m({} {:X}h)\x1b[0m",
+        op,
+        instruction,
+        operand.into()
+    );
 }
