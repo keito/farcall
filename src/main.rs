@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, process};
 
 mod machine;
 
@@ -9,7 +9,13 @@ fn main() {
         return;
     }
     match machine::main_loop(&args[1]) {
-        Ok(code) => eprintln!("Exit code {}", code),
-        Err(e) => eprintln!("Error: {}", e),
+        Ok(code) => {
+            eprintln!("Exit code {}", code);
+            process::exit(code as i32);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            process::exit(-1);
+        }
     }
 }

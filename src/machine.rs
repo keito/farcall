@@ -3,6 +3,9 @@ use std::fs;
 use std::io::{self, Write};
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 pub struct Cpu {
     ax: u16,
     bx: u16,
@@ -141,7 +144,6 @@ enum InterruptResult {
 impl Machine {
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
-        eprintln!("Write service invoked");
         let num_bytes = self.cpu.cx as usize;
         let start_pos = self.cpu.dx as usize;
         let dest = self.cpu.bx;
@@ -152,7 +154,9 @@ impl Machine {
         }
 
         if let Some(buffer) = self.memory.get(start_pos..start_pos + num_bytes) {
+            io::stdout().write_all(b"\x1b[92m")?;
             io::stdout().write_all(buffer)?;
+            io::stdout().write_all(b"\x1b[0m")?;
             // Successfully written bytes
             self.cpu.ax = num_bytes as u16;
             // Clear the carry flag (least significant bit of `flags`)
@@ -173,7 +177,7 @@ impl Machine {
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
             0x21 => {
-                // AH contains the service
+                // AH contains the service ID
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
                     0x40 => self.write_service(),
@@ -219,7 +223,7 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
 
 fn print_instruction(op: u8, instruction: &str, operand: impl Into<u16>) {
     eprintln!(
-        "{:#X} \x1b[37m({} {:X}h)\x1b[0m",
+        "{:#X} \x1b[96m({} {:X}h)\x1b[0m",
         op,
         instruction,
         operand.into()
