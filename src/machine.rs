@@ -48,6 +48,12 @@ impl Cpu {
         // Table 4-13
         match byte {
             // B0-B7: move an 8-bit immediate into an 8-bit register
+            0xB0 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, "mov al,", operand);
+                // Move the u8 operand into the low byte of AX
+                self.ax = operand as u16 | (self.ax & 0xFF00);
+            }
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, "mov ah,", operand);
@@ -127,9 +133,14 @@ enum MachineError {
     WriteServiceError(String),
 }
 
+enum InterruptResult {
+    ResumeExecution,
+    Exit(u8),
+}
+
 impl Machine {
     /// Emulates the DOS write service
-    fn write_service(&mut self) -> Result<(), MachineError> {
+    fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         eprintln!("Write service invoked");
         let num_bytes = self.cpu.cx as usize;
         let start_pos = self.cpu.dx as usize;
@@ -146,7 +157,7 @@ impl Machine {
             self.cpu.ax = num_bytes as u16;
             // Clear the carry flag (least significant bit of `flags`)
             self.cpu.flags = self.cpu.flags & !0x01;
-            Ok(())
+            Ok(InterruptResult::ResumeExecution)
         } else {
             Err(MachineError::WriteServiceError(
                 "Buffer out of bounds".to_string(),
@@ -154,13 +165,19 @@ impl Machine {
         }
     }
 
-    fn handle_interrupt(&mut self, interrupt: u8) -> Result<(), MachineError> {
+    /// Emulates the DOS termination service
+    fn termination_service(&mut self) -> Result<InterruptResult, MachineError> {
+        Ok(InterruptResult::Exit((self.cpu.ax & 0xFF) as u8))
+    }
+
+    fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
             0x21 => {
                 // AH contains the service
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
                     0x40 => self.write_service(),
+                    0x4C => self.termination_service(),
                     _ => Err(MachineError::UnsupportedService(service)),
                 }
             }
@@ -169,7 +186,7 @@ impl Machine {
     }
 }
 
-pub fn main_loop(file_path: &str) -> anyhow::Result<()> {
+pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     let mut machine = Machine {
         cpu: Cpu::new(),
         memory: vec![0; 512],
@@ -189,14 +206,15 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<()> {
             StepResult::Continue => continue,
             StepResult::Interrupt(interrupt) => {
                 eprintln!("Interrupted: {interrupt:X}");
-                machine.handle_interrupt(interrupt)?;
+                let interrupt_result = machine.handle_interrupt(interrupt)?;
                 machine.cpu.trace();
-                break;
+                match interrupt_result {
+                    InterruptResult::ResumeExecution => continue,
+                    InterruptResult::Exit(code) => return Ok(code),
+                }
             }
         }
     }
-
-    Ok(())
 }
 
 fn print_instruction(op: u8, instruction: &str, operand: impl Into<u16>) {

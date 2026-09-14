@@ -1,7 +1,5 @@
 use std::env;
 
-use crate::machine::main_loop;
-
 mod machine;
 
 fn main() {
@@ -10,7 +8,8 @@ fn main() {
         eprintln!("Usage: pc86 <file_path>");
         return;
     }
-    if let Err(e) = main_loop(&args[1]) {
-        eprintln!("Error: {}", e);
+    match machine::main_loop(&args[1]) {
+        Ok(code) => eprintln!("Exit code {}", code),
+        Err(e) => eprintln!("Error: {}", e),
     }
 }
