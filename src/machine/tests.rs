@@ -1,4 +1,4 @@
-use super::{Cpu, InterruptResult, Machine, StepResult};
+use super::{Cpu, CpuStepResult, InterruptResult, Machine};
 
 #[test]
 fn dec_cx_updates_auxiliary_carry_on_low_nibble_borrow() {
@@ -14,7 +14,7 @@ fn dec_cx_updates_auxiliary_carry_on_low_nibble_borrow() {
 
             let result = cpu.step(&mut memory).expect("DEC CX should succeed");
 
-            assert!(matches!(result, StepResult::Continue));
+            assert!(matches!(result, CpuStepResult::Continue));
             assert_eq!(cpu.cx, expected_cx);
             assert_eq!(cpu.ip, 1);
             assert_eq!(
@@ -41,7 +41,7 @@ fn dec_cx_computes_parity_from_only_the_low_byte() {
 
             let result = cpu.step(&mut memory).expect("DEC CX should succeed");
 
-            assert!(matches!(result, StepResult::Continue));
+            assert!(matches!(result, CpuStepResult::Continue));
             assert_eq!(cpu.cx, expected_cx);
             assert_eq!(cpu.ip, 1);
             assert_eq!(
@@ -72,7 +72,7 @@ fn dec_cx_updates_sign_and_overflow() {
 
             let result = cpu.step(&mut memory).expect("DEC CX should succeed");
 
-            assert!(matches!(result, StepResult::Continue));
+            assert!(matches!(result, CpuStepResult::Continue));
             assert_eq!(cpu.cx, expected_cx);
             assert_eq!(cpu.ip, 1);
             assert_eq!(
@@ -99,7 +99,7 @@ fn dec_cx_clears_overflow_on_the_next_decrement() {
 
     let first = cpu.step(&mut memory).expect("first DEC should succeed");
 
-    assert!(matches!(first, StepResult::Continue));
+    assert!(matches!(first, CpuStepResult::Continue));
     assert_eq!(cpu.cx, 0x7FFF);
     assert_eq!(cpu.ip, 1);
     assert_eq!(cpu.flags & 0x0800, 0x0800, "first DEC must set OF");
@@ -107,7 +107,7 @@ fn dec_cx_clears_overflow_on_the_next_decrement() {
 
     let second = cpu.step(&mut memory).expect("second DEC should succeed");
 
-    assert!(matches!(second, StepResult::Continue));
+    assert!(matches!(second, CpuStepResult::Continue));
     assert_eq!(cpu.cx, 0x7FFE);
     assert_eq!(cpu.ip, 2);
     assert_eq!(cpu.flags & 0x0800, 0, "second DEC must clear OF");
@@ -124,7 +124,7 @@ fn dec_cx_wraps_zero_to_ffff() {
 
     let result = cpu.step(&mut memory).expect("DEC CX should wrap at zero");
 
-    assert!(matches!(result, StepResult::Continue));
+    assert!(matches!(result, CpuStepResult::Continue));
     assert_eq!(cpu.cx, 0xFFFF);
     assert_eq!(cpu.ip, 1);
     assert_eq!(cpu.flags & 0x0040, 0, "the result is nonzero");
@@ -143,7 +143,7 @@ fn jnz_forward_crosses_signed_16_bit_boundary() {
     // even though that calculation would overflow an i16.
     let result = cpu.step(&mut memory).expect("forward JNZ should succeed");
 
-    assert!(matches!(result, StepResult::Continue));
+    assert!(matches!(result, CpuStepResult::Continue));
     assert_eq!(cpu.ip, 0x8000);
     assert_eq!(cpu.flags, 0);
 }
@@ -159,7 +159,7 @@ fn jnz_backward_crosses_signed_16_bit_boundary() {
     // After fetching, IP is 0x8000. A displacement of -1 gives 0x7FFF.
     let result = cpu.step(&mut memory).expect("backward JNZ should succeed");
 
-    assert!(matches!(result, StepResult::Continue));
+    assert!(matches!(result, CpuStepResult::Continue));
     assert_eq!(cpu.ip, 0x7FFF);
     assert_eq!(cpu.flags, 0);
 }
@@ -177,7 +177,7 @@ fn jnz_target_wraps_at_16_bit_address_limits() {
 
         let result = cpu.step(&mut memory).expect("JNZ target should wrap");
 
-        assert!(matches!(result, StepResult::Continue));
+        assert!(matches!(result, CpuStepResult::Continue));
         assert_eq!(cpu.ip, expected_ip, "starting IP = {start_ip:#06X}");
         assert_eq!(cpu.flags, 0);
     }
@@ -193,7 +193,7 @@ fn mov_al_preserves_ah() {
 
         let result = cpu.step(&mut memory).expect("MOV AL should succeed");
 
-        assert!(matches!(result, StepResult::Continue));
+        assert!(matches!(result, CpuStepResult::Continue));
         assert_eq!(cpu.ax, expected_ax, "immediate = {immediate:#04X}");
         assert_eq!(cpu.ip, 4);
     }
@@ -209,7 +209,7 @@ fn mov_ah_preserves_al() {
 
         let result = cpu.step(&mut memory).expect("MOV AH should succeed");
 
-        assert!(matches!(result, StepResult::Continue));
+        assert!(matches!(result, CpuStepResult::Continue));
         assert_eq!(cpu.ax, expected_ax, "immediate = {immediate:#04X}");
         assert_eq!(cpu.ip, 4);
     }

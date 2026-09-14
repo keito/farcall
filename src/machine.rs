@@ -27,7 +27,7 @@ enum CpuError {
     UnsupportedInstruction(u8),
 }
 
-enum StepResult {
+enum CpuStepResult {
     Continue,
     Interrupt(u8),
 }
@@ -64,9 +64,9 @@ impl Cpu {
     }
 
     /// Fetch, decode, and execute one instruction
-    fn step(&mut self, memory: &mut [u8]) -> Result<StepResult, CpuError> {
+    fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
-        let mut result = StepResult::Continue;
+        let mut result = CpuStepResult::Continue;
         // Table 4-13
         match byte {
             // Arithmetic
@@ -128,7 +128,7 @@ impl Cpu {
             0xCD => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("int {:X}h", operand));
-                result = StepResult::Interrupt(operand);
+                result = CpuStepResult::Interrupt(operand);
             }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
@@ -188,6 +188,11 @@ enum InterruptResult {
     Exit(u8),
 }
 
+enum MachineStepResult {
+    Continue,
+    Exit(u8),
+}
+
 impl Machine {
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
@@ -207,7 +212,7 @@ impl Machine {
             // Successfully written bytes
             self.cpu.ax = num_bytes as u16;
             // Clear the carry flag (least significant bit of `flags`)
-            self.cpu.flags = self.cpu.flags & !0x01;
+            self.cpu.set_flag(Flag::Carry, false);
             Ok(InterruptResult::ResumeExecution)
         } else {
             Err(MachineError::WriteServiceError(
@@ -235,6 +240,22 @@ impl Machine {
             _ => Err(MachineError::UnsupportedInterrupt(interrupt)),
         }
     }
+
+    fn step(&mut self) -> anyhow::Result<MachineStepResult> {
+        let result = self.cpu.step(&mut self.memory)?;
+        match result {
+            CpuStepResult::Continue => Ok(MachineStepResult::Continue),
+            CpuStepResult::Interrupt(interrupt) => {
+                eprintln!("Interrupted: {interrupt:X}");
+                let interrupt_result = self.handle_interrupt(interrupt)?;
+                self.cpu.trace();
+                match interrupt_result {
+                    InterruptResult::ResumeExecution => Ok(MachineStepResult::Continue),
+                    InterruptResult::Exit(code) => Ok(MachineStepResult::Exit(code)),
+                }
+            }
+        }
+    }
 }
 
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
@@ -256,18 +277,9 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
 
     machine.cpu.trace();
     loop {
-        let result = machine.cpu.step(&mut machine.memory)?;
-        match result {
-            StepResult::Continue => continue,
-            StepResult::Interrupt(interrupt) => {
-                eprintln!("Interrupted: {interrupt:X}");
-                let interrupt_result = machine.handle_interrupt(interrupt)?;
-                machine.cpu.trace();
-                match interrupt_result {
-                    InterruptResult::ResumeExecution => continue,
-                    InterruptResult::Exit(code) => return Ok(code),
-                }
-            }
+        let result = machine.step()?;
+        if let MachineStepResult::Exit(code) = result {
+            return Ok(code);
         }
     }
 }
