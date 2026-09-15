@@ -4,7 +4,9 @@ org 100h
 
     mov sp, 0200h          ; stack above this program and its buffer
 
-    ; Type a short line and press Enter. Process one read of up to 64 bytes.
+    ; Process successive chunks until EOF. In a normal host terminal,
+    ; press Enter to submit each line, then Ctrl-D on an empty line to finish.
+read_next:
     mov bx, 0              ; stdin
     mov cx, buffer_size
     mov dx, buffer
@@ -12,6 +14,13 @@ org 100h
     int 21h
     jb short io_error      ; JB also means "jump if carry"
 
+    ; AX is in 0..64, so AL alone is enough to detect a zero-byte read.
+    ; Check before entering the conversion loop or writing another chunk.
+    cmp al, 0
+    jnz short process_chunk
+    jmp short done
+
+process_chunk:
     push ax                ; save the actual byte count for printing
     mov cl, al             ; copy AX to CX using supported byte MOVs
     mov ch, ah
@@ -26,7 +35,9 @@ org 100h
     mov ah, 40h
     int 21h
     jb short io_error
+    jmp short read_next    ; reset the read arguments for every chunk
 
+done:
     mov ax, 4C00h
     int 21h
 
@@ -37,7 +48,7 @@ io_error:
 uppercase:
     ; SI = buffer, CX = length (0..64). Changes AL, CX, SI, and flags.
     ; Checking CL is sufficient here because the buffer is smaller than 256.
-    ; Return immediately on EOF: decrementing a zero count would wrap to FFFF.
+    ; Accept an empty buffer too: decrementing zero would wrap to FFFF.
     mov al, cl
     cmp al, 0
     jnz short next_char
