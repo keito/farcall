@@ -36,6 +36,8 @@ enum MachineError {
     PrintStringServiceError(String),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
+    #[error("Video Service Error: {0}")]
+    VideoServiceError(String),
 }
 
 enum InterruptResult {
@@ -152,8 +154,23 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
+        if self.cpu.get_reg8(Reg8::Ah) == 0xf {
+            // Get current video mode
+            self.cpu.set_reg8(Reg8::Al, 0x3); // 80x25 color text mode
+            self.cpu.set_reg8(Reg8::Ah, 80); // 80 columns in decimal
+            self.cpu.set_reg8(Reg8::Bh, 0); // active display page
+            Ok(InterruptResult::ResumeExecution)
+        } else {
+            Err(MachineError::VideoServiceError(
+                "Unsupported command".to_string(),
+            ))
+        }
+    }
+
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
+            0x10 => self.video_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
             0x21 => {
                 // AH contains the service ID

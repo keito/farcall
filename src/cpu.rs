@@ -102,7 +102,7 @@ impl Cpu {
         }
     }
 
-    fn get_reg8(&self, reg: Reg8) -> u8 {
+    pub(crate) fn get_reg8(&self, reg: Reg8) -> u8 {
         (match reg {
             Reg8::Al => self.ax,
             Reg8::Bl => self.bx,
