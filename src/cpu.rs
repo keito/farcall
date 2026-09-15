@@ -279,6 +279,32 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x86 => {
+                // XCHG REG8,REG8/MEM8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let first_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("xchg {}, {}", first_reg, rm));
+
+                let first_value = self.get_reg8(first_reg);
+                let second_value = match rm {
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        read_byte(memory, PhysAddr::new(seg_addr, addr))?
+                    }
+                    RegisterOrMemoryOperand::Register(second_reg) => self.get_reg8(second_reg),
+                };
+                self.set_reg8(first_reg, second_value);
+                match rm {
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_byte(memory, PhysAddr::new(seg_addr, addr), first_value)?
+                    }
+                    RegisterOrMemoryOperand::Register(second_reg) => {
+                        self.set_reg8(second_reg, first_value)
+                    }
+                }
+            }
             // MOVs
             0x88 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);

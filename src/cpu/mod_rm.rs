@@ -4,6 +4,7 @@ use crate::registers::{Reg8, Reg16, SegmentReg};
 
 use super::{Cpu, CpuError};
 
+#[derive(Clone)]
 pub(crate) enum RegisterOrMemoryOperand<T> {
     Register(T),
     Memory(SegmentReg, u16),

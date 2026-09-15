@@ -1,6 +1,7 @@
 use crate::cpu::CpuError;
 use std::fmt;
 
+#[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub(crate) enum Reg8 {
     Al = 0b000,
@@ -89,6 +90,7 @@ impl TryFrom<u8> for Reg16 {
     }
 }
 
+#[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub(crate) enum SegmentReg {
     Es = 0b000,
