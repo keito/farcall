@@ -1,6 +1,6 @@
 use core::fmt::Debug;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
@@ -24,6 +24,8 @@ enum MachineError {
     UnsupportedService(u8),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+    #[error("Read Service error: {0}")]
+    ReadServiceError(String),
     #[error("Write Service error: {0}")]
     WriteServiceError(String),
 }
@@ -54,6 +56,7 @@ impl Machine {
             io::stdout().write_all(b"\x1b[92m")?;
             io::stdout().write_all(buffer)?;
             io::stdout().write_all(b"\x1b[0m")?;
+            io::stdout().flush()?;
             // Successfully written bytes
             self.cpu.ax = num_bytes as u16;
             // Clear the carry flag
@@ -64,6 +67,35 @@ impl Machine {
                 "Buffer out of bounds".to_string(),
             ))
         }
+    }
+
+    /// Emulates the DOS read service
+    fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let dest = self.cpu.bx;
+        if dest != 0 {
+            return Err(MachineError::ReadServiceError(
+                "Unsupported source in bx".to_string(),
+            ));
+        }
+        let max_bytes = self.cpu.cx as usize;
+        let dest_buffer = self.cpu.dx as usize;
+
+        let Some(mem_mut) = self
+            .memory
+            .get_mut(dest_buffer as usize..dest_buffer as usize + max_bytes)
+        else {
+            return Err(MachineError::ReadServiceError(
+                "Destination buffer too small".to_string(),
+            ));
+        };
+
+        let num_bytes = io::stdin().read(mem_mut)?;
+
+        // Write actual bytes read to AX on success
+        self.cpu.ax = num_bytes as u16;
+        // Clear carry on success
+        self.cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
     }
 
     /// Emulates the DOS termination service
@@ -77,6 +109,7 @@ impl Machine {
                 // AH contains the service ID
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
+                    0x3F => self.read_service(),
                     0x40 => self.write_service(),
                     0x4C => self.termination_service(),
                     _ => Err(MachineError::UnsupportedService(service)),
