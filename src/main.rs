@@ -2,6 +2,7 @@ use std::{env, process};
 
 mod cpu;
 mod machine;
+mod memory;
 mod registers;
 
 fn main() {

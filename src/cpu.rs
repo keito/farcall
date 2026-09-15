@@ -1,3 +1,4 @@
+use crate::memory::PhysAddr;
 use crate::registers::{Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
@@ -291,7 +292,8 @@ impl Cpu {
                 let value = self.get_reg8(reg);
                 match rm {
                     RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        write_byte(memory, addr, value)?
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_byte(memory, PhysAddr::new(seg_addr, addr), value)?
                     }
                     RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
                 }
@@ -304,7 +306,10 @@ impl Cpu {
 
                 print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => read_byte(memory, addr)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        read_byte(memory, PhysAddr::new(seg_addr, addr))?
+                    }
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
                 };
                 self.set_reg8(reg, value);
@@ -320,7 +325,8 @@ impl Cpu {
                 let value = self.get_segment_reg(source_segment);
                 match rm {
                     RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        write_word(memory, addr, value)?
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
                     }
                     RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
                 }
@@ -351,7 +357,10 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
 
                 let value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => read_word(memory, addr)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        read_word(memory, PhysAddr::new(seg_addr, addr))?
+                    }
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
                 };
                 self.set_segment_reg(dest_segment, value);
@@ -442,11 +451,11 @@ impl Cpu {
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
-        write_word(memory, self.sp, word)
+        write_word(memory, PhysAddr::new(self.ss, self.sp), word)
     }
 
     fn pop_from_stack(&mut self, memory: &[u8]) -> Result<u16, CpuError> {
-        let value = read_word(memory, self.sp)?;
+        let value = read_word(memory, PhysAddr::new(self.ss, self.sp))?;
         self.sp = self.sp.wrapping_add(2);
         Ok(value)
     }
@@ -519,32 +528,40 @@ fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
 }
 
-fn write_byte(memory: &mut [u8], address: u16, value: u8) -> Result<(), CpuError> {
-    let Some(mem_mut) = memory.get_mut(address as usize) else {
+fn write_byte(memory: &mut [u8], address: PhysAddr, value: u8) -> Result<(), CpuError> {
+    let Some(mem_mut) = memory.get_mut(address.as_usize()) else {
         return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
     };
     *mem_mut = value;
     Ok(())
 }
 
-fn write_word(memory: &mut [u8], address: u16, value: u16) -> Result<(), CpuError> {
-    let Some(mem_mut) = memory.get_mut(address as usize..address as usize + 2) else {
-        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
-    };
-    mem_mut.copy_from_slice(&value.to_le_bytes());
-    Ok(())
-}
-
-fn read_byte(memory: &[u8], address: u16) -> Result<u8, CpuError> {
-    let Some(data) = memory.get(address as usize) else {
+fn read_byte(memory: &[u8], address: PhysAddr) -> Result<u8, CpuError> {
+    let Some(data) = memory.get(address.as_usize()) else {
         return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
     };
     Ok(*data)
 }
 
-fn read_word(memory: &[u8], address: u16) -> Result<u16, CpuError> {
-    let Some(data) = memory.get(address as usize..address as usize + 2) else {
+fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), CpuError> {
+    let byte1 = address.as_usize();
+    // The second byte might wrap
+    let byte2 = (byte1 + 1) & 0xFFFFF;
+    if memory.get(byte1).is_none() || memory.get(byte2).is_none() {
         return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
     };
-    Ok(u16::from_le_bytes([data[0], data[1]]))
+    Ok((byte1, byte2))
+}
+
+fn write_word(memory: &mut [u8], address: PhysAddr, value: u16) -> Result<(), CpuError> {
+    let (byte1, byte2) = calc_word_addr(memory, address)?;
+    let [low, high] = value.to_le_bytes();
+    memory[byte1] = low;
+    memory[byte2] = high;
+    Ok(())
+}
+
+fn read_word(memory: &[u8], address: PhysAddr) -> Result<u16, CpuError> {
+    let (byte1, byte2) = calc_word_addr(memory, address)?;
+    Ok(u16::from_le_bytes([memory[byte1], memory[byte2]]))
 }
