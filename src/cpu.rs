@@ -354,6 +354,7 @@ impl Cpu {
             }
             // MOVs
             0x88 => {
+                // Mov reg8/mem8, reg8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg8::try_from(parsed.reg_field)?;
@@ -369,6 +370,25 @@ impl Cpu {
                         write_byte(memory, PhysAddr::new(seg_addr, addr), value)?
                     }
                     RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
+                }
+            }
+            0x89 => {
+                // mov reg16/mem16, reg16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+
+                print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
+
+                // Read the value in the register
+                let value = self.get_reg16(reg);
+                match rm {
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
+                    }
+                    RegisterOrMemoryOperand::Register(reg) => self.set_reg16(reg, value),
                 }
             }
             0x8A => {
