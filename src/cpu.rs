@@ -292,6 +292,23 @@ impl Cpu {
                     RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
                 }
             }
+            0x8D => {
+                // LEA REG16,MEM16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let mod_field = parsed.mod_field;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("lea {}, {}", dest_reg, rm));
+                match rm {
+                    // We write the address, not the memory at address
+                    RegisterOrMemoryOperand::Memory(addr) => self.set_reg16(dest_reg, addr),
+                    RegisterOrMemoryOperand::Register(_) => {
+                        // LEA can only have a memory source
+                        return Err(CpuError::UnsupportedModField(mod_field));
+                    }
+                }
+            }
             0x8E => {
                 // MOV SEGREG, REG16/MEM16
                 let operand = self.fetch_next_byte_and_advance_ip(memory);

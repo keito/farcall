@@ -1,6 +1,122 @@
 use super::{Cpu, CpuError, CpuStepResult};
 
 #[test]
+fn lea_direct_address_covers_all_destinations_without_reading_memory() {
+    // Destination field order: AX, CX, DX, BX, SP, BP, SI, DI.
+    let initial_registers = [
+        0xA001, 0xA102, 0xA203, 0xA304, 0xA405, 0xA506, 0xA607, 0xA708,
+    ];
+    let segments = [0x1357, 0x0000, 0x9ABC, 0xDEF0]; // ES, CS, SS, DS.
+    for destination in 0..8 {
+        for offset in [0x0000u16, 0x00FF, 0x0137, 0xFF00, 0x8000, 0xFFFF] {
+            for initial_flags in [0x0000, 0x0FD7] {
+                let mut cpu = Cpu::new();
+                [
+                    cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
+                ] = initial_registers;
+                [cpu.es, cpu.cs, cpu.ss, cpu.ds] = segments;
+                cpu.flags = initial_flags;
+                let mod_rm = ((destination as u8) << 3) | 0x06;
+                let [low, high] = offset.to_le_bytes();
+                // Only instruction bytes exist. Most offsets are outside this
+                // slice, which is fine: LEA must not read the addressed word.
+                // Nonzero DS must not be added to the effective offset either.
+                let mut memory = [0x8D, mod_rm, low, high];
+                let original_memory = memory;
+                let mut expected_registers = initial_registers;
+                expected_registers[destination] = offset;
+
+                let result = cpu
+                    .step(&mut memory)
+                    .expect("LEA r16, [disp16] should succeed");
+
+                assert!(matches!(result, CpuStepResult::Continue));
+                assert_eq!(
+                    [
+                        cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di
+                    ],
+                    expected_registers,
+                    "8D {mod_rm:02X}, offset={offset:#06X}: only the destination changes"
+                );
+                assert_eq!([cpu.es, cpu.cs, cpu.ss, cpu.ds], segments);
+                assert_eq!(cpu.ip, 4, "consume opcode, ModR/M, and both offset bytes");
+                assert_eq!(cpu.flags, initial_flags, "LEA preserves every flag");
+                assert_eq!(memory, original_memory, "LEA must not write memory");
+            }
+        }
+    }
+}
+
+#[test]
+fn lea_direct_address_wraps_ip_during_instruction_fetch() {
+    // Cover wrapping after the high byte, between offset bytes, before the
+    // low byte, and before ModR/M. Data addressing is still the flat model.
+    for (start, next) in [
+        (0xFFFCu16, 0x0000),
+        (0xFFFD, 0x0001),
+        (0xFFFE, 0x0002),
+        (0xFFFF, 0x0003),
+    ] {
+        let mut cpu = Cpu::new();
+        cpu.ip = start;
+        cpu.dx = 0xA55A;
+        cpu.flags = 0x0FD7;
+        let mut memory = vec![0xCC; 0x10000];
+        // Same encoding as the game's LEA DX, [GUESS_PROMPT].
+        for (index, byte) in [0x8D, 0x16, 0x37, 0x01].into_iter().enumerate() {
+            memory[start.wrapping_add(index as u16) as usize] = byte;
+        }
+        let original_memory = memory.clone();
+
+        let result = cpu
+            .step(&mut memory)
+            .expect("LEA instruction fetch should wrap IP");
+
+        assert!(matches!(result, CpuStepResult::Continue));
+        assert_eq!(cpu.dx, 0x0137, "decode the full little-endian offset");
+        assert_eq!(cpu.ip, next, "starting IP={start:#06X}");
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, original_memory);
+    }
+}
+
+#[test]
+fn lea_rejects_register_sources_without_changing_registers_flags_or_memory() {
+    let initial_registers = [
+        0xA001, 0xA102, 0xA203, 0xA304, 0xA405, 0xA506, 0xA607, 0xA708,
+    ];
+    for destination in 0u8..8 {
+        for source in 0u8..8 {
+            let mut cpu = Cpu::new();
+            [
+                cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
+            ] = initial_registers;
+            cpu.flags = 0x0FD7;
+            let mod_rm = 0xC0 | (destination << 3) | source;
+            let mut memory = [0x8D, mod_rm];
+            let original_memory = memory;
+
+            let result = cpu.step(&mut memory);
+
+            assert!(
+                matches!(result, Err(CpuError::UnsupportedModField(0b11))),
+                "8D {mod_rm:02X} must reject the register addressing mode"
+            );
+            assert_eq!(
+                [
+                    cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di
+                ],
+                initial_registers,
+                "invalid LEA must not copy the source register into the destination"
+            );
+            assert_eq!([cpu.es, cpu.cs, cpu.ss, cpu.ds], [0; 4]);
+            assert_eq!(cpu.flags, 0x0FD7);
+            assert_eq!(memory, original_memory);
+        }
+    }
+}
+
+#[test]
 fn mov_to_segment_register_covers_es_ss_ds_and_all_source_registers() {
     // Source field order: AX, CX, DX, BX, SP, BP, SI, DI.
     let initial_registers = [

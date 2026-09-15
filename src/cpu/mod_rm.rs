@@ -90,6 +90,15 @@ impl Cpu {
         fields: ModRmFields,
     ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
         match fields.mod_field {
+            0b00 => {
+                if fields.rm_field == 0b110 {
+                    // Special case where we fetch the next word and return Memory(offset)
+                    let word = self.fetch_next_word_and_advance_ip(memory);
+                    Ok(RegisterOrMemoryOperand::Memory(word))
+                } else {
+                    Err(CpuError::UnsupportedRmField(fields.rm_field))
+                }
+            }
             0b11 => {
                 // Register
                 let rm_reg = Reg16::try_from(fields.rm_field)?;
