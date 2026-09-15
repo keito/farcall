@@ -379,6 +379,64 @@ fn cmp_al_updates_arithmetic_flags_without_changing_registers_or_memory() {
 }
 
 #[test]
+fn cmp_ax_immediate16_updates_flags_without_storing_the_result() {
+    // CF=0001, PF=0004, AF=0010, ZF=0040, SF=0080, OF=0800.
+    let arithmetic_flags = 0x08D5;
+    for (ax, immediate, expected_flags) in [
+        (0x0200u16, 0x0200u16, 0x0044), // MORE's version comparison: equal.
+        (0x1234, 0x0234, 0x0004), // Result 1000: parity is for low byte 00 only.
+        (0x0000, 0x0001, 0x0095), // Result FFFF: unsigned and nibble borrow.
+        (0x8000, 0x0001, 0x0814), // -32768 - 1 overflows to +32767.
+        (0x7FFF, 0xFFFF, 0x0885), // +32767 - (-1) overflows to -32768.
+        (0x0080, 0x0000, 0x0000), // Bit 7 does not make a word negative.
+        (0x8000, 0x0000, 0x0084), // Bit 15 does; low byte still has even parity.
+        (0x0080, 0x0001, 0x0010), // +128 - 1 is not signed word overflow.
+        (0x0010, 0x0001, 0x0014), // Nibble borrow without unsigned borrow.
+        (0xFFFF, 0x0000, 0x0084), // Negative result without borrow or overflow.
+        (0x0000, 0xFFFF, 0x0011), // Unsigned borrow without signed overflow.
+    ] {
+        // Check both setting flags and clearing stale flags, while preserving
+        // control flags and unrelated bits.
+        for initial_flags in [0x0000, 0x0FD7] {
+            let mut cpu = Cpu::new();
+            cpu.ax = ax;
+            cpu.ip = 0x0100;
+            cpu.flags = initial_flags;
+            [cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp] =
+                [0x1234, 0x5678, 0x9ABC, 0xDEF0, 0x1357, 0x2468, 0xABCD];
+            [cpu.ds, cpu.es, cpu.ss] = [0x1111, 0x2222, 0x3333];
+            let registers = (
+                cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
+                cpu.cs, cpu.ds, cpu.es, cpu.ss,
+            );
+            let [low, high] = immediate.to_le_bytes();
+            let mut memory = vec![0xCC; 0x0200];
+            memory[0x0100..0x0103].copy_from_slice(&[0x3D, low, high]);
+            let original_memory = memory.clone();
+
+            let result = cpu.step(&mut memory).expect("CMP AX, imm16 should succeed");
+
+            assert!(matches!(result, CpuStepResult::Continue));
+            assert_eq!(cpu.ip, 0x0103, "consume opcode and little-endian immediate word");
+            assert_eq!(
+                (
+                    cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
+                    cpu.cs, cpu.ds, cpu.es, cpu.ss,
+                ),
+                registers,
+                "CMP must preserve AX and all other registers except IP"
+            );
+            assert_eq!(memory, original_memory, "CMP must not write memory");
+            assert_eq!(
+                cpu.flags,
+                (initial_flags & !arithmetic_flags) | expected_flags,
+                "AX={ax:#06X}, immediate={immediate:#06X}, initial flags={initial_flags:#06X}"
+            );
+        }
+    }
+}
+
+#[test]
 fn je_depends_only_on_zero() {
     for (flags, target) in [
         (0x0000, 0x0102),

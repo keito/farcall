@@ -173,10 +173,16 @@ impl Cpu {
                 self.set_reg8(Reg8::Al, new_val);
             }
             0x3C => {
-                // CMP AL - basically SUB AL that doesn't change AL
+                // CMP AL, imm8 - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
                 self.subtract_immediate8(Reg8::Al, operand);
+            }
+            0x3D => {
+                // CMP AX, imm16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
+                self.subtract_immediate16(Reg16::Ax, operand);
             }
             0x46 => {
                 print_instruction(byte, &format_args!("inc si"));
@@ -520,6 +526,27 @@ impl Cpu {
         );
         self.set_flag(Flag::Sign, result & (1 << 7) != 0);
         self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
+        self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+
+        result
+    }
+
+    fn subtract_immediate16(&mut self, reg: Reg16, operand: u16) -> u16 {
+        let old_reg = self.get_reg16(reg);
+        let (result, borrow) = old_reg.overflowing_sub(operand);
+
+        // Carry flag: did subtraction require a borrow?
+        self.set_flag(Flag::Carry, borrow);
+        // Set or clear the zero flag
+        self.set_flag(Flag::Zero, result == 0);
+        // Overflow: (1) old_reg and operand have different signs, AND
+        // (2) the result's sign differs from old_reg's sign
+        self.set_flag(
+            Flag::Overflow,
+            ((old_reg & 0x8000) != (operand & 0x8000)) && ((result & 0x8000) != (old_reg & 0x8000)),
+        );
+        self.set_flag(Flag::Sign, result & (1 << 15) != 0);
+        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
         self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
 
         result
