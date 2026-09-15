@@ -238,6 +238,15 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x73 => {
+                // JAE/JNC/JNB
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jae {:X}h", operand));
+                // Jump if CF is clear
+                if !self.get_flag(Flag::Carry) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x74 => {
                 // JE/JZ
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
