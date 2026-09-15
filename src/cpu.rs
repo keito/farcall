@@ -500,6 +500,17 @@ impl Cpu {
                 let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
             }
+            0xAC => {
+                // LODSB
+                print_instruction(byte, &format_args!("lodsb"));
+                let byte = read_byte(memory, PhysAddr::new(self.ds, self.si))?;
+                self.set_reg8(Reg8::Al, byte);
+                if self.get_flag(Flag::Direction) {
+                    self.si = self.si.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                }
+            }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
