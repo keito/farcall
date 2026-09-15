@@ -14,6 +14,8 @@ pub struct Cpu {
     dx: u16,
     si: u16,
     di: u16,
+    sp: u16,
+    bp: u16,
     ip: u16,
     flags: u16,
 }
@@ -110,6 +112,8 @@ impl Cpu {
             dx: 0x1234,
             si: 0x1234,
             di: 0x1234,
+            sp: 0x1234,
+            bp: 0x1234,
             ip: 0x0,
             flags: 0,
         }
@@ -201,6 +205,23 @@ impl Cpu {
                 // Did decrementing borrowing into lower nibble (was it 0)
                 self.set_flag(Flag::AuxiliaryCarry, old_cx & 0x0F == 0);
             }
+            // PUSH/POP 50-5F
+            0x50 => {
+                print_instruction(byte, &format_args!("push ax"));
+                self.push_onto_stack(memory, self.ax)?;
+            }
+            0x53 => {
+                print_instruction(byte, &format_args!("push bx"));
+                self.push_onto_stack(memory, self.bx)?;
+            }
+            0x58 => {
+                print_instruction(byte, &format_args!("pop ax"));
+                self.ax = self.pop_from_stack(memory)?;
+            }
+            0x5B => {
+                print_instruction(byte, &format_args!("pop bx"));
+                self.bx = self.pop_from_stack(memory)?;
+            }
             // Jumps
             0x75 => {
                 // Signed byte
@@ -266,6 +287,16 @@ impl Cpu {
                 self.set_reg8(Reg8::Ah, operand);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
+            0xB8 => {
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov ax, {:X}h", operand));
+                self.ax = operand;
+            }
+            0xB9 => {
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov cx, {:X}h", operand));
+                self.cx = operand;
+            }
             0xBA => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov dx, {:X}h", operand));
@@ -276,15 +307,30 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov bx, {:X}h", operand));
                 self.bx = operand;
             }
+            0xBC => {
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov sp, {:X}h", operand));
+                self.sp = operand;
+            }
+            0xBD => {
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov bp, {:X}h", operand));
+                self.bp = operand;
+            }
             0xBE => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov si, {:X}h", operand));
                 self.si = operand;
             }
-            0xB9 => {
+            0xBF => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
-                print_instruction(byte, &format_args!("mov cx, {:X}h", operand));
-                self.cx = operand;
+                print_instruction(byte, &format_args!("mov di, {:X}h", operand));
+                self.di = operand;
+            }
+            // RET
+            0xC3 => {
+                print_instruction(byte, &format_args!("ret"));
+                self.ip = self.pop_from_stack(memory)?;
             }
             // Interrupts
             0xCD => {
@@ -292,15 +338,50 @@ impl Cpu {
                 print_instruction(byte, &format_args!("int {:X}h", operand));
                 result = CpuStepResult::Interrupt(operand);
             }
+            // CALL
+            0xE8 => {
+                // Fetch 16-bit relative displacement
+                let displacement = self.fetch_next_word_and_advance_ip(memory);
+                // Push the current IP - it now points after the entire CALL instruction
+                self.push_onto_stack(memory, self.ip)?;
+                // Add the displacement to IP with 16-bit wrapping
+                self.ip = self.ip.wrapping_add(displacement)
+            }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
         self.trace();
         Ok(result)
     }
 
+    fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
+        self.sp = self.sp.wrapping_sub(2);
+        if let Some(mem_mut) = memory.get_mut(self.sp as usize..self.sp as usize + 2) {
+            mem_mut[0] = word as u8;
+            mem_mut[1] = (word >> 8) as u8;
+            Ok(())
+        } else {
+            return Err(CpuError::OutOfBoundsMemoryAccess(
+                "push_onto_stack".to_string(),
+            ));
+        }
+    }
+
+    fn pop_from_stack(&mut self, memory: &mut [u8]) -> Result<u16, CpuError> {
+        let value;
+        if let Some(mem) = memory.get(self.sp as usize..self.sp as usize + 2) {
+            value = (mem[0] as u16) | ((mem[1] as u16) << 8);
+        } else {
+            return Err(CpuError::OutOfBoundsMemoryAccess(
+                "pop_from_stack".to_string(),
+            ));
+        }
+        self.sp = self.sp.wrapping_add(2);
+        Ok(value)
+    }
+
     fn fetch_next_byte_and_advance_ip(&mut self, memory: &[u8]) -> u8 {
         let byte = memory[self.ip as usize];
-        self.ip += 1;
+        self.ip = self.ip.wrapping_add(1);
         byte
     }
 
@@ -380,6 +461,8 @@ impl Debug for Cpu {
             .field("dx", &format_args!("{:#06X}", self.dx))
             .field("si", &format_args!("{:#06X}", self.si))
             .field("di", &format_args!("{:#06X}", self.di))
+            .field("sp", &format_args!("{:#06X}", self.sp))
+            .field("bp", &format_args!("{:#06X}", self.bp))
             .field("ip", &format_args!("{:#06X}", self.ip))
             .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
