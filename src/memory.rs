@@ -83,11 +83,17 @@ pub(crate) fn read_buffer(
     Ok(bytes)
 }
 
-pub(crate) fn validate_buffer(
-    memory: &[u8],
+pub(crate) struct ValidatedBuffer<'a> {
+    memory: &'a mut [u8],
+    address: PhysAddr,
+    max_bytes: usize,
+}
+
+pub(crate) fn validate_buffer<'a>(
+    memory: &'a mut [u8],
     address: PhysAddr,
     num_bytes: usize,
-) -> Result<(), MemoryError> {
+) -> Result<ValidatedBuffer<'a>, MemoryError> {
     let memory_len = memory.len();
     let mut cur_byte = address;
     // Validate every destination address
@@ -97,20 +103,29 @@ pub(crate) fn validate_buffer(
         };
         cur_byte = cur_byte.wrapping_add(1);
     }
-    Ok(())
+    Ok(ValidatedBuffer {
+        memory,
+        address,
+        max_bytes: num_bytes,
+    })
 }
 
 pub(crate) fn write_buffer(
-    memory: &mut [u8],
-    address: PhysAddr,
-    buffer: &[u8],
+    destination: ValidatedBuffer<'_>,
+    bytes: &[u8],
 ) -> Result<(), MemoryError> {
-    validate_buffer(memory, address, buffer.len())?;
+    let bytes_len = bytes.len();
+    if bytes_len > destination.max_bytes {
+        let max_bytes = destination.max_bytes;
+        return Err(MemoryError::OutOfBoundsAccess(format!(
+            "Buffer is too large for memory: {bytes_len:?} > {max_bytes:?}",
+        )));
+    }
 
     // Actually perform the writes
-    let mut cur_byte = address;
-    for i in 0..buffer.len() {
-        write_byte(memory, cur_byte, buffer[i])?;
+    let mut cur_byte = destination.address;
+    for i in 0..bytes.len() {
+        write_byte(destination.memory, cur_byte, bytes[i])?;
         cur_byte = cur_byte.wrapping_add(1);
     }
 

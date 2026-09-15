@@ -123,12 +123,12 @@ impl Machine {
         }
         let max_bytes = self.cpu.cx as usize;
         let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx);
-        validate_buffer(&self.memory, dest_buffer, max_bytes)?;
+        let validated_buffer = validate_buffer(&mut self.memory, dest_buffer, max_bytes)?;
 
         let mut temp_buf = vec![0u8; max_bytes];
         let num_bytes = io::stdin().read(&mut temp_buf)?;
         temp_buf.truncate(num_bytes);
-        write_buffer(&mut self.memory, dest_buffer, &temp_buf)?;
+        write_buffer(validated_buffer, &temp_buf)?;
 
         // Write actual bytes read to AX on success
         self.cpu.ax = num_bytes as u16;
@@ -228,11 +228,12 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
         )
         .into());
     }
-    write_buffer(
+    let validated_buffer = validate_buffer(
         &mut machine.memory,
         PhysAddr::new(segment, prog_offset as u16),
-        &data,
+        data.len(),
     )?;
+    write_buffer(validated_buffer, &data)?;
     machine.cpu.ip = prog_offset as u16;
 
     machine.cpu.trace();
