@@ -1,5 +1,6 @@
 use std::{env, process};
 
+mod cpu;
 mod machine;
 
 fn main() {
