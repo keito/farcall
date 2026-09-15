@@ -172,6 +172,38 @@ impl Cpu {
                 let new_val = self.subtract_immediate8(Reg8::Al, operand);
                 self.set_reg8(Reg8::Al, new_val);
             }
+            0x31 => {
+                // XOR REG16/MEM16, REG16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("xor {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg16(source_reg);
+                let rm_value = match rm {
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        read_word(memory, PhysAddr::new(seg_addr, addr))?
+                    }
+                    RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
+                };
+
+                let value = reg_value ^ rm_value;
+
+                match rm {
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
+                    }
+                    RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
+                }
+                self.set_flag(Flag::Carry, false);
+                self.set_flag(Flag::Overflow, false);
+                self.set_flag(Flag::Zero, value == 0);
+                self.set_flag(Flag::Sign, value & 0x8000 != 0);
+                self.set_flag(Flag::Parity, value.to_le_bytes()[0].count_ones() % 2 == 0);
+            }
             0x3C => {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);

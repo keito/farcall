@@ -3,6 +3,7 @@ use crate::memory::MemoryError;
 
 mod addressing;
 mod memory_access;
+mod xor;
 
 #[test]
 fn lea_direct_address_covers_all_destinations_without_reading_memory() {

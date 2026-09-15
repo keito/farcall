@@ -46,6 +46,7 @@ impl TryFrom<u8> for Reg8 {
     }
 }
 
+#[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub(crate) enum Reg16 {
     Ax = 0b000,
