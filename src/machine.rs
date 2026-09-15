@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
-use crate::memory::{MemoryError, PhysAddr};
+use crate::memory::{MemoryError, PhysAddr, read_buffer};
 use crate::registers::Reg8;
 
 #[cfg(test)]
@@ -60,7 +60,7 @@ impl Machine {
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         let num_bytes = self.cpu.cx as usize;
-        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
+        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx);
         let dest = self.cpu.bx;
         if dest != 1 {
             return Err(MachineError::WriteServiceError(
@@ -68,22 +68,16 @@ impl Machine {
             ));
         }
 
-        // TODO: Support memory wrapped at the 20-bit mark
-        if let Some(buffer) = self.memory.get(start_pos..start_pos + num_bytes) {
-            io::stdout().write_all(b"\x1b[92m")?;
-            io::stdout().write_all(buffer)?;
-            io::stdout().write_all(b"\x1b[0m")?;
-            io::stdout().flush()?;
-            // Successfully written bytes
-            self.cpu.ax = num_bytes as u16;
-            // Clear the carry flag
-            self.cpu.set_flag(Flag::Carry, false);
-            Ok(InterruptResult::ResumeExecution)
-        } else {
-            Err(MachineError::WriteServiceError(
-                "Buffer out of bounds".to_string(),
-            ))
-        }
+        let buffer = read_buffer(&self.memory, start_pos, num_bytes)?;
+        io::stdout().write_all(b"\x1b[92m")?;
+        io::stdout().write_all(&buffer)?;
+        io::stdout().write_all(b"\x1b[0m")?;
+        io::stdout().flush()?;
+        // Successfully written bytes
+        self.cpu.ax = num_bytes as u16;
+        // Clear the carry flag
+        self.cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
     }
 
     /// Emulates the DOS print string service

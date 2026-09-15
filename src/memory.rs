@@ -17,6 +17,10 @@ impl PhysAddr {
     pub(crate) fn as_usize(&self) -> usize {
         self.0 as usize
     }
+
+    pub(crate) fn wrapping_add(&self, rhs: u16) -> PhysAddr {
+        Self((self.0 + (rhs as u32)) & 0xFFFFF)
+    }
 }
 
 impl std::fmt::UpperHex for PhysAddr {
@@ -61,10 +65,25 @@ pub(crate) fn read_word(memory: &[u8], address: PhysAddr) -> Result<u16, MemoryE
     Ok(u16::from_le_bytes([memory[byte1], memory[byte2]]))
 }
 
+pub(crate) fn read_buffer(
+    memory: &[u8],
+    address: PhysAddr,
+    length: usize,
+) -> Result<Vec<u8>, MemoryError> {
+    let mut cur_byte = address;
+    let mut bytes = Vec::<u8>::with_capacity(length);
+    while bytes.len() < length {
+        let byte = read_byte(memory, cur_byte)?;
+        bytes.push(byte);
+        cur_byte = cur_byte.wrapping_add(1);
+    }
+    Ok(bytes)
+}
+
 fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), MemoryError> {
     let byte1 = address.as_usize();
     // The second byte might wrap
-    let byte2 = (byte1 + 1) & 0xFFFFF;
+    let byte2 = address.wrapping_add(1).as_usize();
     if memory.get(byte1).is_none() || memory.get(byte2).is_none() {
         return Err(MemoryError::OutOfBoundsAccess(format!("{:#X}", address)));
     };
