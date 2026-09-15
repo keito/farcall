@@ -35,15 +35,49 @@ pub(super) fn parse_mod_rm(operand: u8) -> ModRmFields {
 impl Cpu {
     fn effective_address_base(&self, rm_field: u8) -> Result<u16, CpuError> {
         match rm_field {
-            // 0b000 => {} // BX+SI
-            // 0b001 => {} // BX+DI
-            // 0b010 => {} // BP+SI
-            // 0b011 => {} // BP+DI
+            0b000 => Ok(self.bx.wrapping_add(self.si)),
+            0b001 => Ok(self.bx.wrapping_add(self.di)),
+            0b010 => Ok(self.bp.wrapping_add(self.si)),
+            0b011 => Ok(self.bp.wrapping_add(self.di)),
             0b100 => Ok(self.si),
             0b101 => Ok(self.di),
-            // 0b110 => {} // BP (except in exception handled separately)
-            // 0b111 => {} // BX
+            0b110 => Ok(self.bp),
+            0b111 => Ok(self.bx),
             _ => Err(CpuError::UnsupportedRmField(rm_field)),
+        }
+    }
+
+    fn decode_effective_address(
+        &mut self,
+        memory: &[u8],
+        fields: ModRmFields,
+    ) -> Result<u16, CpuError> {
+        match fields.mod_field {
+            0b00 => {
+                // Memory without displacement
+                if fields.rm_field == 0b110 {
+                    // Special case for direct memory [disp16]
+                    let word = self.fetch_next_word_and_advance_ip(memory);
+                    Ok(word)
+                } else {
+                    let base_address = self.effective_address_base(fields.rm_field)?;
+                    Ok(base_address)
+                }
+            }
+            0b01 => {
+                // Memory with an 8-bit displacement
+                let base_address = self.effective_address_base(fields.rm_field)?;
+                let displacement = self.fetch_next_byte_and_advance_ip(memory);
+                Ok(base_address.wrapping_add_signed((displacement as i8) as i16))
+            }
+            0b10 => {
+                // Memory with a 16-bit displacement
+                let base_address = self.effective_address_base(fields.rm_field)?;
+                let displacement = self.fetch_next_word_and_advance_ip(memory);
+                Ok(base_address.wrapping_add_signed(displacement as i16))
+            }
+            0b11 => unreachable!("Caller should handle 0b11"),
+            _ => Err(CpuError::UnsupportedModField(fields.mod_field)),
         }
     }
 
@@ -53,28 +87,9 @@ impl Cpu {
         fields: ModRmFields,
     ) -> Result<RegisterOrMemoryOperand<Reg8>, CpuError> {
         match fields.mod_field {
-            0b00 => {
-                // Memory without displacement
-                if fields.rm_field == 0b110 {
-                    // Exception for direct memory [disp16]
-                    todo!("[disp16]");
-                }
-                let base_address = self.effective_address_base(fields.rm_field)?;
-                Ok(RegisterOrMemoryOperand::Memory(base_address))
-            }
-            0b01 => {
-                // Memory with an 8-bit displacement
-                let base_address = self.effective_address_base(fields.rm_field)?;
-                // Get displacement
-                let displacement = self.fetch_next_byte_and_advance_ip(memory);
-                Ok(RegisterOrMemoryOperand::Memory(
-                    base_address.wrapping_add_signed((displacement as i8) as i16),
-                ))
-            }
-            // 0b10 => {
-            //     // Memory with a 16-bit displacement
-            //     panic!("I'm so sorry")
-            // }
+            0b00 | 0b01 | 0b10 => Ok(RegisterOrMemoryOperand::Memory(
+                self.decode_effective_address(memory, fields)?,
+            )),
             0b11 => {
                 // Register
                 let rm_reg = Reg8::try_from(fields.rm_field)?;
@@ -90,15 +105,9 @@ impl Cpu {
         fields: ModRmFields,
     ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
         match fields.mod_field {
-            0b00 => {
-                if fields.rm_field == 0b110 {
-                    // Special case where we fetch the next word and return Memory(offset)
-                    let word = self.fetch_next_word_and_advance_ip(memory);
-                    Ok(RegisterOrMemoryOperand::Memory(word))
-                } else {
-                    Err(CpuError::UnsupportedRmField(fields.rm_field))
-                }
-            }
+            0b00 | 0b01 | 0b10 => Ok(RegisterOrMemoryOperand::Memory(
+                self.decode_effective_address(memory, fields)?,
+            )),
             0b11 => {
                 // Register
                 let rm_reg = Reg16::try_from(fields.rm_field)?;

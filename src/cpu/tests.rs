@@ -1,5 +1,7 @@
 use super::{Cpu, CpuError, CpuStepResult};
 
+mod addressing;
+
 #[test]
 fn lea_direct_address_covers_all_destinations_without_reading_memory() {
     // Destination field order: AX, CX, DX, BX, SP, BP, SI, DI.
@@ -363,6 +365,101 @@ fn cmp_al_updates_arithmetic_flags_without_changing_registers_or_memory() {
 }
 
 #[test]
+fn je_depends_only_on_zero() {
+    for (flags, target) in [
+        (0x0000, 0x0102),
+        (0x0040, 0x0107),
+        (0x0F97, 0x0102), // Other flags set, ZF clear.
+        (0x0FD7, 0x0107), // Other flags set, ZF set.
+    ] {
+        assert_conditional_jump(0x74, flags, 0x0100, 5, target);
+    }
+}
+
+#[test]
+fn jl_and_jg_cover_every_sign_overflow_and_zero_combination() {
+    // Explicit truth table: ZF=0040, SF=0080, OF=0800.
+    for (flags, jl_taken, jg_taken) in [
+        (0x0000, false, true),
+        (0x0040, false, false),
+        (0x0080, true, false),
+        (0x00C0, true, false),
+        (0x0800, true, false),
+        (0x0840, true, false),
+        (0x0880, false, true),
+        (0x08C0, false, false),
+    ] {
+        // CF, PF, AF and control flags must not influence either condition.
+        for other_flags in [0, 0x0717] {
+            for (opcode, taken) in [(0x7C, jl_taken), (0x7F, jg_taken)] {
+                let target = if taken { 0x0107 } else { 0x0102 };
+                assert_conditional_jump(opcode, flags | other_flags, 0x0100, 5, target);
+            }
+        }
+    }
+}
+
+#[test]
+fn je_jl_and_jg_use_signed_offsets_and_wrap_ip() {
+    for (opcode, taken_flags, untaken_flags) in [
+        (0x74, 0x0040, 0x0000),
+        (0x7C, 0x0080, 0x0000),
+        (0x7F, 0x0000, 0x0040),
+    ] {
+        // Start, encoded rel8, taken target, fall-through IP.
+        for (start, displacement, target, next) in [
+            (0x0100, 0x00, 0x0102, 0x0102),
+            (0x0100, 0x7F, 0x0181, 0x0102), // +127.
+            (0x0100, 0x80, 0x0082, 0x0102), // -128.
+            (0x0100, 0xFE, 0x0100, 0x0102), // -2; execute once, not a loop.
+            (0x0100, 0xFF, 0x0101, 0x0102), // -1.
+            (0x7FFD, 0x01, 0x8000, 0x7FFF),
+            (0x7FFE, 0xFF, 0x7FFF, 0x8000),
+            (0xFFFD, 0x02, 0x0001, 0xFFFF), // Target wraps forward.
+            (0x0000, 0xFD, 0xFFFF, 0x0002), // Target wraps backward.
+            (0xFFFE, 0x00, 0x0000, 0x0000),
+            (0xFFFF, 0xFE, 0xFFFF, 0x0001), // Displacement fetched at 0000.
+        ] {
+            assert_conditional_jump(opcode, taken_flags, start, displacement, target);
+            assert_conditional_jump(opcode, untaken_flags, start, displacement, next);
+        }
+    }
+}
+
+#[test]
+fn cmp_then_je_jl_or_jg_handles_guesses_and_signed_overflow() {
+    for (al, immediate, expected_taken) in [
+        (b'1', b'5', [false, true, false]),
+        (b'5', b'5', [true, false, false]),
+        (b'9', b'5', [false, false, true]),
+        (0x80, 0x01, [false, true, false]), // -128 < +1, despite positive result.
+        (0x7F, 0xFF, [false, false, true]), // +127 > -1, despite negative result.
+        (0xFF, 0x00, [false, true, false]), // -1 < 0; differs from unsigned comparison.
+    ] {
+        for (opcode, taken) in [0x74, 0x7C, 0x7F].into_iter().zip(expected_taken) {
+            let mut cpu = Cpu::new();
+            cpu.ax = 0xAB00 | al as u16;
+            cpu.flags = 0x0FD7;
+            let mut memory = [0x3C, immediate, opcode, 0x05];
+            let original_memory = memory;
+
+            assert!(matches!(cpu.step(&mut memory), Ok(CpuStepResult::Continue)));
+            let comparison_flags = cpu.flags;
+            assert!(matches!(cpu.step(&mut memory), Ok(CpuStepResult::Continue)));
+
+            assert_eq!(
+                cpu.ip,
+                if taken { 9 } else { 4 },
+                "AL={al:#04X}, immediate={immediate:#04X}, opcode={opcode:#04X}"
+            );
+            assert_eq!(cpu.ax, 0xAB00 | al as u16);
+            assert_eq!(cpu.flags, comparison_flags);
+            assert_eq!(memory, original_memory);
+        }
+    }
+}
+
+#[test]
 fn jb_depends_only_on_carry() {
     // Explicitly cover every CF/ZF combination, including both set.
     for (condition_flags, expected_ip) in [
@@ -372,7 +469,7 @@ fn jb_depends_only_on_carry() {
         (0x0041, 0x0107),
     ] {
         for other_flags in [0, 0x0F94] {
-            assert_unsigned_jump(
+            assert_conditional_jump(
                 0x72,
                 condition_flags | other_flags,
                 0x0100,
@@ -392,7 +489,7 @@ fn ja_requires_both_carry_and_zero_clear() {
         (0x0041, 0x0102),
     ] {
         for other_flags in [0, 0x0F94] {
-            assert_unsigned_jump(
+            assert_conditional_jump(
                 0x77,
                 condition_flags | other_flags,
                 0x0100,
@@ -414,8 +511,8 @@ fn jb_and_ja_use_signed_displacements_from_the_next_ip() {
             (0xFE, 0x0100), // -2 branches back to the opcode.
             (0xFF, 0x0101), // -1 branches to the displacement byte.
         ] {
-            assert_unsigned_jump(opcode, taken_flags, 0x0100, displacement, target);
-            assert_unsigned_jump(opcode, untaken_flags, 0x0100, displacement, 0x0102);
+            assert_conditional_jump(opcode, taken_flags, 0x0100, displacement, target);
+            assert_conditional_jump(opcode, untaken_flags, 0x0100, displacement, 0x0102);
         }
     }
 }
@@ -432,14 +529,19 @@ fn jb_and_ja_wrap_targets_and_instruction_fetch_at_16_bits() {
             (0xFFFE, 0x00, 0x0000, 0x0000),
             (0xFFFF, 0xFE, 0xFFFF, 0x0001), // Displacement fetched at 0000.
         ] {
-            assert_unsigned_jump(opcode, taken_flags, start, displacement, target);
-            assert_unsigned_jump(opcode, untaken_flags, start, displacement, next);
+            assert_conditional_jump(opcode, taken_flags, start, displacement, target);
+            assert_conditional_jump(opcode, untaken_flags, start, displacement, next);
         }
     }
 }
 
-fn assert_unsigned_jump(opcode: u8, flags: u16, start: u16, displacement: u8, expected_ip: u16) {
+fn assert_conditional_jump(opcode: u8, flags: u16, start: u16, displacement: u8, expected_ip: u16) {
     let mut cpu = Cpu::new();
+    [
+        cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
+    ] = [
+        0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A, 0x89AB,
+    ];
     cpu.ip = start;
     cpu.flags = flags;
     let registers = (
