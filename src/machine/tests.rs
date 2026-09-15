@@ -1,6 +1,86 @@
 use super::{Cpu, CpuStepResult, InterruptResult, Machine};
 
 #[test]
+fn mov_from_si_disp8_accepts_zero_and_positive_offsets() {
+    for (base, displacement, expected_address) in [
+        (0x0180, 0x00, 0x0180),
+        (0x0180, 0x05, 0x0185),
+        (0x2000, 0x7F, 0x207F), // Largest positive disp8: +127.
+    ] {
+        assert_si_disp8_load(base, displacement, expected_address);
+    }
+}
+
+#[test]
+fn mov_from_si_disp8_sign_extends_negative_offsets() {
+    for (base, displacement, expected_address) in [
+        (0x0180, 0xFE, 0x017E), // -2, not +254.
+        (0x2000, 0x80, 0x1F80), // Smallest disp8: -128, not +128.
+    ] {
+        assert_si_disp8_load(base, displacement, expected_address);
+    }
+}
+
+#[test]
+fn mov_from_si_disp8_wraps_the_effective_address() {
+    for (base, displacement, expected_address) in [
+        (0xFFFF, 0x01, 0x0000),
+        (0x0000, 0xFF, 0xFFFF), // 0 - 1 wraps to 0xFFFF.
+    ] {
+        assert_si_disp8_load(base, displacement, expected_address);
+    }
+}
+
+fn assert_si_disp8_load(base: u16, displacement: u8, expected_address: u16) {
+    let mut cpu = Cpu::new();
+    cpu.ax = 0xABCD;
+    cpu.si = base;
+    cpu.ip = 0x0100;
+    cpu.flags = 0x08D5;
+    let mut memory = vec![0; 0x10000];
+    // MOV AL, [SI + disp8]: opcode, ModR/M, displacement.
+    memory[0x0100..0x0103].copy_from_slice(&[0x8A, 0x44, displacement]);
+    memory[expected_address as usize] = 0x5A;
+
+    let result = cpu
+        .step(&mut memory)
+        .expect("displaced load should succeed");
+
+    assert!(matches!(result, CpuStepResult::Continue));
+    assert_eq!(
+        cpu.ax, 0xAB5A,
+        "SI={base:#06X}, disp8={displacement:#04X}: expected a load from {expected_address:#06X}"
+    );
+    assert_eq!(cpu.si, base, "address calculation must not change SI");
+    assert_eq!(cpu.ip, 0x0103, "consume exactly one displacement byte");
+    assert_eq!(cpu.flags, 0x08D5, "MOV must preserve flags");
+}
+
+#[test]
+fn mov_to_si_disp8_writes_at_a_negative_offset() {
+    let mut cpu = Cpu::new();
+    cpu.ax = 0xA534;
+    cpu.si = 0x0180;
+    cpu.ip = 0x0100;
+    cpu.flags = 0x08D5;
+    let mut memory = vec![0xCC; 0x10000];
+    // MOV [SI - 2], AH.
+    memory[0x0100..0x0103].copy_from_slice(&[0x88, 0x64, 0xFE]);
+
+    let result = cpu
+        .step(&mut memory)
+        .expect("displaced store should succeed");
+
+    assert!(matches!(result, CpuStepResult::Continue));
+    assert_eq!(&memory[0x017D..0x0180], &[0xCC, 0xA5, 0xCC]);
+    assert_eq!(memory[0x027E], 0xCC, "must not interpret 0xFE as +254");
+    assert_eq!(cpu.ax, 0xA534, "store must preserve its source register");
+    assert_eq!(cpu.si, 0x0180);
+    assert_eq!(cpu.ip, 0x0103);
+    assert_eq!(cpu.flags, 0x08D5);
+}
+
+#[test]
 fn dec_cx_updates_auxiliary_carry_on_low_nibble_borrow() {
     for (starting_cx, expected_cx, expected_af) in
         [(0x0010, 0x000F, 0x0010), (0x0011, 0x0010, 0x0000)]

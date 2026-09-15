@@ -13,6 +13,7 @@ pub struct Cpu {
     cx: u16,
     dx: u16,
     si: u16,
+    di: u16,
     ip: u16,
     flags: u16,
 }
@@ -33,6 +34,8 @@ enum CpuError {
     UnsupportedModField(u8),
     #[error("Invalid register value: {0}")]
     InvalidRegisterValue(u8),
+    #[error("Unsupported r/m field: {0}")]
+    UnsupportedRmField(u8),
 }
 
 enum CpuStepResult {
@@ -106,6 +109,7 @@ impl Cpu {
             cx: 0x1234,
             dx: 0x1234,
             si: 0x1234,
+            di: 0x1234,
             ip: 0x0,
             flags: 0,
         }
@@ -210,7 +214,7 @@ impl Cpu {
             // MOVs
             0x88 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let decoded = self.decode_mod_r_m8(operand)?;
+                let decoded = self.decode_mod_r_m8(memory, operand)?;
 
                 print_instruction(byte, &format_args!("mov {}, {}", decoded.rm, decoded.reg));
 
@@ -232,7 +236,7 @@ impl Cpu {
             }
             0x8A => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let decoded = self.decode_mod_r_m8(operand)?;
+                let decoded = self.decode_mod_r_m8(memory, operand)?;
 
                 print_instruction(byte, &format_args!("mov {}, {}", decoded.reg, decoded.rm));
                 let value = match decoded.rm {
@@ -313,7 +317,21 @@ impl Cpu {
         eprintln!("{:?}", self);
     }
 
-    fn decode_mod_r_m8(&self, operand: u8) -> Result<DecodedModRm8, CpuError> {
+    fn effective_address_base(&self, rm_field: u8) -> Result<u16, CpuError> {
+        match rm_field {
+            // 0b000 => {} // BX+SI
+            // 0b001 => {} // BX+DI
+            // 0b010 => {} // BP+SI
+            // 0b011 => {} // BP+DI
+            0b100 => Ok(self.si),
+            0b101 => Ok(self.di),
+            // 0b110 => {} // BP (except in exception handled separately)
+            // 0b111 => {} // BX
+            _ => Err(CpuError::UnsupportedRmField(rm_field)),
+        }
+    }
+
+    fn decode_mod_r_m8(&mut self, memory: &[u8], operand: u8) -> Result<DecodedModRm8, CpuError> {
         let mod_field = operand >> 6;
         let reg_field = (operand & 0x3F) >> 3;
         let rm_field = operand & 0x7;
@@ -322,20 +340,26 @@ impl Cpu {
         let rm = match mod_field {
             0b00 => {
                 // Memory without displacement
-                if rm_field == 0b100 {
-                    Ok(RegisterOrMemoryOperand::Memory(self.si))
-                } else {
-                    panic!("I'm so sorry")
+                if rm_field == 0b110 {
+                    // Exception for direct memory [disp16]
+                    todo!("[disp16]");
                 }
+                let base_address = self.effective_address_base(rm_field)?;
+                Ok(RegisterOrMemoryOperand::Memory(base_address))
             }
             0b01 => {
                 // Memory with an 8-bit displacement
-                panic!("I'm so sorry")
+                let base_address = self.effective_address_base(rm_field)?;
+                // Get displacement
+                let displacement = self.fetch_next_byte_and_advance_ip(memory);
+                Ok(RegisterOrMemoryOperand::Memory(
+                    base_address.wrapping_add_signed((displacement as i8) as i16),
+                ))
             }
-            0b10 => {
-                // Memory with a 16-bit displacement
-                panic!("I'm so sorry")
-            }
+            // 0b10 => {
+            //     // Memory with a 16-bit displacement
+            //     panic!("I'm so sorry")
+            // }
             0b11 => {
                 // Register
                 let rm_reg = Reg8::try_from(rm_field)?;
@@ -355,6 +379,7 @@ impl Debug for Cpu {
             .field("cx", &format_args!("{:#06X}", self.cx))
             .field("dx", &format_args!("{:#06X}", self.dx))
             .field("si", &format_args!("{:#06X}", self.si))
+            .field("di", &format_args!("{:#06X}", self.di))
             .field("ip", &format_args!("{:#06X}", self.ip))
             .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
