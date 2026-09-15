@@ -1,4 +1,5 @@
 use core::fmt::{self, Debug};
+use std::fmt::Display;
 use std::fs;
 use std::io::{self, Write};
 use thiserror::Error;
@@ -28,6 +29,10 @@ enum CpuError {
     UnsupportedInstruction(u8),
     #[error("Out of bounds memory access: {0}")]
     OutOfBoundsMemoryAccess(String),
+    #[error("Unsupported mod field: {0}")]
+    UnsupportedModField(u8),
+    #[error("Invalid register value: {0}")]
+    InvalidRegisterValue(u8),
 }
 
 enum CpuStepResult {
@@ -76,6 +81,23 @@ impl fmt::Display for Reg8 {
     }
 }
 
+impl TryFrom<u8> for Reg8 {
+    type Error = CpuError;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0b000 => Ok(Reg8::Al),
+            0b001 => Ok(Reg8::Cl),
+            0b010 => Ok(Reg8::Dl),
+            0b011 => Ok(Reg8::Bl),
+            0b100 => Ok(Reg8::Ah),
+            0b101 => Ok(Reg8::Ch),
+            0b110 => Ok(Reg8::Dh),
+            0b111 => Ok(Reg8::Bh),
+            _ => Err(CpuError::InvalidRegisterValue(value)),
+        }
+    }
+}
+
 impl Cpu {
     fn new() -> Self {
         Cpu {
@@ -100,8 +122,24 @@ impl Cpu {
             Reg8::Bl => self.bx = (self.bx & 0xFF00) | value as u16,
             Reg8::Cl => self.cx = (self.cx & 0xFF00) | value as u16,
             Reg8::Dl => self.dx = (self.dx & 0xFF00) | value as u16,
-            _ => todo!("Not implemented arm of set_reg8"),
+            Reg8::Ah => self.ax = (self.ax & 0x00FF) | ((value as u16) << 8),
+            Reg8::Bh => self.bx = (self.bx & 0x00FF) | ((value as u16) << 8),
+            Reg8::Ch => self.cx = (self.cx & 0x00FF) | ((value as u16) << 8),
+            Reg8::Dh => self.dx = (self.dx & 0x00FF) | ((value as u16) << 8),
         }
+    }
+
+    fn get_reg8(&self, reg: Reg8) -> u8 {
+        (match reg {
+            Reg8::Al => self.ax & 0x00FF,
+            Reg8::Bl => self.bx & 0x00FF,
+            Reg8::Cl => self.cx & 0x00FF,
+            Reg8::Dl => self.dx & 0x00FF,
+            Reg8::Ah => (self.ax & 0xFF00) >> 8,
+            Reg8::Bh => (self.bx & 0xFF00) >> 8,
+            Reg8::Ch => (self.cx & 0xFF00) >> 8,
+            Reg8::Dh => (self.dx & 0xFF00) >> 8,
+        }) as u8
     }
 
     /// Fetch, decode, and execute one instruction
@@ -114,7 +152,7 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let old_al = lower_byte(self.ax);
+                let old_al = self.get_reg8(Reg8::Al);
                 let new_al = old_al.wrapping_sub(operand);
                 self.set_reg8(Reg8::Al, new_al);
 
@@ -172,74 +210,56 @@ impl Cpu {
             // MOVs
             0x88 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let mod_field = operand >> 6;
-                let reg_field = (operand & 0x3F) >> 3;
-                let rm_field = operand & 0x7;
+                let decoded = self.decode_mod_r_m8(operand)?;
 
-                if mod_field != 0 {
-                    // Unsupported mod
-                    todo!("mods other than 00 not currently supported for 88");
-                }
-                let source = match reg_field {
-                    0b000 => Reg8::Al,
-                    _ => todo!("Sources other than 0b000 (AL) not supported for 88"),
-                };
-                if rm_field != 0b100 {
-                    // Unsupported RM
-                    todo!("r/m other than 0b100 ([SI]) not supported for 88");
-                }
+                print_instruction(byte, &format_args!("mov {}, {}", decoded.rm, decoded.reg));
 
-                print_instruction(byte, &format_args!("mov [si], {}", source));
-
-                // Read the value in AL
-                let value = lower_byte(self.ax);
-                // Make sure we are not out of bounds
-                if let Some(si_mut) = memory.get_mut(self.si as usize) {
-                    *si_mut = value;
-                } else {
-                    return Err(CpuError::OutOfBoundsMemoryAccess("[si]".to_string()));
+                // Read the value in the register
+                let value = self.get_reg8(decoded.reg);
+                match decoded.rm {
+                    RegisterOrMemoryOperand::Memory(memory_addr) => {
+                        if let Some(mem_mut) = memory.get_mut(memory_addr as usize) {
+                            *mem_mut = value;
+                        } else {
+                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
+                                "Address {:#X}",
+                                memory_addr
+                            )));
+                        }
+                    }
+                    RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
                 }
             }
             0x8A => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let mod_field = operand >> 6;
-                let reg_field = (operand & 0x3F) >> 3;
-                let rm_field = operand & 0x7;
+                let decoded = self.decode_mod_r_m8(operand)?;
 
-                if mod_field != 0 {
-                    // Unsupported mod
-                    todo!("mods other than 00 not currently supported for 8A");
-                }
-                let dest = match reg_field {
-                    0b000 => Reg8::Al,
-                    _ => todo!("Destinations other than 0b000 (AL) not supported for 8A"),
+                print_instruction(byte, &format_args!("mov {}, {}", decoded.reg, decoded.rm));
+                let value = match decoded.rm {
+                    RegisterOrMemoryOperand::Memory(memory_addr) => {
+                        if let Some(data) = memory.get(memory_addr as usize) {
+                            *data
+                        } else {
+                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
+                                "Address {:#X}",
+                                memory_addr
+                            )));
+                        }
+                    }
+                    RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
                 };
-                if rm_field != 0b100 {
-                    // Unsupported RM
-                    todo!("r/m other than 0b100 ([SI]) not supported for 8A");
-                }
-
-                print_instruction(byte, &format_args!("mov {}, [si]", dest));
-
-                // Read the value at SI
-                if let Some(data) = memory.get(self.si as usize) {
-                    self.ax = *data as u16 | (self.ax & 0xFF00);
-                } else {
-                    return Err(CpuError::OutOfBoundsMemoryAccess("[si]".to_string()));
-                }
+                self.set_reg8(decoded.reg, value);
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov al, {:X}h", operand));
-                // Move the u8 operand into the low byte of AX
-                self.ax = operand as u16 | (self.ax & 0xFF00);
+                self.set_reg8(Reg8::Al, operand);
             }
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov ah, {:X}h", operand));
-                // Move the u8 operand into the high byte of AX
-                self.ax = ((operand as u16) << 8) | (self.ax & 0b11111111);
+                self.set_reg8(Reg8::Ah, operand);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
             0xBA => {
@@ -291,6 +311,39 @@ impl Cpu {
 
     fn trace(&self) {
         eprintln!("{:?}", self);
+    }
+
+    fn decode_mod_r_m8(&self, operand: u8) -> Result<DecodedModRm8, CpuError> {
+        let mod_field = operand >> 6;
+        let reg_field = (operand & 0x3F) >> 3;
+        let rm_field = operand & 0x7;
+
+        let reg = Reg8::try_from(reg_field)?;
+        let rm = match mod_field {
+            0b00 => {
+                // Memory without displacement
+                if rm_field == 0b100 {
+                    Ok(RegisterOrMemoryOperand::Memory(self.si))
+                } else {
+                    panic!("I'm so sorry")
+                }
+            }
+            0b01 => {
+                // Memory with an 8-bit displacement
+                panic!("I'm so sorry")
+            }
+            0b10 => {
+                // Memory with a 16-bit displacement
+                panic!("I'm so sorry")
+            }
+            0b11 => {
+                // Register
+                let rm_reg = Reg8::try_from(rm_field)?;
+                Ok(RegisterOrMemoryOperand::Register(rm_reg))
+            }
+            _ => Err(CpuError::UnsupportedModField(mod_field)),
+        }?;
+        Ok(DecodedModRm8 { reg, rm })
     }
 }
 
@@ -427,6 +480,21 @@ fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
 }
 
-fn lower_byte(word: u16) -> u8 {
-    (word & 0xFF) as u8
+enum RegisterOrMemoryOperand {
+    Register(Reg8),
+    Memory(u16),
+}
+
+impl Display for RegisterOrMemoryOperand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Register(reg) => write!(f, "{}", reg),
+            Self::Memory(addr) => write!(f, "[{:#X}]", addr),
+        }
+    }
+}
+
+struct DecodedModRm8 {
+    reg: Reg8,
+    rm: RegisterOrMemoryOperand,
 }
