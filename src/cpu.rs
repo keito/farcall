@@ -116,6 +116,11 @@ impl Cpu {
         self.flags = (self.flags & !mask) | ((value as u16) << (flag as u8));
     }
 
+    pub(crate) fn get_flag(&self, flag: Flag) -> bool {
+        let mask = 1 << (flag as u8);
+        self.flags & mask != 0
+    }
+
     fn set_reg8(&mut self, reg: Reg8, value: u8) {
         match reg {
             Reg8::Al => self.ax = (self.ax & 0xFF00) | value as u16,
@@ -152,23 +157,14 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let old_al = self.get_reg8(Reg8::Al);
-                let new_al = old_al.wrapping_sub(operand);
-                self.set_reg8(Reg8::Al, new_al);
-
-                // Carry flag: did subtraction require a borrow?
-                self.set_flag(Flag::Carry, old_al < operand);
-                // Set or clear the zero flag
-                self.set_flag(Flag::Zero, new_al == 0);
-                // Overflow: (1) old_al and operand have different signs, AND
-                // (2) the result's sign differs from old_al's sign
-                self.set_flag(
-                    Flag::Overflow,
-                    ((old_al & 0x80) != (operand & 0x80)) && ((new_al & 0x80) != (old_al & 0x80)),
-                );
-                self.set_flag(Flag::Sign, new_al & (1 << 7) != 0);
-                self.set_flag(Flag::Parity, new_al.count_ones() % 2 == 0);
-                self.set_flag(Flag::AuxiliaryCarry, (old_al & 0x0F) < (operand & 0x0F));
+                let new_val = self.sub_imm8(Reg8::Al, operand);
+                self.set_reg8(Reg8::Al, new_val);
+            }
+            0x3C => {
+                // CMP AL - basically SUB AL that doesn't change AL
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
+                self.sub_imm8(Reg8::Al, operand);
             }
             0x46 => {
                 print_instruction(byte, &format_args!("inc si"));
@@ -215,12 +211,30 @@ impl Cpu {
                 self.bx = self.pop_from_stack(memory)?;
             }
             // Jumps
+            0x72 => {
+                // Jump if Below
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jb {:X}h", operand));
+                // If CF is 1, then jump ("jump if carry")
+                if self.get_flag(Flag::Carry) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x75 => {
                 // Signed byte
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 print_instruction(byte, &format_args!("jnz short {:X}h", operand));
                 // If zero flag is not set, then jump
-                if self.flags & 0x40 == 0 {
+                if !self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x77 => {
+                // Jump if Above
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("ja {:X}h", operand));
+                // If CF is 0 AND ZF = 0, jump
+                if !self.get_flag(Flag::Carry) && !self.get_flag(Flag::Zero) {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
@@ -384,6 +398,27 @@ impl Cpu {
         let hob = self.fetch_next_byte_and_advance_ip(memory);
         // Combine the low and high bytes into a 16-bit value
         (lob as u16) | ((hob as u16) << 8)
+    }
+
+    fn sub_imm8(&mut self, reg: Reg8, operand: u8) -> u8 {
+        let old_reg = self.get_reg8(reg);
+        let new_al = old_reg.wrapping_sub(operand);
+
+        // Carry flag: did subtraction require a borrow?
+        self.set_flag(Flag::Carry, old_reg < operand);
+        // Set or clear the zero flag
+        self.set_flag(Flag::Zero, new_al == 0);
+        // Overflow: (1) old_reg and operand have different signs, AND
+        // (2) the result's sign differs from old_reg's sign
+        self.set_flag(
+            Flag::Overflow,
+            ((old_reg & 0x80) != (operand & 0x80)) && ((new_al & 0x80) != (old_reg & 0x80)),
+        );
+        self.set_flag(Flag::Sign, new_al & (1 << 7) != 0);
+        self.set_flag(Flag::Parity, new_al.count_ones() % 2 == 0);
+        self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+
+        new_al
     }
 
     pub(crate) fn trace(&self) {
