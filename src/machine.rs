@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
-use crate::memory::{MemoryError, PhysAddr, read_buffer};
+use crate::memory::{MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer};
 use crate::registers::Reg8;
 
 #[cfg(test)]
@@ -82,26 +82,33 @@ impl Machine {
 
     /// Emulates the DOS print string service
     fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let phys_addr = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
-        // TODO: Support memory wrapped at the 20-bit mark
-        let bytes = self
-            .memory
-            .get(phys_addr..)
-            .ok_or(MachineError::PrintStringServiceError(
-                "Memory referenced in dx is out of bounds".to_string(),
-            ))?;
-        if let Some(position) = bytes.iter().position(|&byte| byte == b'$') {
-            io::stdout().write_all(b"\x1b[92m")?;
-            io::stdout().write_all(&bytes[..position])?;
-            io::stdout().write_all(b"\x1b[0m")?;
-            io::stdout().flush()?;
-            // Observed in real DOS
-            self.cpu.set_reg8(Reg8::Al, 0x24);
-            return Ok(InterruptResult::ResumeExecution);
+        let mut phys_addr = PhysAddr::new(self.cpu.ds, self.cpu.dx);
+        let mut buf = vec![];
+        let mut found_dollar = false;
+        for _ in 0..self.memory.len() {
+            let byte = read_byte(&self.memory, phys_addr)?;
+            if byte == b'$' {
+                found_dollar = true;
+                break;
+            }
+            buf.push(byte);
+            phys_addr = phys_addr.wrapping_add(1);
         }
-        return Err(MachineError::PrintStringServiceError(
-            "$ symbol not found in memory".to_string(),
-        ));
+        if !found_dollar {
+            return Err(MachineError::PrintStringServiceError(
+                "$ symbol not found in memory".to_string(),
+            ));
+        }
+
+        io::stdout().write_all(b"\x1b[92m")?;
+        io::stdout().write_all(&buf)?;
+        io::stdout().write_all(b"\x1b[0m")?;
+        io::stdout().flush()?;
+
+        // Observed in real DOS
+        self.cpu.set_reg8(Reg8::Al, 0x24);
+
+        return Ok(InterruptResult::ResumeExecution);
     }
 
     /// Emulates the DOS read service
@@ -113,19 +120,13 @@ impl Machine {
             ));
         }
         let max_bytes = self.cpu.cx as usize;
-        let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
+        let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx);
+        validate_buffer(&self.memory, dest_buffer, max_bytes)?;
 
-        // TODO: Support memory wrapped at the 20-bit mark
-        let Some(mem_mut) = self
-            .memory
-            .get_mut(dest_buffer as usize..dest_buffer as usize + max_bytes)
-        else {
-            return Err(MachineError::ReadServiceError(
-                "Destination buffer too small".to_string(),
-            ));
-        };
-
-        let num_bytes = io::stdin().read(mem_mut)?;
+        let mut temp_buf = vec![0u8; max_bytes];
+        let num_bytes = io::stdin().read(&mut temp_buf)?;
+        temp_buf.truncate(num_bytes);
+        write_buffer(&mut self.memory, dest_buffer, &temp_buf)?;
 
         // Write actual bytes read to AX on success
         self.cpu.ax = num_bytes as u16;

@@ -1,5 +1,8 @@
 use thiserror::Error;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Error, Debug)]
 pub(crate) enum MemoryError {
     #[error("Out of bounds memory access: {0}")]
@@ -78,6 +81,40 @@ pub(crate) fn read_buffer(
         cur_byte = cur_byte.wrapping_add(1);
     }
     Ok(bytes)
+}
+
+pub(crate) fn validate_buffer(
+    memory: &[u8],
+    address: PhysAddr,
+    num_bytes: usize,
+) -> Result<(), MemoryError> {
+    let memory_len = memory.len();
+    let mut cur_byte = address;
+    // Validate every destination address
+    for _ in 0..num_bytes {
+        if cur_byte.as_usize() >= memory_len {
+            return Err(MemoryError::OutOfBoundsAccess(format!("{:#X}", address)));
+        };
+        cur_byte = cur_byte.wrapping_add(1);
+    }
+    Ok(())
+}
+
+pub(crate) fn write_buffer(
+    memory: &mut [u8],
+    address: PhysAddr,
+    buffer: &[u8],
+) -> Result<(), MemoryError> {
+    validate_buffer(memory, address, buffer.len())?;
+
+    // Actually perform the writes
+    let mut cur_byte = address;
+    for i in 0..buffer.len() {
+        write_byte(memory, cur_byte, buffer[i])?;
+        cur_byte = cur_byte.wrapping_add(1);
+    }
+
+    Ok(())
 }
 
 fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), MemoryError> {
