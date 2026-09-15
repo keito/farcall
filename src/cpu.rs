@@ -557,6 +557,11 @@ impl Cpu {
                 // Add the displacement to IP with 16-bit wrapping
                 self.ip = self.ip.wrapping_add(displacement)
             }
+            // CLD
+            0xFC => {
+                print_instruction(byte, &format_args!("cld"));
+                self.set_flag(Flag::Direction, false);
+            }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
         self.trace();
