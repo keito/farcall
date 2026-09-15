@@ -1,5 +1,5 @@
 use super::{Cpu, CpuError, CpuStepResult};
-use crate::memory::PhysAddr;
+use crate::memory::{MemoryError, PhysAddr};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -117,7 +117,10 @@ fn assert_bounds_error(opcode: u8) {
         let result = cpu.step(&mut memory);
 
         assert!(
-            matches!(result, Err(CpuError::OutOfBoundsMemoryAccess(_))),
+            matches!(
+                result,
+                Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+            ),
             "opcode={opcode:02X}, offset={offset:04X}: bounds must use the physical address"
         );
         assert_eq!(registers(&cpu), original_registers);

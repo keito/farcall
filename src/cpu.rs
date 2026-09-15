@@ -1,4 +1,4 @@
-use crate::memory::PhysAddr;
+use crate::memory::{MemoryError, PhysAddr, read_byte, read_word, write_byte, write_word};
 use crate::registers::{Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
@@ -30,14 +30,14 @@ pub(crate) struct Cpu {
 pub(crate) enum CpuError {
     #[error("Unsupported instruction: {0:X}")]
     UnsupportedInstruction(u8),
-    #[error("Out of bounds memory access: {0}")]
-    OutOfBoundsMemoryAccess(String),
     #[error("Unsupported mod field: {0}")]
     UnsupportedModField(u8),
     #[error("Invalid register value: {0}")]
     InvalidRegisterValue(u8),
     #[error("Unsupported r/m field: {0}")]
     UnsupportedRmField(u8),
+    #[error("Memory Error: {0}")]
+    MemoryError(#[from] MemoryError),
 }
 
 pub(crate) enum CpuStepResult {
@@ -451,7 +451,7 @@ impl Cpu {
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
-        write_word(memory, PhysAddr::new(self.ss, self.sp), word)
+        Ok(write_word(memory, PhysAddr::new(self.ss, self.sp), word)?)
     }
 
     fn pop_from_stack(&mut self, memory: &[u8]) -> Result<u16, CpuError> {
@@ -527,42 +527,4 @@ impl Debug for Cpu {
 
 fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
-}
-
-fn write_byte(memory: &mut [u8], address: PhysAddr, value: u8) -> Result<(), CpuError> {
-    let Some(mem_mut) = memory.get_mut(address.as_usize()) else {
-        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
-    };
-    *mem_mut = value;
-    Ok(())
-}
-
-fn read_byte(memory: &[u8], address: PhysAddr) -> Result<u8, CpuError> {
-    let Some(data) = memory.get(address.as_usize()) else {
-        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
-    };
-    Ok(*data)
-}
-
-fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), CpuError> {
-    let byte1 = address.as_usize();
-    // The second byte might wrap
-    let byte2 = (byte1 + 1) & 0xFFFFF;
-    if memory.get(byte1).is_none() || memory.get(byte2).is_none() {
-        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
-    };
-    Ok((byte1, byte2))
-}
-
-fn write_word(memory: &mut [u8], address: PhysAddr, value: u16) -> Result<(), CpuError> {
-    let (byte1, byte2) = calc_word_addr(memory, address)?;
-    let [low, high] = value.to_le_bytes();
-    memory[byte1] = low;
-    memory[byte2] = high;
-    Ok(())
-}
-
-fn read_word(memory: &[u8], address: PhysAddr) -> Result<u16, CpuError> {
-    let (byte1, byte2) = calc_word_addr(memory, address)?;
-    Ok(u16::from_le_bytes([memory[byte1], memory[byte2]]))
 }

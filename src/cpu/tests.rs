@@ -1,4 +1,5 @@
 use super::{Cpu, CpuError, CpuStepResult};
+use crate::memory::MemoryError;
 
 mod addressing;
 mod memory_access;
@@ -776,7 +777,10 @@ fn call_returns_a_stack_bounds_error_without_partially_writing_memory() {
 
         let result = cpu.step(&mut memory);
 
-        assert!(matches!(result, Err(CpuError::OutOfBoundsMemoryAccess(_))));
+        assert!(matches!(
+            result,
+            Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+        ));
         assert_eq!(memory, original_memory);
         assert_eq!(cpu.flags, 0x0FD5);
         // Error recovery / rollback of IP and SP is not specified here.
@@ -796,7 +800,10 @@ fn ret_returns_a_stack_bounds_error_without_consuming_a_word() {
 
         let result = cpu.step(&mut memory);
 
-        assert!(matches!(result, Err(CpuError::OutOfBoundsMemoryAccess(_))));
+        assert!(matches!(
+            result,
+            Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+        ));
         assert_eq!(cpu.sp, initial_sp);
         assert_eq!(cpu.flags, 0x0FD5);
         assert_eq!(memory, original_memory);
@@ -877,7 +884,10 @@ fn pop_ax_returns_a_bounds_error_without_changing_ax_or_sp() {
         let result = cpu.step(&mut memory);
 
         assert!(
-            matches!(result, Err(CpuError::OutOfBoundsMemoryAccess(_))),
+            matches!(
+                result,
+                Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+            ),
             "expected a bounds error with SP={initial_sp:#06X}"
         );
         assert_eq!(cpu.ax, 0x1234, "do not load a partial word");
@@ -1008,7 +1018,10 @@ fn push_ax_returns_a_bounds_error_without_partially_writing_memory() {
         let result = cpu.step(&mut memory);
 
         assert!(
-            matches!(result, Err(CpuError::OutOfBoundsMemoryAccess(_))),
+            matches!(
+                result,
+                Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+            ),
             "expected a bounds error with initial SP={initial_sp:#06X}"
         );
         assert_eq!(

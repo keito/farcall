@@ -4,7 +4,7 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
-use crate::memory::PhysAddr;
+use crate::memory::{MemoryError, PhysAddr};
 use crate::registers::Reg8;
 
 #[cfg(test)]
@@ -32,6 +32,8 @@ enum MachineError {
     WriteServiceError(String),
     #[error("Print String Service error: {0}")]
     PrintStringServiceError(String),
+    #[error("Memory Error: {0}")]
+    MemoryError(#[from] MemoryError),
 }
 
 enum InterruptResult {
