@@ -238,8 +238,10 @@ fn mov_from_segment_register_covers_all_register_encodings() {
                 cpu.ip = 2;
                 cpu.flags = initial_flags;
                 let mod_rm = 0xC0 | ((segment_field as u8) << 3) | destination as u8;
-                let mut memory = [0xCC, 0xCC, 0x8C, mod_rm, 0xCC];
-                let original_memory = memory;
+                let mut memory = vec![0xCC; 0x100000];
+                // CS:IP = 2468:0002, so instruction fetch begins at 24682h.
+                memory[0x24682..0x24684].copy_from_slice(&[0x8C, mod_rm]);
+                let original_memory = memory.clone();
                 let mut expected_registers = initial_registers;
                 expected_registers[destination] = value;
 
@@ -260,8 +262,8 @@ fn mov_from_segment_register_covers_all_register_encodings() {
                 );
                 assert_eq!(cpu.ip, 4, "register form consumes only opcode and ModR/M");
                 assert_eq!(cpu.flags, initial_flags, "MOV preserves every flag");
-                assert_eq!(
-                    memory, original_memory,
+                assert!(
+                    memory == original_memory,
                     "register form must not write memory"
                 );
             }
@@ -271,15 +273,22 @@ fn mov_from_segment_register_covers_all_register_encodings() {
 
 #[test]
 fn mov_ax_cs_copies_the_full_word_without_dereferencing_it() {
-    for value in [0x0000, 0x00FF, 0xFF00, 0x8000, 0xFFFF] {
+    for (value, instruction_address) in [
+        (0x0000, 0x00000),
+        (0x00FF, 0x00FF0),
+        (0xFF00, 0xFF000),
+        (0x8000, 0x80000),
+        (0xFFFF, 0xFFFF0),
+    ] {
         let mut cpu = Cpu::new();
         cpu.ax = 0xA55A;
         cpu.cs = value;
         cpu.flags = 0x0FD7;
-        // Exact first instruction in guess.com. Only instruction bytes exist;
-        // copying CS must not try to read a word at the address stored in CS.
-        // Instruction fetch still uses the emulator's current flat-memory model.
-        let mut memory = [0x8C, 0xC8];
+        // Fetch the game's MOV AX, CS through CS:0000. Its source operand is
+        // still the segment value itself, not the base address or memory there.
+        let mut memory = vec![0xCC; 0x100000];
+        memory[instruction_address..instruction_address + 2].copy_from_slice(&[0x8C, 0xC8]);
+        let original_memory = memory.clone();
 
         let result = cpu.step(&mut memory).expect("MOV AX, CS should succeed");
 
@@ -291,7 +300,10 @@ fn mov_ax_cs_copies_the_full_word_without_dereferencing_it() {
         assert_eq!(cpu.cs, value);
         assert_eq!(cpu.ip, 2);
         assert_eq!(cpu.flags, 0x0FD7);
-        assert_eq!(memory, [0x8C, 0xC8]);
+        assert!(
+            memory == original_memory,
+            "MOV AX, CS must not write memory"
+        );
     }
 }
 

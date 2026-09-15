@@ -461,7 +461,8 @@ impl Cpu {
     }
 
     fn fetch_next_byte_and_advance_ip(&mut self, memory: &[u8]) -> u8 {
-        let byte = memory[self.ip as usize];
+        let phys_addr = PhysAddr::new(self.cs, self.ip);
+        let byte = memory[phys_addr.as_usize()];
         self.ip = self.ip.wrapping_add(1);
         byte
     }
