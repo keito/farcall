@@ -20,7 +20,7 @@ struct Machine {
     handles: Vec<Option<Resource>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 enum Resource {
     Stdin,
     Stdout,
@@ -126,10 +126,16 @@ impl Machine {
 
     /// Emulates the DOS read service
     fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let dest = self.cpu.bx;
-        if dest != 0 {
+        let dest = self.cpu.bx as usize;
+        let Some(Some(resource)) = self.handles.get(dest) else {
+            // Unknown handle
+            self.cpu.ax = 6;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        if *resource != Resource::Stdin {
             return Err(MachineError::ReadServiceError(
-                "Unsupported source in bx".to_string(),
+                "Unsupported resource".to_string(),
             ));
         }
         let max_bytes = self.cpu.cx as usize;
