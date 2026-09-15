@@ -44,6 +44,16 @@ enum MachineStepResult {
 }
 
 impl Machine {
+    /// Emulates the read one character with echo service
+    fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let mut buf = [0u8; 1];
+        io::stdin().read_exact(&mut buf)?;
+        io::stdout().write_all(&buf)?;
+        io::stdout().flush()?;
+        self.cpu.set_reg8(Reg8::Al, buf[0]);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         let num_bytes = self.cpu.cx as usize;
@@ -134,6 +144,7 @@ impl Machine {
                 // AH contains the service ID
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
+                    0x01 => self.read_char_with_echo_service(),
                     0x09 => self.print_string_service(),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
