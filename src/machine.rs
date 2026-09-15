@@ -142,6 +142,16 @@ impl Machine {
         Ok(InterruptResult::Exit((self.cpu.ax & 0xFF) as u8))
     }
 
+    /// Emulates the DOS version service
+    fn dos_version_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // Report DOS version 2.0
+        self.cpu.set_reg8(Reg8::Al, 2);
+        self.cpu.set_reg8(Reg8::Ah, 0);
+        self.cpu.bx = 0;
+        self.cpu.cx = 0;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
             0x20 => Ok(InterruptResult::Exit(0)),
@@ -151,6 +161,7 @@ impl Machine {
                 match service {
                     0x01 => self.read_char_with_echo_service(),
                     0x09 => self.print_string_service(),
+                    0x30 => self.dos_version_service(),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
                     0x4C => self.termination_service(),
