@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
+use crate::memory::PhysAddr;
 use crate::registers::Reg8;
 
 #[cfg(test)]
@@ -57,7 +58,7 @@ impl Machine {
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         let num_bytes = self.cpu.cx as usize;
-        let start_pos = self.cpu.dx as usize;
+        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
         let dest = self.cpu.bx;
         if dest != 1 {
             return Err(MachineError::WriteServiceError(
@@ -65,6 +66,7 @@ impl Machine {
             ));
         }
 
+        // TODO: Support memory wrapped at the 20-bit mark
         if let Some(buffer) = self.memory.get(start_pos..start_pos + num_bytes) {
             io::stdout().write_all(b"\x1b[92m")?;
             io::stdout().write_all(buffer)?;
@@ -84,11 +86,14 @@ impl Machine {
 
     /// Emulates the DOS print string service
     fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let bytes = self.memory.get(self.cpu.dx as usize..).ok_or(
-            MachineError::PrintStringServiceError(
+        let phys_addr = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
+        // TODO: Support memory wrapped at the 20-bit mark
+        let bytes = self
+            .memory
+            .get(phys_addr..)
+            .ok_or(MachineError::PrintStringServiceError(
                 "Memory referenced in dx is out of bounds".to_string(),
-            ),
-        )?;
+            ))?;
         if let Some(position) = bytes.iter().position(|&byte| byte == b'$') {
             io::stdout().write_all(b"\x1b[92m")?;
             io::stdout().write_all(&bytes[..position])?;
@@ -112,8 +117,9 @@ impl Machine {
             ));
         }
         let max_bytes = self.cpu.cx as usize;
-        let dest_buffer = self.cpu.dx as usize;
+        let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx).as_usize();
 
+        // TODO: Support memory wrapped at the 20-bit mark
         let Some(mem_mut) = self
             .memory
             .get_mut(dest_buffer as usize..dest_buffer as usize + max_bytes)
