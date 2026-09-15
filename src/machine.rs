@@ -4,7 +4,6 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
-use crate::machine::Resource::{Console, Stdin};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
@@ -200,6 +199,21 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the Close Handle Service
+    fn close_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let handle_num = self.cpu.get_reg16(Reg16::Bx);
+        if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
+            // Handle is already closed or nonexistent
+            self.cpu.ax = 6;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+
+        self.handles[handle_num as usize] = None;
+        self.cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
             0x10 => self.video_service(),
@@ -211,6 +225,7 @@ impl Machine {
                     0x01 => self.read_char_with_echo_service(),
                     0x09 => self.print_string_service(),
                     0x30 => self.dos_version_service(),
+                    0x3E => self.close_handle_service(),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
                     0x45 => self.duplicate_file_handle_service(),
