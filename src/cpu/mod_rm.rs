@@ -1,19 +1,21 @@
 use std::fmt::{self, Display};
 
-use crate::registers::{Reg8, Reg16};
+use crate::registers::{Reg8, Reg16, SegmentReg};
 
 use super::{Cpu, CpuError};
 
 pub(crate) enum RegisterOrMemoryOperand<T> {
     Register(T),
-    Memory(u16),
+    Memory(SegmentReg, u16),
 }
 
 impl<T: Display> Display for RegisterOrMemoryOperand<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Register(reg) => write!(f, "{}", reg),
-            Self::Memory(addr) => write!(f, "[{:#X}]", addr),
+            Self::Memory(seg_reg, addr) => {
+                write!(f, "[{:}:{:#X}]", seg_reg, addr)
+            }
         }
     }
 }
@@ -33,16 +35,16 @@ pub(super) fn parse_mod_rm(operand: u8) -> ModRmFields {
 }
 
 impl Cpu {
-    fn effective_address_base(&self, rm_field: u8) -> Result<u16, CpuError> {
+    fn effective_address_base(&self, rm_field: u8) -> Result<(SegmentReg, u16), CpuError> {
         match rm_field {
-            0b000 => Ok(self.bx.wrapping_add(self.si)),
-            0b001 => Ok(self.bx.wrapping_add(self.di)),
-            0b010 => Ok(self.bp.wrapping_add(self.si)),
-            0b011 => Ok(self.bp.wrapping_add(self.di)),
-            0b100 => Ok(self.si),
-            0b101 => Ok(self.di),
-            0b110 => Ok(self.bp),
-            0b111 => Ok(self.bx),
+            0b000 => Ok((SegmentReg::Ds, self.bx.wrapping_add(self.si))),
+            0b001 => Ok((SegmentReg::Ds, self.bx.wrapping_add(self.di))),
+            0b010 => Ok((SegmentReg::Ss, self.bp.wrapping_add(self.si))),
+            0b011 => Ok((SegmentReg::Ss, self.bp.wrapping_add(self.di))),
+            0b100 => Ok((SegmentReg::Ds, self.si)),
+            0b101 => Ok((SegmentReg::Ds, self.di)),
+            0b110 => Ok((SegmentReg::Ss, self.bp)),
+            0b111 => Ok((SegmentReg::Ds, self.bx)),
             _ => Err(CpuError::UnsupportedRmField(rm_field)),
         }
     }
@@ -51,30 +53,35 @@ impl Cpu {
         &mut self,
         memory: &[u8],
         fields: ModRmFields,
-    ) -> Result<u16, CpuError> {
+    ) -> Result<(SegmentReg, u16), CpuError> {
         match fields.mod_field {
             0b00 => {
                 // Memory without displacement
                 if fields.rm_field == 0b110 {
                     // Special case for direct memory [disp16]
                     let word = self.fetch_next_word_and_advance_ip(memory);
-                    Ok(word)
+                    Ok((SegmentReg::Ds, word))
                 } else {
-                    let base_address = self.effective_address_base(fields.rm_field)?;
-                    Ok(base_address)
+                    self.effective_address_base(fields.rm_field)
                 }
             }
             0b01 => {
                 // Memory with an 8-bit displacement
-                let base_address = self.effective_address_base(fields.rm_field)?;
+                let (seg_reg, base_address) = self.effective_address_base(fields.rm_field)?;
                 let displacement = self.fetch_next_byte_and_advance_ip(memory);
-                Ok(base_address.wrapping_add_signed((displacement as i8) as i16))
+                Ok((
+                    seg_reg,
+                    base_address.wrapping_add_signed((displacement as i8) as i16),
+                ))
             }
             0b10 => {
                 // Memory with a 16-bit displacement
-                let base_address = self.effective_address_base(fields.rm_field)?;
+                let (seg_reg, base_address) = self.effective_address_base(fields.rm_field)?;
                 let displacement = self.fetch_next_word_and_advance_ip(memory);
-                Ok(base_address.wrapping_add_signed(displacement as i16))
+                Ok((
+                    seg_reg,
+                    base_address.wrapping_add_signed(displacement as i16),
+                ))
             }
             0b11 => unreachable!("Caller should handle 0b11"),
             _ => Err(CpuError::UnsupportedModField(fields.mod_field)),
@@ -87,9 +94,10 @@ impl Cpu {
         fields: ModRmFields,
     ) -> Result<RegisterOrMemoryOperand<Reg8>, CpuError> {
         match fields.mod_field {
-            0b00 | 0b01 | 0b10 => Ok(RegisterOrMemoryOperand::Memory(
-                self.decode_effective_address(memory, fields)?,
-            )),
+            0b00 | 0b01 | 0b10 => {
+                let (seg_reg, addr) = self.decode_effective_address(memory, fields)?;
+                Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
+            }
             0b11 => {
                 // Register
                 let rm_reg = Reg8::try_from(fields.rm_field)?;
@@ -105,9 +113,10 @@ impl Cpu {
         fields: ModRmFields,
     ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
         match fields.mod_field {
-            0b00 | 0b01 | 0b10 => Ok(RegisterOrMemoryOperand::Memory(
-                self.decode_effective_address(memory, fields)?,
-            )),
+            0b00 | 0b01 | 0b10 => {
+                let (seg_reg, addr) = self.decode_effective_address(memory, fields)?;
+                Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
+            }
             0b11 => {
                 // Register
                 let rm_reg = Reg16::try_from(fields.rm_field)?;

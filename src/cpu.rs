@@ -290,7 +290,9 @@ impl Cpu {
                 // Read the value in the register
                 let value = self.get_reg8(reg);
                 match rm {
-                    RegisterOrMemoryOperand::Memory(addr) => write_byte(memory, addr, value)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        write_byte(memory, addr, value)?
+                    }
                     RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
                 }
             }
@@ -302,7 +304,7 @@ impl Cpu {
 
                 print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = match rm {
-                    RegisterOrMemoryOperand::Memory(addr) => read_byte(memory, addr)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => read_byte(memory, addr)?,
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
                 };
                 self.set_reg8(reg, value);
@@ -317,7 +319,9 @@ impl Cpu {
 
                 let value = self.get_segment_reg(source_segment);
                 match rm {
-                    RegisterOrMemoryOperand::Memory(addr) => write_word(memory, addr, value)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                        write_word(memory, addr, value)?
+                    }
                     RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
                 }
             }
@@ -330,8 +334,8 @@ impl Cpu {
                 let rm = self.decode_rm16_operand(memory, parsed)?;
                 print_instruction(byte, &format_args!("lea {}, {}", dest_reg, rm));
                 match rm {
-                    // We write the address, not the memory at address
-                    RegisterOrMemoryOperand::Memory(addr) => self.set_reg16(dest_reg, addr),
+                    // We write the address, not the memory at address. We ignore the segment.
+                    RegisterOrMemoryOperand::Memory(_, addr) => self.set_reg16(dest_reg, addr),
                     RegisterOrMemoryOperand::Register(_) => {
                         // LEA can only have a memory source
                         return Err(CpuError::UnsupportedModField(mod_field));
@@ -347,7 +351,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
 
                 let value = match rm {
-                    RegisterOrMemoryOperand::Memory(addr) => read_word(memory, addr)?,
+                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => read_word(memory, addr)?,
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
                 };
                 self.set_segment_reg(dest_segment, value);
