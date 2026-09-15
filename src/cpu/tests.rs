@@ -1,6 +1,193 @@
 use super::{Cpu, CpuError, CpuStepResult};
 
 #[test]
+fn cmp_al_updates_arithmetic_flags_without_changing_registers_or_memory() {
+    // CF=0001, PF=0004, AF=0010, ZF=0040, SF=0080, OF=0800.
+    let arithmetic_flags = 0x08D5;
+    for (al, immediate, expected_flags) in [
+        (0x61u8, 0x61, 0x0044), // Equal: zero result has even parity.
+        (0x60, 0x61, 0x0095),   // Unsigned borrow; temporary result FF.
+        (0x7B, 0x7A, 0x0000),   // Above: temporary result 01.
+        (0x10, 0x01, 0x0014),   // Nibble borrow and even parity, without CF.
+        (0x80, 0x01, 0x0810),   // -128 - 1: signed overflow to +127.
+        (0x7F, 0xFF, 0x0881),   // +127 - (-1): signed overflow to -128.
+        (0xFF, 0x00, 0x0084),   // High unsigned value; no borrow or overflow.
+        (0x00, 0xFF, 0x0011),   // Unsigned borrow without signed overflow.
+    ] {
+        // Exercise setting flags and clearing stale ones; preserve control flags.
+        for initial_flags in [0x0000, 0x0FD7] {
+            let mut cpu = Cpu::new();
+            cpu.ax = 0xAB00 | al as u16;
+            cpu.ip = 0x0100;
+            cpu.flags = initial_flags;
+            let registers = (
+                cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
+            );
+            let mut memory = vec![0xCC; 0x0200];
+            memory[0x0100..0x0102].copy_from_slice(&[0x3C, immediate]);
+            let original_memory = memory.clone();
+
+            let result = cpu.step(&mut memory).expect("CMP AL should succeed");
+
+            assert!(matches!(result, CpuStepResult::Continue));
+            assert_eq!(cpu.ip, 0x0102);
+            assert_eq!(
+                cpu.flags,
+                (initial_flags & !arithmetic_flags) | expected_flags,
+                "AL={al:#04X}, immediate={immediate:#04X}, initial flags={initial_flags:#06X}"
+            );
+            assert_eq!(
+                (
+                    cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp
+                ),
+                registers,
+                "CMP must not store the subtraction result"
+            );
+            assert_eq!(memory, original_memory);
+        }
+    }
+}
+
+#[test]
+fn jb_depends_only_on_carry() {
+    // Explicitly cover every CF/ZF combination, including both set.
+    for (condition_flags, expected_ip) in [
+        (0x0000, 0x0102),
+        (0x0001, 0x0107),
+        (0x0040, 0x0102),
+        (0x0041, 0x0107),
+    ] {
+        for other_flags in [0, 0x0F94] {
+            assert_unsigned_jump(
+                0x72,
+                condition_flags | other_flags,
+                0x0100,
+                0x05,
+                expected_ip,
+            );
+        }
+    }
+}
+
+#[test]
+fn ja_requires_both_carry_and_zero_clear() {
+    for (condition_flags, expected_ip) in [
+        (0x0000, 0x0107),
+        (0x0001, 0x0102),
+        (0x0040, 0x0102),
+        (0x0041, 0x0102),
+    ] {
+        for other_flags in [0, 0x0F94] {
+            assert_unsigned_jump(
+                0x77,
+                condition_flags | other_flags,
+                0x0100,
+                0x05,
+                expected_ip,
+            );
+        }
+    }
+}
+
+#[test]
+fn jb_and_ja_use_signed_displacements_from_the_next_ip() {
+    for (opcode, taken_flags, untaken_flags) in [(0x72, 0x0001, 0x0000), (0x77, 0x0000, 0x0040)] {
+        for (displacement, target) in [
+            (0x00, 0x0102),
+            (0x01, 0x0103),
+            (0x7F, 0x0181), // Largest positive rel8: +127.
+            (0x80, 0x0082), // Most negative rel8: -128.
+            (0xFE, 0x0100), // -2 branches back to the opcode.
+            (0xFF, 0x0101), // -1 branches to the displacement byte.
+        ] {
+            assert_unsigned_jump(opcode, taken_flags, 0x0100, displacement, target);
+            assert_unsigned_jump(opcode, untaken_flags, 0x0100, displacement, 0x0102);
+        }
+    }
+}
+
+#[test]
+fn jb_and_ja_wrap_targets_and_instruction_fetch_at_16_bits() {
+    for (opcode, taken_flags, untaken_flags) in [(0x72, 0x0001, 0x0000), (0x77, 0x0000, 0x0040)] {
+        // Starting IP, rel8, taken IP, untaken IP.
+        for (start, displacement, target, next) in [
+            (0x7FFD, 0x01, 0x8000, 0x7FFF),
+            (0x7FFE, 0xFF, 0x7FFF, 0x8000),
+            (0xFFFD, 0x02, 0x0001, 0xFFFF),
+            (0x0000, 0xFD, 0xFFFF, 0x0002),
+            (0xFFFE, 0x00, 0x0000, 0x0000),
+            (0xFFFF, 0xFE, 0xFFFF, 0x0001), // Displacement fetched at 0000.
+        ] {
+            assert_unsigned_jump(opcode, taken_flags, start, displacement, target);
+            assert_unsigned_jump(opcode, untaken_flags, start, displacement, next);
+        }
+    }
+}
+
+fn assert_unsigned_jump(opcode: u8, flags: u16, start: u16, displacement: u8, expected_ip: u16) {
+    let mut cpu = Cpu::new();
+    cpu.ip = start;
+    cpu.flags = flags;
+    let registers = (
+        cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
+    );
+    let mut memory = vec![0xCC; 0x10000];
+    memory[start as usize] = opcode;
+    memory[start.wrapping_add(1) as usize] = displacement;
+    let original_memory = memory.clone();
+
+    // Execute one instruction even when the target would loop or contain data.
+    let result = cpu
+        .step(&mut memory)
+        .expect("conditional jump should succeed");
+
+    assert!(matches!(result, CpuStepResult::Continue));
+    assert_eq!(
+        cpu.ip, expected_ip,
+        "opcode={opcode:#04X}, flags={flags:#06X}, start={start:#06X}, rel8={displacement:#04X}"
+    );
+    assert_eq!(cpu.flags, flags, "jumps must preserve every flag");
+    assert_eq!(
+        (
+            cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp
+        ),
+        registers
+    );
+    assert_eq!(memory, original_memory);
+}
+
+#[test]
+fn cmp_then_jb_or_ja_handles_ascii_boundaries_and_unsigned_bytes() {
+    for (al, immediate, opcode, expected_ip) in [
+        (b'`', b'a', 0x72, 0x0107), // Below lowercase range.
+        (b'a', b'a', 0x72, 0x0104), // Lower boundary is included.
+        (b'z', b'z', 0x77, 0x0104), // Upper boundary is included.
+        (b'{', b'z', 0x77, 0x0107), // Above lowercase range.
+        (0xFF, b'a', 0x72, 0x0104), // FF is large unsigned, not negative.
+        (0xFF, b'z', 0x77, 0x0107),
+    ] {
+        let mut cpu = Cpu::new();
+        cpu.ax = 0xAB00 | al as u16;
+        cpu.ip = 0x0100;
+        cpu.flags = 0x0FD7;
+        let mut memory = vec![0xCC; 0x0200];
+        memory[0x0100..0x0104].copy_from_slice(&[0x3C, immediate, opcode, 0x03]);
+
+        let cmp = cpu.step(&mut memory).expect("CMP should succeed");
+        assert!(matches!(cmp, CpuStepResult::Continue));
+        let comparison_flags = cpu.flags;
+        let jump = cpu
+            .step(&mut memory)
+            .expect("jump after CMP should succeed");
+
+        assert!(matches!(jump, CpuStepResult::Continue));
+        assert_eq!(cpu.ip, expected_ip);
+        assert_eq!(cpu.ax, 0xAB00 | al as u16);
+        assert_eq!(cpu.flags, comparison_flags);
+    }
+}
+
+#[test]
 fn call_uses_displacement_from_next_ip_and_saves_return_address() {
     for (start_ip, displacement, target) in [
         (0x0100u16, 0x0000u16, 0x0103),
@@ -710,4 +897,3 @@ fn fetch_word_reads_little_endian_and_advances_ip() {
     assert_eq!(word, 0x1234);
     assert_eq!(cpu.ip, 4);
 }
-
