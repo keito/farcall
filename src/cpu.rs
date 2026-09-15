@@ -333,6 +333,12 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov di, {:X}h", operand));
                 self.di = operand;
             }
+            // JMP
+            0xEB => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jmp {:X}h", operand));
+                self.ip = self.ip.wrapping_add_signed(operand as i16);
+            }
             // RET
             0xC3 => {
                 print_instruction(byte, &format_args!("ret"));
