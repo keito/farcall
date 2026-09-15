@@ -469,6 +469,27 @@ impl Cpu {
                 print_instruction(byte, &format_args!("ret"));
                 self.ip = self.pop_from_stack(memory)?;
             }
+            // MOV r/m8, imm8
+            0xC6 => {
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                if parsed.reg_field != 0 {
+                    // The register value is required to be 0
+                    return Err(CpuError::InvalidRegisterValue(parsed.reg_field));
+                }
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+
+                print_instruction(byte, &format_args!("mov {}, {}", rm, immediate));
+                match rm {
+                    RegisterOrMemoryOperand::Register(reg) => {
+                        self.set_reg8(reg, immediate);
+                    }
+                    RegisterOrMemoryOperand::Memory(seg_reg, offset) => {
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        write_byte(memory, PhysAddr::new(seg_addr, offset), immediate)?;
+                    }
+                }
+            }
             // Interrupts
             0xCD => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);

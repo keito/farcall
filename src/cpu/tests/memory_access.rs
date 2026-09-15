@@ -26,6 +26,92 @@ fn cpu_for_memory_access() -> Cpu {
     cpu
 }
 
+#[test]
+fn c6_writes_each_byte_register_preserving_its_other_half_and_flags() {
+    // Register field order: AL, CL, DL, BL, AH, CH, DH, BH.
+    let expected_words = [
+        0xA5E7, 0x12E7, 0x56E7, 0x03E7, 0xE75A, 0xE734, 0xE778, 0xE700,
+    ];
+    for (destination, expected_word) in expected_words.into_iter().enumerate() {
+        for flags in [0x0000, 0x0FD7] {
+            let mut cpu = cpu_for_memory_access();
+            cpu.flags = flags;
+            let mut expected_registers = registers(&cpu);
+            expected_registers[destination % 4] = expected_word;
+            let mut memory = vec![0xCC; 0x0200];
+            memory[0x0100..0x0103].copy_from_slice(&[0xC6, 0xC0 | destination as u8, 0xE7]);
+            let original_memory = memory.clone();
+
+            let result = cpu.step(&mut memory).expect("MOV r8, imm8 should succeed");
+
+            assert!(matches!(result, CpuStepResult::Continue));
+            assert_eq!(
+                registers(&cpu),
+                expected_registers,
+                "destination={destination}"
+            );
+            assert_eq!(cpu.ip, 0x0103);
+            assert_eq!(cpu.flags, flags);
+            assert_eq!(memory, original_memory);
+        }
+    }
+}
+
+#[test]
+fn c6_memory_consumes_displacement_before_immediate_and_uses_default_segment() {
+    for (instruction, physical) in [
+        (&[0xC6, 0x06, 0xE5, 0x01, 25][..], 0x101E5), // MORE: [DS:01E5].
+        (&[0xC6, 0x04, 0x80][..], 0x10800),           // [SI], no displacement.
+        (&[0xC6, 0x46, 0xFE, 0x00][..], 0x207FE),     // [BP-2], signed disp8, SS.
+        (&[0xC6, 0x80, 0x34, 0x12, 0xFF][..], 0x11D34), // [BX+SI+1234], disp16.
+    ] {
+        for flags in [0x0000, 0x0FD7] {
+            let mut cpu = cpu_for_memory_access();
+            cpu.flags = flags;
+            let original_registers = registers(&cpu);
+            let mut memory = vec![0xCC; 0x30000];
+            memory[0x0100..0x0100 + instruction.len()].copy_from_slice(instruction);
+            let mut expected_memory = memory.clone();
+            expected_memory[physical] = *instruction.last().unwrap();
+
+            let result = cpu.step(&mut memory).expect("MOV m8, imm8 should succeed");
+
+            assert!(matches!(result, CpuStepResult::Continue));
+            assert_eq!(registers(&cpu), original_registers);
+            assert_eq!(cpu.ip, 0x0100 + instruction.len() as u16);
+            assert_eq!(cpu.flags, flags);
+            assert!(
+                memory == expected_memory,
+                "instruction={instruction:02X?}: only the destination byte should change"
+            );
+        }
+    }
+}
+
+#[test]
+fn c6_rejects_nonzero_opcode_extensions_without_writing() {
+    for extension in 1..=7 {
+        let mut cpu = cpu_for_memory_access();
+        let original_registers = registers(&cpu);
+        let mut memory = vec![0xCC; 0x0200];
+        memory[0x0100..0x0103].copy_from_slice(&[0xC6, 0xC0 | (extension << 3), 0xE7]);
+        let original_memory = memory.clone();
+
+        let result = cpu.step(&mut memory);
+
+        assert!(
+            matches!(
+                result,
+                Err(CpuError::InvalidRegisterValue(actual)) if actual == extension
+            ),
+            "must report the rejected extension {extension}"
+        );
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, original_memory);
+    }
+}
+
 fn assert_access(mut cpu: Cpu, opcode: u8, operand: &[u8], low: usize, high: usize) {
     let mut memory = vec![0xCC; 0x100000];
     memory[0x0100] = opcode;
