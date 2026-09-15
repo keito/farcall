@@ -103,14 +103,14 @@ impl Cpu {
 
     fn get_reg8(&self, reg: Reg8) -> u8 {
         (match reg {
-            Reg8::Al => self.ax & 0x00FF,
-            Reg8::Bl => self.bx & 0x00FF,
-            Reg8::Cl => self.cx & 0x00FF,
-            Reg8::Dl => self.dx & 0x00FF,
-            Reg8::Ah => (self.ax & 0xFF00) >> 8,
-            Reg8::Bh => (self.bx & 0xFF00) >> 8,
-            Reg8::Ch => (self.cx & 0xFF00) >> 8,
-            Reg8::Dh => (self.dx & 0xFF00) >> 8,
+            Reg8::Al => self.ax,
+            Reg8::Bl => self.bx,
+            Reg8::Cl => self.cx,
+            Reg8::Dl => self.dx,
+            Reg8::Ah => self.ax >> 8,
+            Reg8::Bh => self.bx >> 8,
+            Reg8::Ch => self.cx >> 8,
+            Reg8::Dh => self.dx >> 8,
         }) as u8
     }
 
@@ -386,8 +386,7 @@ impl Cpu {
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
         if let Some(mem_mut) = memory.get_mut(self.sp as usize..self.sp as usize + 2) {
-            mem_mut[0] = word as u8;
-            mem_mut[1] = (word >> 8) as u8;
+            mem_mut.copy_from_slice(&word.to_le_bytes());
             Ok(())
         } else {
             return Err(CpuError::OutOfBoundsMemoryAccess(
@@ -399,7 +398,7 @@ impl Cpu {
     fn pop_from_stack(&mut self, memory: &mut [u8]) -> Result<u16, CpuError> {
         let value;
         if let Some(mem) = memory.get(self.sp as usize..self.sp as usize + 2) {
-            value = (mem[0] as u16) | ((mem[1] as u16) << 8);
+            value = u16::from_le_bytes([mem[0], mem[1]]);
         } else {
             return Err(CpuError::OutOfBoundsMemoryAccess(
                 "pop_from_stack".to_string(),
@@ -428,23 +427,23 @@ impl Cpu {
     /// from an 8-bit register and setting the correct flags.
     fn subtract_immediate8(&mut self, reg: Reg8, operand: u8) -> u8 {
         let old_reg = self.get_reg8(reg);
-        let new_al = old_reg.wrapping_sub(operand);
+        let (result, borrow) = old_reg.overflowing_sub(operand);
 
         // Carry flag: did subtraction require a borrow?
-        self.set_flag(Flag::Carry, old_reg < operand);
+        self.set_flag(Flag::Carry, borrow);
         // Set or clear the zero flag
-        self.set_flag(Flag::Zero, new_al == 0);
+        self.set_flag(Flag::Zero, result == 0);
         // Overflow: (1) old_reg and operand have different signs, AND
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
-            ((old_reg & 0x80) != (operand & 0x80)) && ((new_al & 0x80) != (old_reg & 0x80)),
+            ((old_reg & 0x80) != (operand & 0x80)) && ((result & 0x80) != (old_reg & 0x80)),
         );
-        self.set_flag(Flag::Sign, new_al & (1 << 7) != 0);
-        self.set_flag(Flag::Parity, new_al.count_ones() % 2 == 0);
+        self.set_flag(Flag::Sign, result & (1 << 7) != 0);
+        self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
         self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
 
-        new_al
+        result
     }
 
     pub(crate) fn trace(&self) {
