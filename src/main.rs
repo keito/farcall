@@ -2,6 +2,7 @@ use std::{env, process};
 
 mod cpu;
 mod machine;
+mod registers;
 
 fn main() {
     let args: Vec<String> = env::args().collect();

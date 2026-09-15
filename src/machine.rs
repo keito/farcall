@@ -3,7 +3,8 @@ use std::fs;
 use std::io::{self, Read, Write};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuStepResult, Flag, Reg8};
+use crate::cpu::{Cpu, CpuStepResult, Flag};
+use crate::registers::Reg8;
 
 #[cfg(test)]
 mod tests;
@@ -164,6 +165,7 @@ impl Machine {
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     let memory_size = 65_536;
     let begin_offset = 0x100;
+
     let mut machine = Machine {
         cpu: Cpu::new(),
         memory: vec![0; memory_size],
@@ -187,7 +189,6 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
         return Err(MachineError::NotEnoughMemory(begin_offset + data.len(), memory_size).into());
     }
     machine.memory[begin_offset..begin_offset + data.len()].copy_from_slice(&data);
-    // Start executing at begin_offset
     machine.cpu.ip = begin_offset as u16;
 
     machine.cpu.trace();

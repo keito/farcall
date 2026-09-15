@@ -1,6 +1,104 @@
 use super::{Cpu, CpuError, CpuStepResult};
 
 #[test]
+fn mov_from_segment_register_covers_all_register_encodings() {
+    // Segment field order: ES, CS, SS, DS.
+    // Destination order: AX, CX, DX, BX, SP, BP, SI, DI.
+    let segment_values = [0x1357, 0x2468, 0x9ABC, 0xDEF0];
+    let initial_registers = [
+        0xA001, 0xA102, 0xA203, 0xA304, 0xA405, 0xA506, 0xA607, 0xA708,
+    ];
+    for (segment_field, &value) in segment_values.iter().enumerate() {
+        for destination in 0..8 {
+            for initial_flags in [0x0000, 0x0FD7] {
+                let mut cpu = Cpu::new();
+                [
+                    cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
+                ] = initial_registers;
+                [cpu.es, cpu.cs, cpu.ss, cpu.ds] = segment_values;
+                cpu.ip = 2;
+                cpu.flags = initial_flags;
+                let mod_rm = 0xC0 | ((segment_field as u8) << 3) | destination as u8;
+                let mut memory = [0xCC, 0xCC, 0x8C, mod_rm, 0xCC];
+                let original_memory = memory;
+                let mut expected_registers = initial_registers;
+                expected_registers[destination] = value;
+
+                let result = cpu.step(&mut memory).expect("MOV r16, Sreg should succeed");
+
+                assert!(matches!(result, CpuStepResult::Continue));
+                assert_eq!(
+                    [
+                        cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di
+                    ],
+                    expected_registers,
+                    "8C {mod_rm:02X} must change only its destination register"
+                );
+                assert_eq!(
+                    [cpu.es, cpu.cs, cpu.ss, cpu.ds],
+                    segment_values,
+                    "8C reads the segment register; it must not write it"
+                );
+                assert_eq!(cpu.ip, 4, "register form consumes only opcode and ModR/M");
+                assert_eq!(cpu.flags, initial_flags, "MOV preserves every flag");
+                assert_eq!(
+                    memory, original_memory,
+                    "register form must not write memory"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mov_ax_cs_copies_the_full_word_without_dereferencing_it() {
+    for value in [0x0000, 0x00FF, 0xFF00, 0x8000, 0xFFFF] {
+        let mut cpu = Cpu::new();
+        cpu.ax = 0xA55A;
+        cpu.cs = value;
+        cpu.flags = 0x0FD7;
+        // Exact first instruction in guess.com. Only instruction bytes exist;
+        // copying CS must not try to read a word at the address stored in CS.
+        // Instruction fetch still uses the emulator's current flat-memory model.
+        let mut memory = [0x8C, 0xC8];
+
+        let result = cpu.step(&mut memory).expect("MOV AX, CS should succeed");
+
+        assert!(matches!(result, CpuStepResult::Continue));
+        assert_eq!(
+            cpu.ax, value,
+            "replace both halves of AX with CS={value:#06X}"
+        );
+        assert_eq!(cpu.cs, value);
+        assert_eq!(cpu.ip, 2);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, [0x8C, 0xC8]);
+    }
+}
+
+#[test]
+fn mov_from_segment_register_wraps_ip_when_fetching_mod_rm() {
+    let mut cpu = Cpu::new();
+    cpu.ip = 0xFFFF;
+    cpu.ds = 0xBEEF;
+    cpu.di = 0x1234;
+    cpu.flags = 0x0FD7;
+    let mut memory = vec![0xCC; 0x10000];
+    memory[0xFFFF] = 0x8C;
+    memory[0] = 0xDF; // MOV DI, DS: mod=11, segment=011, destination=111.
+    let original_memory = memory.clone();
+
+    let result = cpu.step(&mut memory).expect("ModR/M fetch should wrap IP");
+
+    assert!(matches!(result, CpuStepResult::Continue));
+    assert_eq!(cpu.di, 0xBEEF);
+    assert_eq!(cpu.ds, 0xBEEF);
+    assert_eq!(cpu.ip, 1);
+    assert_eq!(cpu.flags, 0x0FD7);
+    assert_eq!(memory, original_memory);
+}
+
+#[test]
 fn cmp_al_updates_arithmetic_flags_without_changing_registers_or_memory() {
     // CF=0001, PF=0004, AF=0010, ZF=0040, SF=0080, OF=0800.
     let arithmetic_flags = 0x08D5;

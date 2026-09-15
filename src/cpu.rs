@@ -1,6 +1,9 @@
+use crate::registers::{Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
-use std::fmt::Display;
+use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
 use thiserror::Error;
+
+mod mod_rm;
 
 #[cfg(test)]
 mod tests;
@@ -15,6 +18,10 @@ pub(crate) struct Cpu {
     pub(crate) sp: u16,
     pub(crate) bp: u16,
     pub(crate) ip: u16,
+    pub(crate) cs: u16,
+    pub(crate) ds: u16,
+    pub(crate) es: u16,
+    pub(crate) ss: u16,
     pub(crate) flags: u16,
 }
 
@@ -51,62 +58,22 @@ pub(crate) enum Flag {
     Trap = 8,            // TF
 }
 
-#[allow(dead_code)]
-pub(crate) enum Reg8 {
-    Al = 0b000,
-    Cl = 0b001,
-    Dl = 0b010,
-    Bl = 0b011,
-    Ah = 0b100,
-    Ch = 0b101,
-    Dh = 0b110,
-    Bh = 0b111,
-}
-
-impl fmt::Display for Reg8 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Reg8::Al => write!(f, "al"),
-            Reg8::Cl => write!(f, "cl"),
-            Reg8::Dl => write!(f, "dl"),
-            Reg8::Bl => write!(f, "bl"),
-            Reg8::Ah => write!(f, "ah"),
-            Reg8::Ch => write!(f, "ch"),
-            Reg8::Dh => write!(f, "dh"),
-            Reg8::Bh => write!(f, "bh"),
-        }
-    }
-}
-
-impl TryFrom<u8> for Reg8 {
-    type Error = CpuError;
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            0b000 => Ok(Reg8::Al),
-            0b001 => Ok(Reg8::Cl),
-            0b010 => Ok(Reg8::Dl),
-            0b011 => Ok(Reg8::Bl),
-            0b100 => Ok(Reg8::Ah),
-            0b101 => Ok(Reg8::Ch),
-            0b110 => Ok(Reg8::Dh),
-            0b111 => Ok(Reg8::Bh),
-            _ => Err(CpuError::InvalidRegisterValue(value)),
-        }
-    }
-}
-
 impl Cpu {
     pub(crate) fn new() -> Self {
         Cpu {
-            ax: 0x1234,
-            bx: 0x1234,
-            cx: 0x1234,
-            dx: 0x1234,
-            si: 0x1234,
-            di: 0x1234,
-            sp: 0x1234,
-            bp: 0x1234,
+            ax: 0x0,
+            bx: 0x0,
+            cx: 0x0,
+            dx: 0x0,
+            si: 0x0,
+            di: 0x0,
+            sp: 0x0,
+            bp: 0x0,
             ip: 0x0,
+            cs: 0x0,
+            ds: 0x0,
+            es: 0x0,
+            ss: 0x0,
             flags: 0,
         }
     }
@@ -147,6 +114,28 @@ impl Cpu {
         }) as u8
     }
 
+    fn get_segment_reg(&self, reg: SegmentReg) -> u16 {
+        match reg {
+            SegmentReg::Es => self.es,
+            SegmentReg::Cs => self.cs,
+            SegmentReg::Ss => self.ss,
+            SegmentReg::Ds => self.ds,
+        }
+    }
+
+    fn set_reg16(&mut self, reg: Reg16, value: u16) {
+        match reg {
+            Reg16::Ax => self.ax = value,
+            Reg16::Cx => self.cx = value,
+            Reg16::Dx => self.dx = value,
+            Reg16::Bx => self.bx = value,
+            Reg16::Sp => self.sp = value,
+            Reg16::Bp => self.bp = value,
+            Reg16::Si => self.si = value,
+            Reg16::Di => self.di = value,
+        }
+    }
+
     /// Fetch, decode, and execute one instruction
     pub(crate) fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
@@ -157,14 +146,14 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let new_val = self.sub_imm8(Reg8::Al, operand);
+                let new_val = self.subtract_immediate8(Reg8::Al, operand);
                 self.set_reg8(Reg8::Al, new_val);
             }
             0x3C => {
                 // CMP AL - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
-                self.sub_imm8(Reg8::Al, operand);
+                self.subtract_immediate8(Reg8::Al, operand);
             }
             0x46 => {
                 print_instruction(byte, &format_args!("inc si"));
@@ -241,13 +230,15 @@ impl Cpu {
             // MOVs
             0x88 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let decoded = self.decode_mod_r_m8(memory, operand)?;
+                let parsed = parse_mod_rm(operand);
+                let reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
 
-                print_instruction(byte, &format_args!("mov {}, {}", decoded.rm, decoded.reg));
+                print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
 
                 // Read the value in the register
-                let value = self.get_reg8(decoded.reg);
-                match decoded.rm {
+                let value = self.get_reg8(reg);
+                match rm {
                     RegisterOrMemoryOperand::Memory(memory_addr) => {
                         if let Some(mem_mut) = memory.get_mut(memory_addr as usize) {
                             *mem_mut = value;
@@ -263,10 +254,12 @@ impl Cpu {
             }
             0x8A => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let decoded = self.decode_mod_r_m8(memory, operand)?;
+                let parsed = parse_mod_rm(operand);
+                let reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
 
-                print_instruction(byte, &format_args!("mov {}, {}", decoded.reg, decoded.rm));
-                let value = match decoded.rm {
+                print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
+                let value = match rm {
                     RegisterOrMemoryOperand::Memory(memory_addr) => {
                         if let Some(data) = memory.get(memory_addr as usize) {
                             *data
@@ -279,7 +272,32 @@ impl Cpu {
                     }
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
                 };
-                self.set_reg8(decoded.reg, value);
+                self.set_reg8(reg, value);
+            }
+            0x8C => {
+                // MOV r/m16, segment register
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_segment = SegmentReg::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("mov {}, {}", rm, source_segment));
+
+                let value = self.get_segment_reg(source_segment);
+                match rm {
+                    RegisterOrMemoryOperand::Memory(memory_addr) => {
+                        if let Some(mem_mut) =
+                            memory.get_mut(memory_addr as usize..memory_addr as usize + 2)
+                        {
+                            mem_mut.copy_from_slice(&value.to_le_bytes());
+                        } else {
+                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
+                                "Address {:#X}",
+                                memory_addr
+                            )));
+                        }
+                    }
+                    RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
+                }
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
@@ -402,11 +420,13 @@ impl Cpu {
         let lob = self.fetch_next_byte_and_advance_ip(memory);
         // The next byte is the high-order byte
         let hob = self.fetch_next_byte_and_advance_ip(memory);
-        // Combine the low and high bytes into a 16-bit value
-        (lob as u16) | ((hob as u16) << 8)
+
+        u16::from_le_bytes([lob, hob])
     }
 
-    fn sub_imm8(&mut self, reg: Reg8, operand: u8) -> u8 {
+    /// Implements shared functionality for subtracting an 8-bit immediate
+    /// from an 8-bit register and setting the correct flags.
+    fn subtract_immediate8(&mut self, reg: Reg8, operand: u8) -> u8 {
         let old_reg = self.get_reg8(reg);
         let new_al = old_reg.wrapping_sub(operand);
 
@@ -430,59 +450,6 @@ impl Cpu {
     pub(crate) fn trace(&self) {
         eprintln!("{:?}", self);
     }
-
-    fn effective_address_base(&self, rm_field: u8) -> Result<u16, CpuError> {
-        match rm_field {
-            // 0b000 => {} // BX+SI
-            // 0b001 => {} // BX+DI
-            // 0b010 => {} // BP+SI
-            // 0b011 => {} // BP+DI
-            0b100 => Ok(self.si),
-            0b101 => Ok(self.di),
-            // 0b110 => {} // BP (except in exception handled separately)
-            // 0b111 => {} // BX
-            _ => Err(CpuError::UnsupportedRmField(rm_field)),
-        }
-    }
-
-    fn decode_mod_r_m8(&mut self, memory: &[u8], operand: u8) -> Result<DecodedModRm8, CpuError> {
-        let mod_field = operand >> 6;
-        let reg_field = (operand & 0x3F) >> 3;
-        let rm_field = operand & 0x7;
-
-        let reg = Reg8::try_from(reg_field)?;
-        let rm = match mod_field {
-            0b00 => {
-                // Memory without displacement
-                if rm_field == 0b110 {
-                    // Exception for direct memory [disp16]
-                    todo!("[disp16]");
-                }
-                let base_address = self.effective_address_base(rm_field)?;
-                Ok(RegisterOrMemoryOperand::Memory(base_address))
-            }
-            0b01 => {
-                // Memory with an 8-bit displacement
-                let base_address = self.effective_address_base(rm_field)?;
-                // Get displacement
-                let displacement = self.fetch_next_byte_and_advance_ip(memory);
-                Ok(RegisterOrMemoryOperand::Memory(
-                    base_address.wrapping_add_signed((displacement as i8) as i16),
-                ))
-            }
-            // 0b10 => {
-            //     // Memory with a 16-bit displacement
-            //     panic!("I'm so sorry")
-            // }
-            0b11 => {
-                // Register
-                let rm_reg = Reg8::try_from(rm_field)?;
-                Ok(RegisterOrMemoryOperand::Register(rm_reg))
-            }
-            _ => Err(CpuError::UnsupportedModField(mod_field)),
-        }?;
-        Ok(DecodedModRm8 { reg, rm })
-    }
 }
 
 impl Debug for Cpu {
@@ -497,6 +464,10 @@ impl Debug for Cpu {
             .field("sp", &format_args!("{:#06X}", self.sp))
             .field("bp", &format_args!("{:#06X}", self.bp))
             .field("ip", &format_args!("{:#06X}", self.ip))
+            .field("cs", &format_args!("{:#06X}", self.cs))
+            .field("ds", &format_args!("{:#06X}", self.ds))
+            .field("es", &format_args!("{:#06X}", self.es))
+            .field("ss", &format_args!("{:#06X}", self.ss))
             .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
     }
@@ -504,23 +475,4 @@ impl Debug for Cpu {
 
 fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
-}
-
-enum RegisterOrMemoryOperand {
-    Register(Reg8),
-    Memory(u16),
-}
-
-impl Display for RegisterOrMemoryOperand {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Register(reg) => write!(f, "{}", reg),
-            Self::Memory(addr) => write!(f, "[{:#X}]", addr),
-        }
-    }
-}
-
-struct DecodedModRm8 {
-    reg: Reg8,
-    rm: RegisterOrMemoryOperand,
 }
