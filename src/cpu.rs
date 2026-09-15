@@ -52,7 +52,7 @@ pub(crate) enum Flag {
 }
 
 #[allow(dead_code)]
-enum Reg8 {
+pub(crate) enum Reg8 {
     Al = 0b000,
     Cl = 0b001,
     Dl = 0b010,
@@ -121,7 +121,7 @@ impl Cpu {
         self.flags & mask != 0
     }
 
-    fn set_reg8(&mut self, reg: Reg8, value: u8) {
+    pub(crate) fn set_reg8(&mut self, reg: Reg8, value: u8) {
         match reg {
             Reg8::Al => self.ax = (self.ax & 0xFF00) | value as u16,
             Reg8::Bl => self.bx = (self.bx & 0xFF00) | value as u16,

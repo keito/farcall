@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuStepResult, Flag};
+use crate::cpu::{Cpu, CpuStepResult, Flag, Reg8};
 
 #[cfg(test)]
 mod tests;
@@ -28,6 +28,8 @@ enum MachineError {
     ReadServiceError(String),
     #[error("Write Service error: {0}")]
     WriteServiceError(String),
+    #[error("Print String Service error: {0}")]
+    PrintStringServiceError(String),
 }
 
 enum InterruptResult {
@@ -69,6 +71,27 @@ impl Machine {
         }
     }
 
+    /// Emulates the DOS print string service
+    fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let bytes = self.memory.get(self.cpu.dx as usize..).ok_or(
+            MachineError::PrintStringServiceError(
+                "Memory referenced in dx is out of bounds".to_string(),
+            ),
+        )?;
+        if let Some(position) = bytes.iter().position(|&byte| byte == b'$') {
+            io::stdout().write_all(b"\x1b[92m")?;
+            io::stdout().write_all(&bytes[..position])?;
+            io::stdout().write_all(b"\x1b[0m")?;
+            io::stdout().flush()?;
+            // Observed in real DOS
+            self.cpu.set_reg8(Reg8::Al, 0x24);
+            return Ok(InterruptResult::ResumeExecution);
+        }
+        return Err(MachineError::PrintStringServiceError(
+            "$ symbol not found in memory".to_string(),
+        ));
+    }
+
     /// Emulates the DOS read service
     fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
         let dest = self.cpu.bx;
@@ -105,10 +128,12 @@ impl Machine {
 
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
+            0x20 => Ok(InterruptResult::Exit(0)),
             0x21 => {
                 // AH contains the service ID
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
+                    0x09 => self.print_string_service(),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
                     0x4C => self.termination_service(),
@@ -137,16 +162,28 @@ impl Machine {
 }
 
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
-    let memory_size = 512;
+    let memory_size = 65_536;
     let begin_offset = 0x100;
     let mut machine = Machine {
         cpu: Cpu::new(),
         memory: vec![0; memory_size],
     };
 
+    // Set up the program segment prefix (PSP) as DOS would
+    machine.cpu.sp = 0xFFFE;
+    // Zero word at FFFEh - FFFh
+    machine.memory[0xFFFE] = 0x00;
+    machine.memory[0xFFFF] = 0x00;
+    // INT 20h at 0000h - 0001h
+    machine.memory[0x0000] = 0xCD;
+    machine.memory[0x0001] = 0x20;
+
+    // Reserve the bytes we wrote above for the stack word at FFFEh-FFFFh
+    let reserved_bytes = 2;
+
     let data: Vec<u8> = fs::read(file_path)?;
     // Load binary into memory at offset 0x100
-    if begin_offset + data.len() > memory_size {
+    if begin_offset + data.len() + reserved_bytes > memory_size {
         return Err(MachineError::NotEnoughMemory(begin_offset + data.len(), memory_size).into());
     }
     machine.memory[begin_offset..begin_offset + data.len()].copy_from_slice(&data);
