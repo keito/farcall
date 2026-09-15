@@ -11,6 +11,7 @@ pub struct Cpu {
     bx: u16,
     cx: u16,
     dx: u16,
+    si: u16,
     ip: u16,
     flags: u16,
 }
@@ -25,6 +26,8 @@ pub struct Machine {
 enum CpuError {
     #[error("Unsupported instruction: {0:X}")]
     UnsupportedInstruction(u8),
+    #[error("Out of bounds memory access: {0}")]
+    OutOfBoundsMemoryAccess(String),
 }
 
 enum CpuStepResult {
@@ -46,6 +49,33 @@ enum Flag {
     Trap = 8,            // TF
 }
 
+#[allow(dead_code)]
+enum Reg8 {
+    Al = 0b000,
+    Cl = 0b001,
+    Dl = 0b010,
+    Bl = 0b011,
+    Ah = 0b100,
+    Ch = 0b101,
+    Dh = 0b110,
+    Bh = 0b111,
+}
+
+impl fmt::Display for Reg8 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Reg8::Al => write!(f, "al"),
+            Reg8::Cl => write!(f, "cl"),
+            Reg8::Dl => write!(f, "dl"),
+            Reg8::Bl => write!(f, "bl"),
+            Reg8::Ah => write!(f, "ah"),
+            Reg8::Ch => write!(f, "ch"),
+            Reg8::Dh => write!(f, "dh"),
+            Reg8::Bh => write!(f, "bh"),
+        }
+    }
+}
+
 impl Cpu {
     fn new() -> Self {
         Cpu {
@@ -53,6 +83,7 @@ impl Cpu {
             bx: 0x1234,
             cx: 0x1234,
             dx: 0x1234,
+            si: 0x1234,
             ip: 0x0,
             flags: 0,
         }
@@ -63,6 +94,16 @@ impl Cpu {
         self.flags = (self.flags & !mask) | ((value as u16) << (flag as u8));
     }
 
+    fn set_reg8(&mut self, reg: Reg8, value: u8) {
+        match reg {
+            Reg8::Al => self.ax = (self.ax & 0xFF00) | value as u16,
+            Reg8::Bl => self.bx = (self.bx & 0xFF00) | value as u16,
+            Reg8::Cl => self.cx = (self.cx & 0xFF00) | value as u16,
+            Reg8::Dl => self.dx = (self.dx & 0xFF00) | value as u16,
+            _ => todo!("Not implemented arm of set_reg8"),
+        }
+    }
+
     /// Fetch, decode, and execute one instruction
     fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
@@ -70,6 +111,39 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
+            0x2C => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("sub al, {:X}h", operand));
+                let old_al = lower_byte(self.ax);
+                let new_al = old_al.wrapping_sub(operand);
+                self.set_reg8(Reg8::Al, new_al);
+
+                // Carry flag: did subtraction require a borrow?
+                self.set_flag(Flag::Carry, old_al < operand);
+                // Set or clear the zero flag
+                self.set_flag(Flag::Zero, new_al == 0);
+                // Overflow: (1) old_al and operand have different signs, AND
+                // (2) the result's sign differs from old_al's sign
+                self.set_flag(
+                    Flag::Overflow,
+                    ((old_al & 0x80) != (operand & 0x80)) && ((new_al & 0x80) != (old_al & 0x80)),
+                );
+                self.set_flag(Flag::Sign, new_al & (1 << 7) != 0);
+                self.set_flag(Flag::Parity, new_al.count_ones() % 2 == 0);
+                self.set_flag(Flag::AuxiliaryCarry, (old_al & 0x0F) < (operand & 0x0F));
+            }
+            0x46 => {
+                print_instruction(byte, &format_args!("inc si"));
+                let old_si = self.si;
+                self.si = self.si.wrapping_add(1);
+                // Signed overflow: 0x7FFF became 0x8000, meaning +32767 became -32768
+                self.set_flag(Flag::Overflow, old_si == 0x7FFF);
+                // Was original low nibble 0b1111
+                self.set_flag(Flag::AuxiliaryCarry, old_si & 0xF == 0xF);
+                self.set_flag(Flag::Zero, self.si == 0);
+                self.set_flag(Flag::Sign, self.si & (1 << 15) != 0);
+                self.set_flag(Flag::Parity, (self.si as u8).count_ones() % 2 == 0);
+            }
             0x49 => {
                 print_instruction(byte, &format_args!("dec cx"));
                 let old_cx = self.cx;
@@ -95,6 +169,65 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            // MOVs
+            0x88 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let mod_field = operand >> 6;
+                let reg_field = (operand & 0x3F) >> 3;
+                let rm_field = operand & 0x7;
+
+                if mod_field != 0 {
+                    // Unsupported mod
+                    todo!("mods other than 00 not currently supported for 88");
+                }
+                let source = match reg_field {
+                    0b000 => Reg8::Al,
+                    _ => todo!("Sources other than 0b000 (AL) not supported for 88"),
+                };
+                if rm_field != 0b100 {
+                    // Unsupported RM
+                    todo!("r/m other than 0b100 ([SI]) not supported for 88");
+                }
+
+                print_instruction(byte, &format_args!("mov [si], {}", source));
+
+                // Read the value in AL
+                let value = lower_byte(self.ax);
+                // Make sure we are not out of bounds
+                if let Some(si_mut) = memory.get_mut(self.si as usize) {
+                    *si_mut = value;
+                } else {
+                    return Err(CpuError::OutOfBoundsMemoryAccess("[si]".to_string()));
+                }
+            }
+            0x8A => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let mod_field = operand >> 6;
+                let reg_field = (operand & 0x3F) >> 3;
+                let rm_field = operand & 0x7;
+
+                if mod_field != 0 {
+                    // Unsupported mod
+                    todo!("mods other than 00 not currently supported for 8A");
+                }
+                let dest = match reg_field {
+                    0b000 => Reg8::Al,
+                    _ => todo!("Destinations other than 0b000 (AL) not supported for 8A"),
+                };
+                if rm_field != 0b100 {
+                    // Unsupported RM
+                    todo!("r/m other than 0b100 ([SI]) not supported for 8A");
+                }
+
+                print_instruction(byte, &format_args!("mov {}, [si]", dest));
+
+                // Read the value at SI
+                if let Some(data) = memory.get(self.si as usize) {
+                    self.ax = *data as u16 | (self.ax & 0xFF00);
+                } else {
+                    return Err(CpuError::OutOfBoundsMemoryAccess("[si]".to_string()));
+                }
+            }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -118,6 +251,11 @@ impl Cpu {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov bx, {:X}h", operand));
                 self.bx = operand;
+            }
+            0xBE => {
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov si, {:X}h", operand));
+                self.si = operand;
             }
             0xB9 => {
                 let operand = self.fetch_next_word_and_advance_ip(memory);
@@ -163,6 +301,7 @@ impl Debug for Cpu {
             .field("bx", &format_args!("{:#06X}", self.bx))
             .field("cx", &format_args!("{:#06X}", self.cx))
             .field("dx", &format_args!("{:#06X}", self.dx))
+            .field("si", &format_args!("{:#06X}", self.si))
             .field("ip", &format_args!("{:#06X}", self.ip))
             .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
@@ -286,4 +425,8 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
 
 fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
+}
+
+fn lower_byte(word: u16) -> u8 {
+    (word & 0xFF) as u8
 }
