@@ -159,6 +159,84 @@ impl Cpu {
         }
     }
 
+    fn read_operand8(
+        &self,
+        memory: &[u8],
+        operand: &RegisterOrMemoryOperand<Reg8>,
+    ) -> Result<u8, CpuError> {
+        let value = match operand {
+            RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                let seg_addr = self.get_segment_reg(*seg_reg);
+                read_byte(memory, PhysAddr::new(seg_addr, *addr))?
+            }
+            RegisterOrMemoryOperand::Register(reg) => self.get_reg8(*reg),
+        };
+        Ok(value)
+    }
+
+    fn read_operand16(
+        &self,
+        memory: &[u8],
+        operand: &RegisterOrMemoryOperand<Reg16>,
+    ) -> Result<u16, CpuError> {
+        let value = match operand {
+            RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                let seg_addr = self.get_segment_reg(*seg_reg);
+                read_word(memory, PhysAddr::new(seg_addr, *addr))?
+            }
+            RegisterOrMemoryOperand::Register(reg) => self.get_reg16(*reg),
+        };
+        Ok(value)
+    }
+
+    fn write_operand8(
+        &mut self,
+        memory: &mut [u8],
+        operand: &RegisterOrMemoryOperand<Reg8>,
+        value: u8,
+    ) -> Result<(), CpuError> {
+        match operand {
+            RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                let seg_addr = self.get_segment_reg(*seg_reg);
+                write_byte(memory, PhysAddr::new(seg_addr, *addr), value)?
+            }
+            RegisterOrMemoryOperand::Register(reg) => self.set_reg8(*reg, value),
+        };
+        Ok(())
+    }
+
+    fn write_operand16(
+        &mut self,
+        memory: &mut [u8],
+        operand: &RegisterOrMemoryOperand<Reg16>,
+        value: u16,
+    ) -> Result<(), CpuError> {
+        match operand {
+            RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
+                let seg_addr = self.get_segment_reg(*seg_reg);
+                write_word(memory, PhysAddr::new(seg_addr, *addr), value)?
+            }
+            RegisterOrMemoryOperand::Register(reg) => self.set_reg16(*reg, value),
+        };
+        Ok(())
+    }
+
+    fn update_logic_flags8(&mut self, result: u8) {
+        self.set_flag(Flag::Carry, false);
+        self.set_flag(Flag::Overflow, false);
+        self.set_flag(Flag::Zero, result == 0);
+        self.set_flag(Flag::Sign, result & 0x80 != 0);
+        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
+    }
+
+    fn update_logic_flags16(&mut self, result: u16) {
+        self.set_flag(Flag::Carry, false);
+        self.set_flag(Flag::Overflow, false);
+        self.set_flag(Flag::Zero, result == 0);
+        self.set_flag(Flag::Sign, result & 0x8000 != 0);
+        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
+    }
+
     /// Fetch, decode, and execute one instruction
     pub(crate) fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
         let byte = self.fetch_next_byte_and_advance_ip(memory);
@@ -166,6 +244,36 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
+            0x08 => {
+                // OR REG8/MEM8, REG8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("or {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg8(source_reg);
+                let rm_value = self.read_operand8(memory, &rm)?;
+
+                let value = reg_value | rm_value;
+                self.write_operand8(memory, &rm, value)?;
+                self.update_logic_flags8(value);
+            }
+            0x09 => {
+                // OR REG16/MEM16, REG16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("or {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg16(source_reg);
+                let rm_value = self.read_operand16(memory, &rm)?;
+
+                let value = reg_value | rm_value;
+                self.write_operand16(memory, &rm, value)?;
+                self.update_logic_flags16(value);
+            }
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
@@ -181,28 +289,11 @@ impl Cpu {
                 print_instruction(byte, &format_args!("xor {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg16(source_reg);
-                let rm_value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        read_word(memory, PhysAddr::new(seg_addr, addr))?
-                    }
-                    RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
-                };
+                let rm_value = self.read_operand16(memory, &rm)?;
 
                 let value = reg_value ^ rm_value;
-
-                match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
-                    }
-                    RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
-                }
-                self.set_flag(Flag::Carry, false);
-                self.set_flag(Flag::Overflow, false);
-                self.set_flag(Flag::Zero, value == 0);
-                self.set_flag(Flag::Sign, value & 0x8000 != 0);
-                self.set_flag(Flag::Parity, value.to_le_bytes()[0].count_ones() % 2 == 0);
+                self.write_operand16(memory, &rm, value)?;
+                self.update_logic_flags16(value);
             }
             0x3C => {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
@@ -334,23 +425,9 @@ impl Cpu {
                 print_instruction(byte, &format_args!("xchg {}, {}", first_reg, rm));
 
                 let first_value = self.get_reg8(first_reg);
-                let second_value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        read_byte(memory, PhysAddr::new(seg_addr, addr))?
-                    }
-                    RegisterOrMemoryOperand::Register(second_reg) => self.get_reg8(second_reg),
-                };
+                let second_value = self.read_operand8(memory, &rm)?;
                 self.set_reg8(first_reg, second_value);
-                match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_byte(memory, PhysAddr::new(seg_addr, addr), first_value)?
-                    }
-                    RegisterOrMemoryOperand::Register(second_reg) => {
-                        self.set_reg8(second_reg, first_value)
-                    }
-                }
+                self.write_operand8(memory, &rm, first_value)?;
             }
             // MOVs
             0x88 => {
@@ -362,15 +439,8 @@ impl Cpu {
 
                 print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
 
-                // Read the value in the register
                 let value = self.get_reg8(reg);
-                match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_byte(memory, PhysAddr::new(seg_addr, addr), value)?
-                    }
-                    RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
-                }
+                self.write_operand8(memory, &rm, value)?;
             }
             0x89 => {
                 // mov reg16/mem16, reg16
@@ -378,33 +448,17 @@ impl Cpu {
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg16::try_from(parsed.reg_field)?;
                 let rm = self.decode_rm16_operand(memory, parsed)?;
-
                 print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
-
-                // Read the value in the register
                 let value = self.get_reg16(reg);
-                match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
-                    }
-                    RegisterOrMemoryOperand::Register(reg) => self.set_reg16(reg, value),
-                }
+                self.write_operand16(memory, &rm, value)?;
             }
             0x8A => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg8::try_from(parsed.reg_field)?;
                 let rm = self.decode_rm8_operand(memory, parsed)?;
-
                 print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
-                let value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        read_byte(memory, PhysAddr::new(seg_addr, addr))?
-                    }
-                    RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
-                };
+                let value = self.read_operand8(memory, &rm)?;
                 self.set_reg8(reg, value);
             }
             0x8C => {
@@ -416,13 +470,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {}", rm, source_segment));
 
                 let value = self.get_segment_reg(source_segment);
-                match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_word(memory, PhysAddr::new(seg_addr, addr), value)?
-                    }
-                    RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
-                }
+                self.write_operand16(memory, &rm, value)?;
             }
             0x8D => {
                 // LEA REG16,MEM16
@@ -449,13 +497,7 @@ impl Cpu {
                 let rm = self.decode_rm16_operand(memory, parsed)?;
                 print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
 
-                let value = match rm {
-                    RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        read_word(memory, PhysAddr::new(seg_addr, addr))?
-                    }
-                    RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
-                };
+                let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register
@@ -532,15 +574,7 @@ impl Cpu {
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
 
                 print_instruction(byte, &format_args!("mov {}, {}", rm, immediate));
-                match rm {
-                    RegisterOrMemoryOperand::Register(reg) => {
-                        self.set_reg8(reg, immediate);
-                    }
-                    RegisterOrMemoryOperand::Memory(seg_reg, offset) => {
-                        let seg_addr = self.get_segment_reg(seg_reg);
-                        write_byte(memory, PhysAddr::new(seg_addr, offset), immediate)?;
-                    }
-                }
+                self.write_operand8(memory, &rm, immediate)?;
             }
             // Interrupts
             0xCD => {

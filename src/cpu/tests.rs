@@ -3,6 +3,7 @@ use crate::memory::MemoryError;
 
 mod addressing;
 mod memory_access;
+mod or;
 mod xor;
 
 #[test]
