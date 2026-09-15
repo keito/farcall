@@ -114,6 +114,15 @@ impl Cpu {
         }) as u8
     }
 
+    fn set_segment_reg(&mut self, reg: SegmentReg, value: u16) {
+        match reg {
+            SegmentReg::Es => self.es = value,
+            SegmentReg::Cs => self.cs = value,
+            SegmentReg::Ss => self.ss = value,
+            SegmentReg::Ds => self.ds = value,
+        }
+    }
+
     fn get_segment_reg(&self, reg: SegmentReg) -> u16 {
         match reg {
             SegmentReg::Es => self.es,
@@ -133,6 +142,19 @@ impl Cpu {
             Reg16::Bp => self.bp = value,
             Reg16::Si => self.si = value,
             Reg16::Di => self.di = value,
+        }
+    }
+
+    fn get_reg16(&self, reg: Reg16) -> u16 {
+        match reg {
+            Reg16::Ax => self.ax,
+            Reg16::Cx => self.cx,
+            Reg16::Dx => self.dx,
+            Reg16::Bx => self.bx,
+            Reg16::Sp => self.sp,
+            Reg16::Bp => self.bp,
+            Reg16::Si => self.si,
+            Reg16::Di => self.di,
         }
     }
 
@@ -239,16 +261,7 @@ impl Cpu {
                 // Read the value in the register
                 let value = self.get_reg8(reg);
                 match rm {
-                    RegisterOrMemoryOperand::Memory(memory_addr) => {
-                        if let Some(mem_mut) = memory.get_mut(memory_addr as usize) {
-                            *mem_mut = value;
-                        } else {
-                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
-                                "Address {:#X}",
-                                memory_addr
-                            )));
-                        }
-                    }
+                    RegisterOrMemoryOperand::Memory(addr) => write_byte(memory, addr, value)?,
                     RegisterOrMemoryOperand::Register(reg) => self.set_reg8(reg, value),
                 }
             }
@@ -260,16 +273,7 @@ impl Cpu {
 
                 print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = match rm {
-                    RegisterOrMemoryOperand::Memory(memory_addr) => {
-                        if let Some(data) = memory.get(memory_addr as usize) {
-                            *data
-                        } else {
-                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
-                                "Address {:#X}",
-                                memory_addr
-                            )));
-                        }
-                    }
+                    RegisterOrMemoryOperand::Memory(addr) => read_byte(memory, addr)?,
                     RegisterOrMemoryOperand::Register(reg) => self.get_reg8(reg),
                 };
                 self.set_reg8(reg, value);
@@ -284,20 +288,23 @@ impl Cpu {
 
                 let value = self.get_segment_reg(source_segment);
                 match rm {
-                    RegisterOrMemoryOperand::Memory(memory_addr) => {
-                        if let Some(mem_mut) =
-                            memory.get_mut(memory_addr as usize..memory_addr as usize + 2)
-                        {
-                            mem_mut.copy_from_slice(&value.to_le_bytes());
-                        } else {
-                            return Err(CpuError::OutOfBoundsMemoryAccess(format!(
-                                "Address {:#X}",
-                                memory_addr
-                            )));
-                        }
-                    }
+                    RegisterOrMemoryOperand::Memory(addr) => write_word(memory, addr, value)?,
                     RegisterOrMemoryOperand::Register(dest_reg) => self.set_reg16(dest_reg, value),
                 }
+            }
+            0x8E => {
+                // MOV SEGREG, REG16/MEM16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_segment = SegmentReg::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
+
+                let value = match rm {
+                    RegisterOrMemoryOperand::Memory(addr) => read_word(memory, addr)?,
+                    RegisterOrMemoryOperand::Register(reg) => self.get_reg16(reg),
+                };
+                self.set_segment_reg(dest_segment, value);
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
@@ -385,25 +392,11 @@ impl Cpu {
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
-        if let Some(mem_mut) = memory.get_mut(self.sp as usize..self.sp as usize + 2) {
-            mem_mut.copy_from_slice(&word.to_le_bytes());
-            Ok(())
-        } else {
-            return Err(CpuError::OutOfBoundsMemoryAccess(
-                "push_onto_stack".to_string(),
-            ));
-        }
+        write_word(memory, self.sp, word)
     }
 
-    fn pop_from_stack(&mut self, memory: &mut [u8]) -> Result<u16, CpuError> {
-        let value;
-        if let Some(mem) = memory.get(self.sp as usize..self.sp as usize + 2) {
-            value = u16::from_le_bytes([mem[0], mem[1]]);
-        } else {
-            return Err(CpuError::OutOfBoundsMemoryAccess(
-                "pop_from_stack".to_string(),
-            ));
-        }
+    fn pop_from_stack(&mut self, memory: &[u8]) -> Result<u16, CpuError> {
+        let value = read_word(memory, self.sp)?;
         self.sp = self.sp.wrapping_add(2);
         Ok(value)
     }
@@ -474,4 +467,34 @@ impl Debug for Cpu {
 
 fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
     eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
+}
+
+fn write_byte(memory: &mut [u8], address: u16, value: u8) -> Result<(), CpuError> {
+    let Some(mem_mut) = memory.get_mut(address as usize) else {
+        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
+    };
+    *mem_mut = value;
+    Ok(())
+}
+
+fn write_word(memory: &mut [u8], address: u16, value: u16) -> Result<(), CpuError> {
+    let Some(mem_mut) = memory.get_mut(address as usize..address as usize + 2) else {
+        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
+    };
+    mem_mut.copy_from_slice(&value.to_le_bytes());
+    Ok(())
+}
+
+fn read_byte(memory: &[u8], address: u16) -> Result<u8, CpuError> {
+    let Some(data) = memory.get(address as usize) else {
+        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
+    };
+    Ok(*data)
+}
+
+fn read_word(memory: &[u8], address: u16) -> Result<u16, CpuError> {
+    let Some(data) = memory.get(address as usize..address as usize + 2) else {
+        return Err(CpuError::OutOfBoundsMemoryAccess(format!("{:#X}", address)));
+    };
+    Ok(u16::from_le_bytes([data[0], data[1]]))
 }

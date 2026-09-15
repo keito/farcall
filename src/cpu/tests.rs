@@ -1,6 +1,106 @@
 use super::{Cpu, CpuError, CpuStepResult};
 
 #[test]
+fn mov_to_segment_register_covers_es_ss_ds_and_all_source_registers() {
+    // Source field order: AX, CX, DX, BX, SP, BP, SI, DI.
+    let initial_registers = [
+        0xA001, 0xA102, 0xA203, 0xA304, 0xA405, 0xA506, 0xA607, 0xA708,
+    ];
+    let initial_segments = [0x1357, 0x0000, 0x9ABC, 0xDEF0]; // ES, CS, SS, DS.
+    for destination in [0usize, 2, 3] {
+        for (source, &value) in initial_registers.iter().enumerate() {
+            for initial_flags in [0x0000, 0x0FD7] {
+                let mut cpu = Cpu::new();
+                [
+                    cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
+                ] = initial_registers;
+                [cpu.es, cpu.cs, cpu.ss, cpu.ds] = initial_segments;
+                cpu.ip = 2;
+                cpu.flags = initial_flags;
+                let mod_rm = 0xC0 | ((destination as u8) << 3) | source as u8;
+                let mut memory = [0xCC, 0xCC, 0x8E, mod_rm, 0xCC];
+                let original_memory = memory;
+                let mut expected_segments = initial_segments;
+                expected_segments[destination] = value;
+
+                let result = cpu.step(&mut memory).expect("MOV Sreg, r16 should succeed");
+
+                assert!(matches!(result, CpuStepResult::Continue));
+                assert_eq!(
+                    [cpu.es, cpu.cs, cpu.ss, cpu.ds],
+                    expected_segments,
+                    "8E {mod_rm:02X} must change only its destination segment register"
+                );
+                assert_eq!(
+                    [
+                        cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di
+                    ],
+                    initial_registers,
+                    "8E must preserve its source and every other general register"
+                );
+                assert_eq!(cpu.ip, 4, "register form consumes only opcode and ModR/M");
+                assert_eq!(cpu.flags, initial_flags, "MOV preserves every flag");
+                assert_eq!(
+                    memory, original_memory,
+                    "register form must not write memory"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn mov_ds_ax_copies_the_full_word_without_dereferencing_it() {
+    for value in [0x0000, 0x00FF, 0xFF00, 0x8000, 0xFFFF] {
+        let mut cpu = Cpu::new();
+        cpu.ax = value;
+        cpu.ds = 0xA55A;
+        cpu.flags = 0x0FD7;
+        // Exact MOV DS, AX encoding used in guess.com. AX contains the value
+        // to copy, not a memory address; only these two instruction bytes exist.
+        let mut memory = [0x8E, 0xD8];
+
+        let result = cpu.step(&mut memory).expect("MOV DS, AX should succeed");
+
+        assert!(matches!(result, CpuStepResult::Continue));
+        assert_eq!(
+            cpu.ds, value,
+            "replace both halves of DS with AX={value:#06X}"
+        );
+        assert_eq!(cpu.ax, value);
+        assert_eq!(cpu.ip, 2);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, [0x8E, 0xD8]);
+    }
+}
+
+#[test]
+fn mov_to_segment_register_wraps_ip_at_instruction_boundaries() {
+    for (start, next) in [(0xFFFEu16, 0x0000), (0xFFFF, 0x0001)] {
+        let mut cpu = Cpu::new();
+        cpu.ip = start;
+        cpu.di = 0xBEEF;
+        cpu.ds = 0x1234;
+        cpu.flags = 0x0FD7;
+        let mut memory = vec![0xCC; 0x10000];
+        memory[start as usize] = 0x8E;
+        memory[start.wrapping_add(1) as usize] = 0xDF; // MOV DS, DI.
+        let original_memory = memory.clone();
+
+        let result = cpu
+            .step(&mut memory)
+            .expect("MOV instruction fetch should wrap IP");
+
+        assert!(matches!(result, CpuStepResult::Continue));
+        assert_eq!(cpu.ds, 0xBEEF);
+        assert_eq!(cpu.di, 0xBEEF);
+        assert_eq!(cpu.ip, next);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, original_memory);
+    }
+}
+
+#[test]
 fn mov_from_segment_register_covers_all_register_encodings() {
     // Segment field order: ES, CS, SS, DS.
     // Destination order: AX, CX, DX, BX, SP, BP, SI, DI.
