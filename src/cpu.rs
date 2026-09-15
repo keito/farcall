@@ -231,8 +231,17 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x74 => {
+                // JE/JZ
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("je short {:X}h", operand));
+                // If zero flag is set, then jump
+                if self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x75 => {
-                // Signed byte
+                // JNE/JNZ
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 print_instruction(byte, &format_args!("jnz short {:X}h", operand));
                 // If zero flag is not set, then jump
@@ -246,6 +255,26 @@ impl Cpu {
                 print_instruction(byte, &format_args!("ja {:X}h", operand));
                 // If CF is 0 AND ZF = 0, jump
                 if !self.get_flag(Flag::Carry) && !self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x7C => {
+                // JL/JNGE (jump if signed less-than)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jl {:X}h", operand));
+                // If SF != OF, jump
+                if self.get_flag(Flag::Sign) != self.get_flag(Flag::Overflow) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x7F => {
+                // JNLE/JG (jump if not less than or equal)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jg {:X}h", operand));
+                // If not ZF and SF == OF
+                if !self.get_flag(Flag::Zero)
+                    && (self.get_flag(Flag::Sign) == self.get_flag(Flag::Overflow))
+                {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
