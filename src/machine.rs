@@ -4,10 +4,11 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
+use crate::machine::Resource::{Console, Stdin};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
-use crate::registers::Reg8;
+use crate::registers::{Reg8, Reg16};
 
 #[cfg(test)]
 mod tests;
@@ -16,6 +17,15 @@ mod tests;
 struct Machine {
     cpu: Cpu,
     memory: Vec<u8>,
+    // Handle table
+    handles: Vec<Option<Resource>>,
+}
+
+#[derive(Clone)]
+enum Resource {
+    Stdin,
+    Stdout,
+    Console,
 }
 
 #[derive(Error, Debug)]
@@ -154,6 +164,7 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the Video Service
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
         if self.cpu.get_reg8(Reg8::Ah) == 0xf {
             // Get current video mode
@@ -166,6 +177,27 @@ impl Machine {
                 "Unsupported command".to_string(),
             ))
         }
+    }
+
+    /// Emulates the Duplicate File Handle Service
+    fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let handle_num = self.cpu.get_reg16(Reg16::Bx);
+        let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
+            // Unknown handle number
+            self.cpu.ax = 6;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        let Some(pos) = self.handles.iter().position(|h| h.is_none()) else {
+            // No open positions in table
+            self.cpu.ax = 4;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        self.handles[pos] = Some(resource.clone());
+        self.cpu.ax = pos as u16;
+        self.cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
     }
 
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
@@ -181,6 +213,7 @@ impl Machine {
                     0x30 => self.dos_version_service(),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
+                    0x45 => self.duplicate_file_handle_service(),
                     0x4C => self.termination_service(),
                     _ => Err(MachineError::UnsupportedService(service)),
                 }
@@ -227,7 +260,13 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     let mut machine = Machine {
         cpu: Cpu::new(),
         memory: vec![0; memory_size],
+        handles: vec![
+            Some(Resource::Stdin),
+            Some(Resource::Stdout),
+            Some(Resource::Console),
+        ],
     };
+    machine.handles.resize(20, None);
 
     // Set up the program segment prefix (PSP) as DOS would
     // INT 20h at 0000h - 0001h

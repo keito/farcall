@@ -5,6 +5,7 @@ fn write_service_clears_only_carry() {
     let mut machine = Machine {
         cpu: Cpu::new(),
         memory: vec![0; 16],
+        handles: vec![],
     };
     machine.cpu.ax = 0x4000;
     machine.cpu.bx = 1;
@@ -27,6 +28,7 @@ fn dos_termination_returns_al_as_exit_code() {
         let mut machine = Machine {
             cpu: Cpu::new(),
             memory: vec![],
+            handles: vec![],
         };
         machine.cpu.ax = ax;
 

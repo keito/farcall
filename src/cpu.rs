@@ -146,7 +146,7 @@ impl Cpu {
         }
     }
 
-    fn get_reg16(&self, reg: Reg16) -> u16 {
+    pub(crate) fn get_reg16(&self, reg: Reg16) -> u16 {
         match reg {
             Reg16::Ax => self.ax,
             Reg16::Cx => self.cx,
