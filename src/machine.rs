@@ -4,7 +4,9 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuStepResult, Flag};
-use crate::memory::{MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer};
+use crate::memory::{
+    MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
+};
 use crate::registers::Reg8;
 
 #[cfg(test)]
@@ -177,8 +179,22 @@ impl Machine {
 }
 
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
-    let memory_size = 65_536;
-    let begin_offset = 0x100;
+    /*
+    Offset within segment
+    0000
+          PSP: 256 bytes
+    00FF
+    ...
+    0100
+          Contents of COM file
+          ...unused space...
+          ^ Stack grows this way
+    FFFE Zero return address
+    FFFF Zero return address
+    */
+    let memory_size = 0x100_000; // Physical memory: 1 MiB
+    let segment = 0x1_000; // Segment where we're loading our program
+    let segment_size = 0x10_000; // COM segment size (64 KiB)
 
     let mut machine = Machine {
         cpu: Cpu::new(),
@@ -186,24 +202,38 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     };
 
     // Set up the program segment prefix (PSP) as DOS would
-    machine.cpu.sp = 0xFFFE;
-    // Zero word at FFFEh - FFFh
-    machine.memory[0xFFFE] = 0x00;
-    machine.memory[0xFFFF] = 0x00;
     // INT 20h at 0000h - 0001h
-    machine.memory[0x0000] = 0xCD;
-    machine.memory[0x0001] = 0x20;
+    write_byte(&mut machine.memory, PhysAddr::new(segment, 0x0000), 0xCD)?;
+    write_byte(&mut machine.memory, PhysAddr::new(segment, 0x0001), 0x20)?;
 
-    // Reserve the bytes we wrote above for the stack word at FFFEh-FFFFh
+    // Zero word at FFFEh - FFFh
+    write_byte(&mut machine.memory, PhysAddr::new(segment, 0xFFFE), 0x00)?;
+    write_byte(&mut machine.memory, PhysAddr::new(segment, 0xFFFF), 0x00)?;
     let reserved_bytes = 2;
 
+    // Initialize registers
+    machine.cpu.sp = 0xFFFE; // Make room for the 2 bytes above
+    machine.cpu.cs = segment;
+    machine.cpu.ds = segment;
+    machine.cpu.es = segment;
+    machine.cpu.ss = segment;
+
+    // Load binary into segment at offset 0x100, by convention
     let data: Vec<u8> = fs::read(file_path)?;
-    // Load binary into memory at offset 0x100
-    if begin_offset + data.len() + reserved_bytes > memory_size {
-        return Err(MachineError::NotEnoughMemory(begin_offset + data.len(), memory_size).into());
+    let prog_offset = 0x100;
+    if prog_offset + data.len() + reserved_bytes > segment_size {
+        return Err(MachineError::NotEnoughMemory(
+            prog_offset + data.len() + reserved_bytes,
+            segment_size,
+        )
+        .into());
     }
-    machine.memory[begin_offset..begin_offset + data.len()].copy_from_slice(&data);
-    machine.cpu.ip = begin_offset as u16;
+    write_buffer(
+        &mut machine.memory,
+        PhysAddr::new(segment, prog_offset as u16),
+        &data,
+    )?;
+    machine.cpu.ip = prog_offset as u16;
 
     machine.cpu.trace();
     loop {
