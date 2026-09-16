@@ -231,16 +231,26 @@ impl Machine {
 
     /// Emulates the Video Service
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
-        if self.cpu.get_reg8(Reg8::Ah) == 0xf {
+        match self.cpu.get_reg8(Reg8::Ah) {
+            // BIOS character output
+            0xe => {
+                let c = self.cpu.get_reg8(Reg8::Al);
+                io::stdout().write_all(b"\x1b[92m")?;
+                io::stdout().write_all(&[c])?;
+                io::stdout().write_all(b"\x1b[0m")?;
+                io::stdout().flush()?;
+                Ok(InterruptResult::ResumeExecution)
+            }
             // Get current video mode
-            self.cpu.set_reg8(Reg8::Al, 0x3); // 80x25 color text mode
-            self.cpu.set_reg8(Reg8::Ah, 80); // 80 columns in decimal
-            self.cpu.set_reg8(Reg8::Bh, 0); // active display page
-            Ok(InterruptResult::ResumeExecution)
-        } else {
-            Err(MachineError::VideoServiceError(
+            0xf => {
+                self.cpu.set_reg8(Reg8::Al, 0x3); // 80x25 color text mode
+                self.cpu.set_reg8(Reg8::Ah, 80); // 80 columns in decimal
+                self.cpu.set_reg8(Reg8::Bh, 0); // active display page
+                Ok(InterruptResult::ResumeExecution)
+            }
+            _ => Err(MachineError::VideoServiceError(
                 "Unsupported command".to_string(),
-            ))
+            )),
         }
     }
 
