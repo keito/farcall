@@ -596,6 +596,21 @@ impl Cpu {
                 let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
             }
+            0x98 => {
+                // CBW
+                let al = self.get_reg8(Reg8::Al);
+                let value = (al as i8) as i16 as u16;
+                print_instruction(byte, &format_args!("cbw"));
+                self.set_reg16(Reg16::Ax, value);
+            }
+            0xA0 => {
+                // MOV AL, MEM8
+                let mem_addr = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov al, [ds:{:04X}h]", mem_addr));
+                let seg_addr = self.get_segment_reg(SegmentReg::Ds);
+                let mem_value = read_byte(memory, PhysAddr::new(seg_addr, mem_addr))?;
+                self.set_reg8(Reg8::Al, mem_value);
+            }
             0xA2 => {
                 // MOV MEM8, AL
                 let mem_addr = self.fetch_next_word_and_advance_ip(memory);
@@ -742,20 +757,51 @@ impl Cpu {
                 // Add the displacement to IP with 16-bit wrapping
                 self.ip = self.ip.wrapping_add(displacement)
             }
-            // CLI
+            0xF7 => {
+                // Does a lot of things! on REG16/MEM16 (and on IMMED16 for TEST only)
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                // let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                let operand = self.read_operand16(memory, &rm)?;
+                match reg_field {
+                    // 0b000 => {
+                    //     // TEST r/m 16, imm16
+                    //     let immed16 = self.fetch_next_word_and_advance_ip(memory);
+                    // }
+                    // 0b010 => 0, // NOT r/m 16
+                    // 0b011 => 0, // NEG r/m 16
+                    0b100 => {
+                        print_instruction(byte, &format_args!("mul {}", rm));
+                        let ax = self.get_reg16(Reg16::Ax);
+                        let value = (ax as u32) * (operand as u32);
+                        self.dx = (value >> 16) as u16; // dx has the upper half
+                        self.ax = (value & 0xFFFF) as u16; // ax holds the lower half
+                        let upper_half_non_zero = self.dx != 0;
+                        self.set_flag(Flag::Carry, upper_half_non_zero);
+                        self.set_flag(Flag::Overflow, upper_half_non_zero);
+                    } // MUL r/m 16
+                    // 0b101 => 0, // IMUL r/m 16
+                    // 0b110 => 0, // DIV r/m 16
+                    // 0b111 => 0, // IDIV r/m 16
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                }
+            }
+            // Flag operations
             0xFA => {
+                // CLI
                 print_instruction(byte, &format_args!("cli"));
                 self.set_flag(Flag::InterruptEnable, false);
             }
-            // STI
             0xFB => {
+                // STI
                 // TODO: When hardware IRQs are implemented, defer maskable interrupt delivery
                 // until after the next instruction.
                 print_instruction(byte, &format_args!("sti"));
                 self.set_flag(Flag::InterruptEnable, true);
             }
-            // CLD
             0xFC => {
+                // CLD
                 print_instruction(byte, &format_args!("cld"));
                 self.set_flag(Flag::Direction, false);
             }

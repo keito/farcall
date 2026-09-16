@@ -27,6 +27,101 @@ fn cpu_for_memory_access() -> Cpu {
 }
 
 #[test]
+fn a0_reads_one_byte_from_ds_preserving_ah_flags_and_other_registers() {
+    for (ds, offset, physical) in [
+        (0x1000, 0x1234u16, 0x11234),
+        (0xFFFF, 0x000F, 0xFFFFF), // Last byte on the 20-bit bus.
+        (0xFFFF, 0x0020, 0x00010), // Segment plus offset wraps at 1 MiB.
+    ] {
+        for value in [0x00u8, 0x80, 0xFF] {
+            for flags in [0x0000, 0x0FD7] {
+                let mut cpu = cpu_for_memory_access();
+                cpu.cs = 0x3000;
+                cpu.ds = ds;
+                cpu.flags = flags;
+                let mut expected_registers = registers(&cpu);
+                expected_registers[0] = 0xA500 | u16::from(value);
+                let [low, high] = offset.to_le_bytes();
+                // Keep both the code segment and the source byte accessible.
+                let mut memory = vec![0xCC; (physical + 1).max(0x40000)];
+                memory[0x30100..0x30103].copy_from_slice(&[0xA0, low, high]);
+                memory[physical] = value;
+                let original_memory = memory.clone();
+
+                assert!(matches!(
+                    cpu.step(&mut memory).unwrap(),
+                    CpuStepResult::Continue
+                ));
+
+                assert_eq!(registers(&cpu), expected_registers);
+                assert_eq!(cpu.flags, flags);
+                assert_eq!(cpu.ip, 0x0103);
+                assert!(memory == original_memory);
+            }
+        }
+    }
+}
+
+#[test]
+fn a0_fetches_both_offset_bytes_across_ip_wrap() {
+    for (ip, low_address, high_address, next_ip) in [
+        (0xFFFE, 0x3FFFF, 0x30000, 0x0001),
+        (0xFFFF, 0x30000, 0x30001, 0x0002),
+    ] {
+        let mut cpu = cpu_for_memory_access();
+        cpu.cs = 0x3000;
+        cpu.ip = ip;
+        let mut expected_registers = registers(&cpu);
+        expected_registers[0] = 0xA57E;
+        let mut memory = vec![0xCC; 0x50000];
+        memory[0x30000 + usize::from(ip)] = 0xA0;
+        memory[low_address] = 0x34;
+        memory[high_address] = 0x12;
+        memory[0x11234] = 0x7E;
+        let original_memory = memory.clone();
+
+        assert!(matches!(
+            cpu.step(&mut memory).unwrap(),
+            CpuStepResult::Continue
+        ));
+
+        assert_eq!(registers(&cpu), expected_registers);
+        assert_eq!(cpu.ip, next_ip);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert!(memory == original_memory);
+    }
+}
+
+#[test]
+fn a0_accepts_the_last_available_byte_and_reports_missing_operands() {
+    for offset in [0x01FFu16, 0x0200] {
+        let mut cpu = cpu_for_memory_access();
+        cpu.ds = 0;
+        let mut expected_registers = registers(&cpu);
+        let [low, high] = offset.to_le_bytes();
+        let mut memory = vec![0xCC; 0x0200];
+        memory[0x0100..0x0103].copy_from_slice(&[0xA0, low, high]);
+        let original_memory = memory.clone();
+
+        let result = cpu.step(&mut memory);
+
+        if offset == 0x01FF {
+            assert!(matches!(result.unwrap(), CpuStepResult::Continue));
+            expected_registers[0] = 0xA5CC;
+            assert_eq!(cpu.ip, 0x0103);
+        } else {
+            assert!(matches!(
+                result,
+                Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+            ));
+        }
+        assert_eq!(registers(&cpu), expected_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(memory, original_memory);
+    }
+}
+
+#[test]
 fn accumulator_stores_use_ds_and_preserve_registers_and_flags() {
     for opcode in [0xA2, 0xA3] {
         for (ax, low, high) in [

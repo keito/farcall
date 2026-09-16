@@ -5,8 +5,71 @@ mod addressing;
 mod group1_byte;
 mod interrupts;
 mod memory_access;
+mod mul;
 mod or;
 mod xor;
+
+#[test]
+fn cbw_sign_extends_every_al_value_preserving_flags_and_other_registers() {
+    for al in 0..=255u16 {
+        for old_ah in [0x00, 0x5A, 0xFF] {
+            for flags in [0x0000, 0x0FD7] {
+                let mut cpu = Cpu::new();
+                cpu.ax = (old_ah << 8) | al;
+                [cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di] =
+                    [0x1234, 0x5678, 0x9ABC, 0x0200, 0x0300, 0x0400, 0x0500];
+                [cpu.es, cpu.cs, cpu.ss, cpu.ds] = [0x1000, 0, 0x2000, 0x3000];
+                cpu.flags = flags;
+                let others = [
+                    cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di, cpu.es, cpu.cs, cpu.ss,
+                    cpu.ds,
+                ];
+                let mut memory = [0x98];
+
+                assert!(matches!(
+                    cpu.step(&mut memory).unwrap(),
+                    CpuStepResult::Continue
+                ));
+
+                // Use bit expectations rather than repeating the implementation's casts.
+                assert_eq!(cpu.ax, if al < 0x80 { al } else { 0xFF00 | al });
+                assert_eq!(cpu.flags, flags, "CBW uses AL's sign bit, not SF");
+                assert_eq!(
+                    [
+                        cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di, cpu.es, cpu.cs,
+                        cpu.ss, cpu.ds
+                    ],
+                    others
+                );
+                assert_eq!(cpu.ip, 1);
+                assert_eq!(memory, [0x98]);
+            }
+        }
+    }
+}
+
+#[test]
+fn cbw_fetches_from_cs_and_wraps_ip() {
+    let mut cpu = Cpu::new();
+    cpu.cs = 0x1000;
+    cpu.ip = 0xFFFF;
+    cpu.ax = 0x0080;
+    cpu.flags = 0x0FD7;
+    let mut memory = vec![0xCC; 0x20000];
+    memory[0x1FFFF] = 0x98;
+    let original_memory = memory.clone();
+
+    assert!(matches!(
+        cpu.step(&mut memory).unwrap(),
+        CpuStepResult::Continue
+    ));
+
+    assert_eq!(cpu.ax, 0xFF80);
+    assert_eq!(cpu.ip, 0);
+    assert_eq!(cpu.cs, 0x1000);
+    assert_eq!(cpu.flags, 0x0FD7);
+    assert!(memory == original_memory);
+}
 
 #[test]
 fn lea_direct_address_covers_all_destinations_without_reading_memory() {
