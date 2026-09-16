@@ -586,6 +586,22 @@ impl Cpu {
                 let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
             }
+            0xA2 => {
+                // MOV MEM8, AL
+                let mem_addr = self.fetch_next_word_and_advance_ip(memory);
+                let al = self.get_reg8(Reg8::Al);
+                let seg_addr = self.get_segment_reg(SegmentReg::Ds);
+                print_instruction(byte, &format_args!("mov [ds:{:04X}h], al", mem_addr));
+                write_byte(memory, PhysAddr::new(seg_addr, mem_addr), al)?;
+            }
+            0xA3 => {
+                // MOV MEM16, AX
+                let mem_addr = self.fetch_next_word_and_advance_ip(memory);
+                let ax = self.get_reg16(Reg16::Ax);
+                let seg_addr = self.get_segment_reg(SegmentReg::Ds);
+                print_instruction(byte, &format_args!("mov [ds:{:04X}h], ax", mem_addr));
+                write_word(memory, PhysAddr::new(seg_addr, mem_addr), ax)?;
+            }
             0xAC => {
                 // LODSB
                 print_instruction(byte, &format_args!("lodsb"));
