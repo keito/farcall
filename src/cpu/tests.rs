@@ -8,6 +8,7 @@ mod interrupts;
 mod memory_access;
 mod mul;
 mod or;
+mod segment_override;
 mod xor;
 
 #[test]

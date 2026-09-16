@@ -36,16 +36,22 @@ pub(super) fn parse_mod_rm(operand: u8) -> ModRmFields {
 }
 
 impl Cpu {
-    fn effective_address_base(&self, rm_field: u8) -> Result<(SegmentReg, u16), CpuError> {
+    fn effective_address_base(
+        &self,
+        rm_field: u8,
+        segment_override: Option<SegmentReg>,
+    ) -> Result<(SegmentReg, u16), CpuError> {
+        let ds_seg = segment_override.unwrap_or(SegmentReg::Ds);
+        let ss_seg = segment_override.unwrap_or(SegmentReg::Ss);
         match rm_field {
-            0b000 => Ok((SegmentReg::Ds, self.bx.wrapping_add(self.si))),
-            0b001 => Ok((SegmentReg::Ds, self.bx.wrapping_add(self.di))),
-            0b010 => Ok((SegmentReg::Ss, self.bp.wrapping_add(self.si))),
-            0b011 => Ok((SegmentReg::Ss, self.bp.wrapping_add(self.di))),
-            0b100 => Ok((SegmentReg::Ds, self.si)),
-            0b101 => Ok((SegmentReg::Ds, self.di)),
-            0b110 => Ok((SegmentReg::Ss, self.bp)),
-            0b111 => Ok((SegmentReg::Ds, self.bx)),
+            0b000 => Ok((ds_seg, self.bx.wrapping_add(self.si))),
+            0b001 => Ok((ds_seg, self.bx.wrapping_add(self.di))),
+            0b010 => Ok((ss_seg, self.bp.wrapping_add(self.si))),
+            0b011 => Ok((ss_seg, self.bp.wrapping_add(self.di))),
+            0b100 => Ok((ds_seg, self.si)),
+            0b101 => Ok((ds_seg, self.di)),
+            0b110 => Ok((ss_seg, self.bp)),
+            0b111 => Ok((ds_seg, self.bx)),
             _ => Err(CpuError::UnsupportedRmField(rm_field)),
         }
     }
@@ -54,6 +60,7 @@ impl Cpu {
         &mut self,
         memory: &[u8],
         fields: ModRmFields,
+        segment_override: Option<SegmentReg>,
     ) -> Result<(SegmentReg, u16), CpuError> {
         match fields.mod_field {
             0b00 => {
@@ -61,14 +68,16 @@ impl Cpu {
                 if fields.rm_field == 0b110 {
                     // Special case for direct memory [disp16]
                     let word = self.fetch_next_word_and_advance_ip(memory);
-                    Ok((SegmentReg::Ds, word))
+                    let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    Ok((seg, word))
                 } else {
-                    self.effective_address_base(fields.rm_field)
+                    self.effective_address_base(fields.rm_field, segment_override)
                 }
             }
             0b01 => {
                 // Memory with an 8-bit displacement
-                let (seg_reg, base_address) = self.effective_address_base(fields.rm_field)?;
+                let (seg_reg, base_address) =
+                    self.effective_address_base(fields.rm_field, segment_override)?;
                 let displacement = self.fetch_next_byte_and_advance_ip(memory);
                 Ok((
                     seg_reg,
@@ -77,7 +86,8 @@ impl Cpu {
             }
             0b10 => {
                 // Memory with a 16-bit displacement
-                let (seg_reg, base_address) = self.effective_address_base(fields.rm_field)?;
+                let (seg_reg, base_address) =
+                    self.effective_address_base(fields.rm_field, segment_override)?;
                 let displacement = self.fetch_next_word_and_advance_ip(memory);
                 Ok((
                     seg_reg,
@@ -93,10 +103,12 @@ impl Cpu {
         &mut self,
         memory: &[u8],
         fields: ModRmFields,
+        segment_override: Option<SegmentReg>,
     ) -> Result<RegisterOrMemoryOperand<Reg8>, CpuError> {
         match fields.mod_field {
             0b00 | 0b01 | 0b10 => {
-                let (seg_reg, addr) = self.decode_effective_address(memory, fields)?;
+                let (seg_reg, addr) =
+                    self.decode_effective_address(memory, fields, segment_override)?;
                 Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
             }
             0b11 => {
@@ -112,10 +124,12 @@ impl Cpu {
         &mut self,
         memory: &[u8],
         fields: ModRmFields,
+        segment_override: Option<SegmentReg>,
     ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
         match fields.mod_field {
             0b00 | 0b01 | 0b10 => {
-                let (seg_reg, addr) = self.decode_effective_address(memory, fields)?;
+                let (seg_reg, addr) =
+                    self.decode_effective_address(memory, fields, segment_override)?;
                 Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
             }
             0b11 => {
