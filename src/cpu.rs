@@ -524,30 +524,49 @@ impl Cpu {
                 let destination = self.read_operand8(memory, &rm)?;
                 let mut is_cmp = false;
                 let value = match reg_field {
-                    0 => self.add8(destination, immediate, false), // ADD
+                    0 => {
+                        print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
+                        self.add8(destination, immediate, false)
+                    } // ADD
                     1 => {
                         // OR
+                        print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
                         let result = destination | immediate;
                         self.update_logic_flags8(result);
                         result
                     }
-                    2 => self.add8(destination, immediate, self.get_flag(Flag::Carry)), // ADC
-                    3 => self.subtract8(destination, immediate, self.get_flag(Flag::Carry)), // SBB
+                    2 => {
+                        // ADC
+                        print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
+                        self.add8(destination, immediate, self.get_flag(Flag::Carry))
+                    }
+                    3 => {
+                        // SBB
+                        print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
+                        self.subtract8(destination, immediate, self.get_flag(Flag::Carry))
+                    }
                     4 => {
                         // AND
+                        print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
                         let result = destination & immediate;
                         self.update_logic_flags8(result);
                         result
                     }
-                    5 => self.subtract8(destination, immediate, false), // SUB
+                    5 => {
+                        // SUB
+                        print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
+                        self.subtract8(destination, immediate, false)
+                    }
                     6 => {
                         // XOR
+                        print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
                         let result = destination ^ immediate;
                         self.update_logic_flags8(result);
                         result
                     }
                     7 => {
                         // CMP
+                        print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
                         is_cmp = true;
                         self.subtract8(destination, immediate, false)
                     }
