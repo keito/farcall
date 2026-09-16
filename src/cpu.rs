@@ -273,7 +273,7 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let new_val = self.subtract_immediate8(Reg8::Al, operand);
+                let new_val = self.subtract8(Reg8::Al, operand);
                 self.set_reg8(Reg8::Al, new_val);
             }
             0x31 => {
@@ -291,17 +291,39 @@ impl Cpu {
                 self.write_operand16(memory, &rm, value)?;
                 self.update_logic_flags16(value);
             }
+            0x3A => {
+                // CMP r8, r/m8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
+
+                let rm_value = self.read_operand8(memory, &rm)?;
+                self.subtract8(dest_reg, rm_value);
+            }
+            0x3B => {
+                // CMP r16, r/m16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
+
+                let rm_value = self.read_operand16(memory, &rm)?;
+                self.subtract16(dest_reg, rm_value);
+            }
             0x3C => {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
-                self.subtract_immediate8(Reg8::Al, operand);
+                self.subtract8(Reg8::Al, operand);
             }
             0x3D => {
                 // CMP AX, imm16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
-                self.subtract_immediate16(Reg16::Ax, operand);
+                self.subtract16(Reg16::Ax, operand);
             }
             0x46 => {
                 print_instruction(byte, &format_args!("inc si"));
@@ -374,6 +396,15 @@ impl Cpu {
                 print_instruction(byte, &format_args!("jnz short {:X}h", operand));
                 // If zero flag is not set, then jump
                 if !self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x76 => {
+                // JBE/JNA (jump if below or equal)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jbe short {:X}h", operand));
+                // If CF or ZF are set, jump
+                if self.get_flag(Flag::Carry) || self.get_flag(Flag::Zero) {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
@@ -677,7 +708,7 @@ impl Cpu {
 
     /// Implements shared functionality for subtracting an 8-bit immediate
     /// from an 8-bit register and setting the correct flags.
-    fn subtract_immediate8(&mut self, reg: Reg8, operand: u8) -> u8 {
+    fn subtract8(&mut self, reg: Reg8, operand: u8) -> u8 {
         let old_reg = self.get_reg8(reg);
         let (result, borrow) = old_reg.overflowing_sub(operand);
 
@@ -695,7 +726,7 @@ impl Cpu {
         result
     }
 
-    fn subtract_immediate16(&mut self, reg: Reg16, operand: u16) -> u16 {
+    fn subtract16(&mut self, reg: Reg16, operand: u16) -> u16 {
         let old_reg = self.get_reg16(reg);
         let (result, borrow) = old_reg.overflowing_sub(operand);
 
