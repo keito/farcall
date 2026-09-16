@@ -1,5 +1,5 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
-use crate::machine::MachineError;
+use crate::machine::{MachineError, calc_360kib_disk_offset};
 use crate::memory::MemoryError;
 
 fn registers(cpu: &Cpu) -> [u16; 13] {
@@ -141,7 +141,7 @@ fn int13_uses_es_bx_including_nonzero_and_aliasing_segments() {
 #[test]
 fn int13_rejects_parameters_outside_the_current_supported_subset() {
     // This intentionally documents today's limited service. Expand these
-    // expectations when more operations, counts, or disk geometry are supported.
+    // expectations when more operations, counts, or drives are supported.
     for (name, ax, cx, dx) in [
         ("reset not yet supported", 0x0001, 0x0002, 0x0000),
         ("writes not supported", 0x0301, 0x0002, 0x0000),
@@ -151,21 +151,106 @@ fn int13_rejects_parameters_outside_the_current_supported_subset() {
         ("large count", 0x02FF, 0x0002, 0x0000),
         ("second floppy", 0x0201, 0x0002, 0x0001),
         ("hard disk", 0x0201, 0x0002, 0x0080),
-        ("nonzero cylinder", 0x0201, 0x0102, 0x0000),
-        ("nonzero head", 0x0201, 0x0002, 0x0100),
-        ("sector numbers start at one", 0x0201, 0x0000, 0x0000),
-        ("third sector not yet supported", 0x0201, 0x0003, 0x0000),
-        ("high cylinder bits not supported", 0x0201, 0x0041, 0x0000),
     ] {
         for flags in [0xF002, 0xFFD7] {
-            // Even sector 3 exists in this image; rejection is about the
-            // explicitly supported parameters, not merely file length.
             let mut machine = machine_with_image(Some(disk_image(1536)));
             machine.cpu.ax = ax;
             machine.cpu.cx = cx;
             machine.cpu.dx = dx;
             machine.cpu.flags = flags;
             assert_guest_error(&mut machine, 0x01, name);
+        }
+    }
+}
+
+#[test]
+fn disk_offset_maps_chs_and_rejects_geometry_boundaries() {
+    for (cylinder, head, sector, offset) in [
+        (0, 0, 1, 0),
+        (0, 0, 2, 512),
+        (0, 0, 9, 4096),
+        (0, 1, 1, 4608),
+        (0, 1, 9, 8704),
+        (1, 0, 1, 9216),
+        (39, 1, 9, 368128),
+    ] {
+        assert_eq!(
+            calc_360kib_disk_offset(cylinder, head, sector),
+            Some(offset),
+            "CHS={cylinder}/{head}/{sector}"
+        );
+    }
+    for (cylinder, head, sector) in [
+        (40, 0, 1),
+        (0, 2, 1),
+        (0, 0, 0),
+        (0, 0, 10),
+        (usize::MAX, 0, 1),
+        (0, usize::MAX, 1),
+        (0, 0, usize::MAX),
+    ] {
+        assert_eq!(
+            calc_360kib_disk_offset(cylinder, head, sector),
+            None,
+            "CHS={cylinder}/{head}/{sector}"
+        );
+    }
+}
+
+#[test]
+fn int13_reads_across_heads_and_cylinders_through_the_last_sector() {
+    for (cx, dx, offset) in [
+        (0x0003, 0x0000, 1024),
+        (0x0009, 0x0000, 4096),
+        (0x0001, 0x0100, 4608),
+        (0x0009, 0x0100, 8704),
+        (0x0101, 0x0000, 9216),
+        (0x2709, 0x0100, 368128),
+    ] {
+        for flags in [0xF002, 0xFFD7] {
+            let image = disk_image(360 * 1024);
+            let mut machine = machine_with_image(Some(image.clone()));
+            machine.cpu.cx = cx;
+            machine.cpu.dx = dx;
+            machine.cpu.flags = flags;
+            let mut expected_registers = registers(&machine.cpu);
+            expected_registers[0] = 1;
+            let mut expected_memory = machine.memory.clone();
+            expected_memory[0x17E00..0x18000].copy_from_slice(&image[offset..offset + 512]);
+
+            assert!(matches!(
+                machine.handle_interrupt(0x13).unwrap(),
+                InterruptResult::ResumeExecution
+            ));
+
+            assert_eq!(registers(&machine.cpu), expected_registers);
+            assert_eq!(machine.cpu.flags, flags & !1);
+            assert!(
+                machine.memory == expected_memory,
+                "CX={cx:04X}, DX={dx:04X}"
+            );
+            assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+        }
+    }
+}
+
+#[test]
+fn int13_invalid_chs_returns_sector_not_found_without_copying() {
+    for (name, cx, dx) in [
+        ("sector numbers start at one", 0x0000, 0x0000),
+        ("sector past end of track", 0x000A, 0x0000),
+        ("head past end", 0x0001, 0x0200),
+        ("cylinder past end", 0x2801, 0x0000),
+        ("high cylinder bits exceed floppy geometry", 0x0041, 0x0000),
+    ] {
+        for flags in [0xF002, 0xFFD7] {
+            // Extra image bytes ensure geometry validation, rather than file
+            // length alone, rejects addresses outside a 360 KiB floppy.
+            let mut machine = machine_with_image(Some(disk_image(400 * 1024)));
+            machine.cpu.cx = cx;
+            machine.cpu.dx = dx;
+            machine.cpu.flags = flags;
+            assert_guest_error(&mut machine, 0x04, name);
         }
     }
 }
