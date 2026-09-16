@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 
-use rustix::termios::{LocalModes, SpecialCodeIndex, Termios};
+use rustix::termios::{LocalModes, QueueSelector, SpecialCodeIndex, Termios, tcflush};
 use rustix::termios::{OptionalActions, tcgetattr, tcsetattr};
 
 use super::Machine;
@@ -29,6 +29,12 @@ impl Machine {
 
         guard.terminal.read_exact(buf)?;
 
+        Ok(())
+    }
+
+    pub(super) fn flush_console_input(&self) -> Result<(), MachineError> {
+        let tty = std::fs::File::open("/dev/tty")?;
+        tcflush(&tty, QueueSelector::IFlush).map_err(std::io::Error::from)?;
         Ok(())
     }
 }
