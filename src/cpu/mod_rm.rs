@@ -15,7 +15,7 @@ impl<T: Display> Display for RegisterOrMemoryOperand<T> {
         match self {
             Self::Register(reg) => write!(f, "{}", reg),
             Self::Memory(seg_reg, addr) => {
-                write!(f, "[{:}:{:#X}]", seg_reg, addr)
+                write!(f, "[{:}:{:04X}h]", seg_reg, addr)
             }
         }
     }

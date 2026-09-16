@@ -1373,6 +1373,63 @@ fn dec_cx_wraps_zero_to_ffff() {
 }
 
 #[test]
+fn loop_uses_signed_displacement_and_preserves_flags() {
+    for (start_ip, displacement, initial_cx, expected_cx, expected_ip) in [
+        (0x0123u16, 0xDE, 2, 1, 0x0103), // -34 from IP after the instruction.
+        (0x0123, 0xDE, 1, 0, 0x0125),    // Fall through, consuming the displacement.
+        (0x0123, 0xDE, 0, 0xFFFF, 0x0103), // CX wraps and takes the branch.
+        (0x0123, 0xDE, 0x0100, 0x00FF, 0x0103), // Decrement all of CX, not just CL.
+        (0x0100, 0x7F, 2, 1, 0x0181),    // Largest positive displacement.
+        (0x0100, 0x80, 2, 1, 0x0082),    // Most negative displacement: -128.
+        (0x0000, 0xFD, 2, 1, 0xFFFF),    // Backward target wraps.
+        (0xFFFC, 0x02, 2, 1, 0x0000),    // Forward target wraps.
+        (0xFFFF, 0xFE, 2, 1, 0xFFFF),    // Displacement fetch wraps, then jumps -2.
+        (0xFFFF, 0x80, 1, 0, 0x0001),    // Fetch wraps even when branch is not taken.
+    ] {
+        for flags in [0x0000, 0x0FD7] {
+            let mut cpu = Cpu::new();
+            cpu.cs = 0x1000;
+            cpu.ip = start_ip;
+            cpu.cx = initial_cx;
+            cpu.flags = flags;
+            [cpu.ax, cpu.bx, cpu.dx, cpu.sp, cpu.bp, cpu.si, cpu.di] =
+                [0x1234, 0x5678, 0x9ABC, 0x0200, 0x0300, 0x0400, 0x0500];
+            [cpu.ds, cpu.ss, cpu.es] = [0x2000, 0x3000, 0x4000];
+            let original_registers = [
+                cpu.ax, cpu.bx, cpu.dx, cpu.sp, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss,
+                cpu.es,
+            ];
+            let mut memory = vec![0xCC; 0x20000];
+            memory[0x10000 + usize::from(start_ip)] = 0xE2;
+            memory[0x10000 + usize::from(start_ip.wrapping_add(1))] = displacement;
+            let original_memory = memory.clone();
+
+            // Execute exactly one instruction, even when LOOP targets itself.
+            let result = cpu.step(&mut memory).expect("LOOP should succeed");
+
+            assert!(matches!(result, CpuStepResult::Continue));
+            assert_eq!(cpu.cx, expected_cx, "initial CX={initial_cx:04X}");
+            assert_eq!(
+                cpu.ip, expected_ip,
+                "IP={start_ip:04X}, displacement={displacement:02X}, CX={initial_cx:04X}"
+            );
+            assert_eq!(
+                cpu.flags, flags,
+                "LOOP neither tests nor changes ZF or other flags"
+            );
+            assert_eq!(
+                [
+                    cpu.ax, cpu.bx, cpu.dx, cpu.sp, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss,
+                    cpu.es,
+                ],
+                original_registers
+            );
+            assert!(memory == original_memory, "LOOP must not modify memory");
+        }
+    }
+}
+
+#[test]
 fn jnz_forward_crosses_signed_16_bit_boundary() {
     let mut cpu = Cpu::new();
     cpu.ip = 0x7FFD;

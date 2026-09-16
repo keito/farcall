@@ -462,6 +462,14 @@ impl Cpu {
                 self.set_flag(Flag::AuxiliaryCarry, old_si & 0xF == 0xF);
                 self.set_result_flags16(self.si);
             }
+            0x47 => {
+                print_instruction(byte, &format_args!("inc di"));
+                let old_di = self.di;
+                self.di = self.di.wrapping_add(1);
+                self.set_flag(Flag::Overflow, old_di == 0x7FFF);
+                self.set_flag(Flag::AuxiliaryCarry, old_di & 0xF == 0xF);
+                self.set_result_flags16(self.di);
+            }
             0x49 => {
                 print_instruction(byte, &format_args!("dec cx"));
                 let old_cx = self.cx;
@@ -939,6 +947,15 @@ impl Cpu {
                     }
                     _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
                 };
+            }
+            0xE2 => {
+                // LOOP rel8
+                let displacement = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("loop {:X}h", displacement));
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 {
+                    self.ip = self.ip.wrapping_add_signed((displacement as i8) as i16);
+                }
             }
             // CALL
             0xE8 => {
