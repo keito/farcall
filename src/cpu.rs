@@ -328,6 +328,36 @@ impl Cpu {
                 self.write_operand16(memory, &rm, value)?;
                 self.update_logic_flags16(value);
             }
+            0x0A => {
+                // OR REG8, REG8/MEM8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("or {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg8(dest_reg);
+                let rm_value = self.read_operand8(memory, &rm)?;
+
+                let value = reg_value | rm_value;
+                self.set_reg8(dest_reg, value);
+                self.update_logic_flags8(value);
+            }
+            0x0B => {
+                // OR REG16, REG16/MEM16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("or {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg16(dest_reg);
+                let rm_value = self.read_operand16(memory, &rm)?;
+
+                let value = reg_value | rm_value;
+                self.set_reg16(dest_reg, value);
+                self.update_logic_flags16(value);
+            }
             0x0C => {
                 // OR AL, IMMED8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
