@@ -1068,7 +1068,7 @@ impl Cpu {
     }
 
     pub(crate) fn trace(&self) {
-        eprintln!("{:?}", self);
+        eprintln!("\x1b[37m{:?}\x1b[0m", self);
     }
 }
 
@@ -1094,5 +1094,8 @@ impl Debug for Cpu {
 }
 
 fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
-    eprintln!("{:#X} \x1b[96m({:?})\x1b[0m", op, instruction);
+    eprintln!(
+        "\x1b[1m{:#04X}\x1b[0m \x1b[94m({:?})\x1b[0m",
+        op, instruction
+    );
 }

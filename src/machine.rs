@@ -330,7 +330,7 @@ impl Machine {
         match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
             CpuStepResult::Interrupt(interrupt) => {
-                eprintln!("Interrupted: {interrupt:X}");
+                eprintln!("\x1b[1;91mInterrupt {interrupt:X}\x1b[0m");
                 let interrupt_result = self.handle_interrupt(interrupt)?;
                 self.cpu.trace();
                 match interrupt_result {
