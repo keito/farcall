@@ -607,10 +607,48 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cld"));
                 self.set_flag(Flag::Direction, false);
             }
+            // INC r/m8 or DEC r/m8
+            0xFE => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let is_inc = match parsed.reg_field {
+                    0 => true,
+                    1 => false,
+                    _ => return Err(CpuError::InvalidRegisterValue(parsed.reg_field)),
+                };
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                print_instruction(
+                    byte,
+                    &format_args!("{} {}", if is_inc { "inc" } else { "dec" }, rm),
+                );
+                let old_value = self.read_operand8(memory, &rm)?;
+                let new_value = (old_value as i8).wrapping_add(if is_inc { 1 } else { -1 }) as u8;
+                self.write_operand8(memory, &rm, new_value)?;
+
+                self.set_result_flags8(new_value);
+                if is_inc {
+                    // Signed overflow: 0x7F became 0x80, meaning +127 became -128
+                    self.set_flag(Flag::Overflow, old_value == 0x7F);
+                    // Was original low nibble 0b1111
+                    self.set_flag(Flag::AuxiliaryCarry, old_value & 0xF == 0xF);
+                } else {
+                    // decrement
+                    // Overflow: 0x80 became 0x7F, meaning -128 became +127
+                    self.set_flag(Flag::Overflow, old_value == 0x80);
+                    // Did decrementing borrowing into lower nibble (was it 0)
+                    self.set_flag(Flag::AuxiliaryCarry, old_value & 0x0F == 0);
+                }
+            }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
         self.trace();
         Ok(result)
+    }
+
+    fn set_result_flags8(&mut self, result: u8) {
+        self.set_flag(Flag::Zero, result == 0);
+        self.set_flag(Flag::Sign, result & (1 << 7) != 0);
+        self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
     }
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
