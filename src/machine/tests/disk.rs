@@ -1,5 +1,6 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
-use crate::machine::{MachineError, calc_360kib_disk_offset};
+use crate::machine::MachineError;
+use crate::machine::disk::calc_360kib_disk_offset;
 use crate::memory::MemoryError;
 
 fn registers(cpu: &Cpu) -> [u16; 13] {
@@ -64,7 +65,7 @@ fn assert_guest_error(machine: &mut Machine, status: u8, context: &str) {
     );
     assert!(
         machine.memory == original_memory,
-        "{context}: rejected reads must not write RAM"
+        "{context}: rejected operations must not write RAM"
     );
     assert_eq!(
         machine.floppy_image, original_image,
@@ -143,7 +144,6 @@ fn int13_rejects_parameters_outside_the_current_supported_subset() {
     // This intentionally documents today's limited service. Expand these
     // expectations when more operations, counts, or drives are supported.
     for (name, ax, cx, dx) in [
-        ("reset not yet supported", 0x0001, 0x0002, 0x0000),
         ("writes not supported", 0x0301, 0x0002, 0x0000),
         ("unknown operation", 0xFF01, 0x0002, 0x0000),
         ("zero sectors", 0x0200, 0x0002, 0x0000),
@@ -159,6 +159,59 @@ fn int13_rejects_parameters_outside_the_current_supported_subset() {
             machine.cpu.dx = dx;
             machine.cpu.flags = flags;
             assert_guest_error(&mut machine, 0x01, name);
+        }
+    }
+}
+
+#[test]
+fn int13_reset_succeeds_without_read_parameters_and_preserves_state() {
+    for image in [None, Some(disk_image(1024))] {
+        for flags in [0xF002, 0xF003, 0xFFD6, 0xFFD7] {
+            // Reset ignores AL and CHS, including values invalid for a read.
+            for (al, cx, dx) in [(0, 0, 0), (1, 2, 0), (0xFF, 0xFFFF, 0xFF00)] {
+                let mut machine = machine_with_image(image.clone());
+                machine.cpu.ax = al; // AH=00h: reset.
+                machine.cpu.cx = cx;
+                machine.cpu.dx = dx;
+                machine.cpu.flags = flags;
+                // Outside the allocated RAM: reset must not access ES:BX.
+                machine.cpu.es = 0x8000;
+                machine.cpu.bx = 0x1234;
+                let expected_registers = registers(&machine.cpu);
+                let original_memory = machine.memory.clone();
+
+                assert!(matches!(
+                    machine.handle_interrupt(0x13).unwrap(),
+                    InterruptResult::ResumeExecution
+                ));
+
+                assert_eq!(registers(&machine.cpu), expected_registers);
+                assert_eq!(machine.cpu.flags, flags & !1, "only CF is cleared");
+                assert!(
+                    machine.memory == original_memory,
+                    "reset must not write RAM"
+                );
+                assert_eq!(machine.floppy_image, image, "reset preserves the disk");
+            }
+        }
+    }
+}
+
+#[test]
+fn int13_reset_rejects_unsupported_drives_without_changing_memory() {
+    for image in [None, Some(disk_image(1024))] {
+        for flags in [0xF002, 0xFFD7] {
+            for drive in [1, 0x80, 0xFF] {
+                let mut machine = machine_with_image(image.clone());
+                machine.cpu.ax = 0x00A5; // Reset, with an unrelated AL to preserve.
+                machine.cpu.dx = drive;
+                machine.cpu.flags = flags;
+                assert_guest_error(
+                    &mut machine,
+                    0x01,
+                    &format!("reset unsupported drive {drive:02X}"),
+                );
+            }
         }
     }
 }
