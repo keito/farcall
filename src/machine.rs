@@ -124,6 +124,25 @@ impl Machine {
         return Ok(InterruptResult::ResumeExecution);
     }
 
+    /// Emulates the DOS output char service
+    fn output_char_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let c = self.cpu.get_reg8(Reg8::Dl);
+        let Some(Some(resource)) = self.handles.get(1) else {
+            return Err(MachineError::WriteServiceError(
+                "Handle 1 is not set".to_string(),
+            ));
+        };
+        // TODO: Support other resources in the future
+        if *resource != Resource::Stdout {
+            return Err(MachineError::WriteServiceError(
+                "Handle 1 must be stdout".to_string(),
+            ));
+        }
+        io::stdout().write_all(&[c])?;
+        io::stdout().flush()?;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the DOS read service
     fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
         let dest = self.cpu.bx as usize;
@@ -229,6 +248,7 @@ impl Machine {
                 let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
                 match service {
                     0x01 => self.read_char_with_echo_service(),
+                    0x02 => self.output_char_service(),
                     0x09 => self.print_string_service(),
                     0x30 => self.dos_version_service(),
                     0x3E => self.close_handle_service(),
