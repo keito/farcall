@@ -240,6 +240,37 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
+            0x03 => {
+                // ADD r16, r/m16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("add {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg16(dest_reg);
+                let rm_value = self.read_operand16(memory, &rm)?;
+                let value = self.add16(reg_value, rm_value, false);
+                self.set_reg16(dest_reg, value);
+            }
+            0x04 => {
+                // ADD AL, IMMED8
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("add al, {:04X}h", immediate));
+
+                let reg_value = self.get_reg8(Reg8::Al);
+                let value = self.add8(reg_value, immediate, false);
+                self.set_reg8(Reg8::Al, value);
+            }
+            0x05 => {
+                // ADD AX, IMMED16
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("add ax, {:04X}h", immediate));
+
+                let reg_value = self.get_reg16(Reg16::Ax);
+                let value = self.add16(reg_value, immediate, false);
+                self.set_reg16(Reg16::Ax, value);
+            }
             0x08 => {
                 // OR REG8/MEM8, REG8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -962,6 +993,25 @@ impl Cpu {
             (lhs & 0x0F) + (rhs & 0x0F) + carry_in as u8 > 0x0F,
         );
         self.set_result_flags8(result);
+
+        result
+    }
+
+    fn add16(&mut self, lhs: u16, rhs: u16, carry_in: bool) -> u16 {
+        let big_result = lhs as u32 + rhs as u32 + carry_in as u32;
+        let result = big_result as u16;
+
+        self.set_flag(Flag::Carry, big_result > 0xFFFF);
+        // Overflow: operands have the same signs AND the result's sign differs
+        self.set_flag(
+            Flag::Overflow,
+            ((lhs & 0x8000) == (rhs & 0x8000)) && ((result & 0x8000) != (lhs & 0x8000)),
+        );
+        self.set_flag(
+            Flag::AuxiliaryCarry,
+            (lhs & 0x0F) + (rhs & 0x0F) + carry_in as u16 > 0x0F,
+        );
+        self.set_result_flags16(result);
 
         result
     }
