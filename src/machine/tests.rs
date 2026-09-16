@@ -1,5 +1,7 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 
+mod disk;
+
 #[test]
 fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segment() {
     let mut machine = Machine {
