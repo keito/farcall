@@ -14,6 +14,137 @@ fn assert_flags(actual: u16, initial: u16, expected: u16) {
 }
 
 #[test]
+fn xor_33_sets_word_flags_and_preserves_the_source() {
+    for (destination, source, expected, flags) in [
+        (0x1234, 0x00FF, 0x12CB, 0x0000), // Distinct operands expose reversed writes.
+        (0x1234, 0x1234, 0x0000, 0x0044), // ZF and even parity of zero.
+        (0x1234, 0x0234, 0x1000, 0x0004), // Parity uses only the low byte.
+        (0x1234, 0x1335, 0x0101, 0x0000), // Odd low-byte parity, even word parity.
+        (0xA55A, 0x255A, 0x8000, 0x0084), // SF uses bit 15.
+        (0x0080, 0x0000, 0x0080, 0x0000), // Bit 7 must not set SF.
+        (0xAAAA, 0x5555, 0xFFFF, 0x0084),
+    ] {
+        for initial_flags in [0x0000, 0x0FD7] {
+            let mut cpu = Cpu::new();
+            cpu.ax = destination;
+            cpu.bx = source;
+            cpu.flags = initial_flags;
+            let mut expected_registers = registers(&cpu);
+            expected_registers[0] = expected;
+            let mut memory = [0x33, 0xC3]; // XOR AX, BX.
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(registers(&cpu), expected_registers);
+            assert_eq!(cpu.ip, 2);
+            assert_eq!(memory, [0x33, 0xC3]);
+            assert_flags(cpu.flags, initial_flags, flags);
+        }
+    }
+}
+
+#[test]
+fn xor_33_register_encoding_covers_every_destination_source_and_self_xor() {
+    let initial = [
+        0x1234, 0x5678, 0x9ABC, 0xDEF0, 0x1357, 0x2468, 0xA55A, 0xFFFF,
+    ];
+    for destination in 0..8 {
+        for source in 0..8 {
+            let mut cpu = Cpu::new();
+            [
+                cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
+            ] = initial;
+            cpu.flags = 0x0FD7;
+            let mut expected_registers = registers(&cpu);
+            expected_registers[destination] = initial[destination] ^ initial[source];
+            let mut memory = [0x33, 0xC0 | ((destination as u8) << 3) | source as u8];
+            let original_memory = memory;
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(
+                registers(&cpu),
+                expected_registers,
+                "destination={destination}, source={source}"
+            );
+            assert_eq!(cpu.ip, 2);
+            assert_eq!(memory, original_memory);
+            if destination == source {
+                assert_flags(cpu.flags, 0x0FD7, 0x0044);
+            }
+        }
+    }
+}
+
+#[test]
+fn xor_33_reads_segmented_memory_without_writing_it() {
+    for (instruction, ds, low, high) in [
+        (&[0x33, 0x04][..], 0x1000, 0x10800, 0x10801), // AX, [SI].
+        (&[0x33, 0x46, 0xFE][..], 0x1000, 0x207FE, 0x207FF), // AX, [BP-2].
+        (&[0x33, 0x84, 0x34, 0x12][..], 0x1000, 0x11A34, 0x11A35), // AX, [SI+1234].
+        (&[0x33, 0x06, 0xFF, 0x00][..], 0xFFFF, 0x000EF, 0x000F0), // Address wraps at 1 MiB.
+        (&[0x33, 0x06, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000), // Word straddles 1 MiB.
+    ] {
+        let mut cpu = Cpu::new();
+        cpu.ax = 0xA55A;
+        cpu.si = 0x0800;
+        cpu.bp = 0x0800;
+        cpu.ds = ds;
+        cpu.ss = 0x2000;
+        cpu.ip = 0x0100;
+        cpu.flags = 0x0FD7;
+        let mut expected_registers = registers(&cpu);
+        expected_registers[0] = 0xB76E;
+        let mut memory = vec![0xCC; 0x100000];
+        memory[0x0100..0x0100 + instruction.len()].copy_from_slice(instruction);
+        memory[low] = 0x34;
+        memory[high] = 0x12;
+        let original_memory = memory.clone();
+
+        assert!(matches!(
+            cpu.step(&mut memory).unwrap(),
+            CpuStepResult::Continue
+        ));
+
+        assert_eq!(registers(&cpu), expected_registers);
+        assert_eq!(cpu.ip, 0x0100 + instruction.len() as u16);
+        assert_flags(cpu.flags, 0x0FD7, 0x0080);
+        assert!(
+            memory == original_memory,
+            "XOR must preserve its memory source: {instruction:02X?}"
+        );
+    }
+}
+
+#[test]
+fn xor_33_memory_error_preserves_destination_flags_and_memory() {
+    for offset in [0x01FFu16, 0x0200] {
+        let mut cpu = Cpu::new();
+        cpu.ax = 0xFFFF;
+        cpu.flags = 0x0FD7;
+        let original_registers = registers(&cpu);
+        let [low, high] = offset.to_le_bytes();
+        let mut memory = vec![0xCC; 0x0200];
+        memory[..4].copy_from_slice(&[0x33, 0x06, low, high]);
+        let original_memory = memory.clone();
+
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+        ));
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert!(memory == original_memory);
+    }
+}
+
+#[test]
 fn xor_word_results_set_flags_and_preserve_the_source() {
     for (destination, source, expected, flags) in [
         (0x1234, 0x1234, 0x0000, 0x0044), // Zero: ZF and PF.

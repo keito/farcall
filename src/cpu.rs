@@ -300,6 +300,21 @@ impl Cpu {
                 self.write_operand16(memory, &rm, value)?;
                 self.update_logic_flags16(value);
             }
+            0x33 => {
+                // XOR REG16, REG16/MEM16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("xor {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg16(dest_reg);
+                let rm_value = self.read_operand16(memory, &rm)?;
+
+                let value = reg_value ^ rm_value;
+                self.set_reg16(dest_reg, value);
+                self.update_logic_flags16(value);
+            }
             0x3A => {
                 // CMP r8, r/m8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -687,6 +702,11 @@ impl Cpu {
                 print_instruction(byte, &format_args!("jmp {:X}h", displacement));
                 // Add the displacement to IP with 16-bit wrapping
                 self.ip = self.ip.wrapping_add(displacement)
+            }
+            // CLI
+            0xFA => {
+                print_instruction(byte, &format_args!("cli"));
+                self.set_flag(Flag::InterruptEnable, false);
             }
             // CLD
             0xFC => {

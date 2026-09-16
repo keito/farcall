@@ -25,6 +25,53 @@ fn cpu_with_distinct_registers() -> Cpu {
 }
 
 #[test]
+fn cli_clears_only_interrupt_enable_and_advances_ip_including_wrap() {
+    for flags in [0xF002, 0xF202, 0xFDD7, 0xFFD7] {
+        for (ip, next_ip) in [(0x0100, 0x0101), (0xFFFF, 0x0000)] {
+            let mut cpu = cpu_with_distinct_registers();
+            cpu.ip = ip;
+            cpu.flags = flags;
+            let original_registers = other_registers(&cpu);
+            let mut memory = vec![0xCC; 0x20000];
+            memory[0x10000 + usize::from(ip)] = 0xFA;
+            let original_memory = memory.clone();
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(cpu.flags, flags & !0x0200, "CLI changes only IF");
+            assert_eq!(cpu.ip, next_ip);
+            assert_eq!(cpu.cs, 0x1000);
+            assert_eq!(cpu.sp, 0x0800);
+            assert_eq!(other_registers(&cpu), original_registers);
+            assert!(memory == original_memory);
+        }
+    }
+}
+
+#[test]
+fn cli_does_not_disable_software_int() {
+    let mut cpu = cpu_with_distinct_registers();
+    cpu.flags = 0xFFD7;
+    let mut memory = vec![0xCC; 0x20000];
+    memory[0x10100..0x10103].copy_from_slice(&[0xFA, 0xCD, 0x60]);
+
+    assert!(matches!(
+        cpu.step(&mut memory).unwrap(),
+        CpuStepResult::Continue
+    ));
+    assert_eq!(cpu.flags, 0xFDD7);
+    assert!(matches!(
+        cpu.step(&mut memory).unwrap(),
+        CpuStepResult::Interrupt(0x60)
+    ));
+    assert_eq!(cpu.ip, 0x0103);
+    assert_eq!(cpu.flags, 0xFDD7);
+}
+
+#[test]
 fn int_decoder_reports_unsigned_vector_and_advances_return_ip_including_wrap() {
     for interrupt in [0x00, 0x60, 0x80, 0xFF] {
         for (ip, next_ip, operand_address) in [
