@@ -2,6 +2,7 @@ use super::{Cpu, CpuError, CpuStepResult};
 use crate::memory::MemoryError;
 
 mod addressing;
+mod group1_byte;
 mod memory_access;
 mod or;
 mod xor;

@@ -446,6 +446,48 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x80 => {
+                // Does a lot of things! on REG8/MEM8, IMMED8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm8_operand(memory, parsed)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                let destination = self.read_operand8(memory, &rm)?;
+                let mut is_cmp = false;
+                let value = match reg_field {
+                    0 => self.add8(destination, immediate), // ADD
+                    1 => {
+                        // OR
+                        let result = destination | immediate;
+                        self.update_logic_flags8(result);
+                        result
+                    }
+                    // 2: ADC
+                    // 3: SBB
+                    4 => {
+                        // AND
+                        let result = destination & immediate;
+                        self.update_logic_flags8(result);
+                        result
+                    }
+                    5 => self.subtract8(destination, immediate), // SUB
+                    6 => {
+                        // XOR
+                        let result = destination ^ immediate;
+                        self.update_logic_flags8(result);
+                        result
+                    }
+                    7 => {
+                        // CMP
+                        is_cmp = true;
+                        self.subtract8(destination, immediate)
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+                if !is_cmp {
+                    self.write_operand8(memory, &rm, value)?;
+                }
+            }
             0x86 => {
                 // XCHG REG8,REG8/MEM8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
@@ -755,6 +797,20 @@ impl Cpu {
         );
         self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) < (rhs & 0x0F));
         self.set_result_flags16(result);
+
+        result
+    }
+
+    fn add8(&mut self, lhs: u8, rhs: u8) -> u8 {
+        let (result, carry) = lhs.overflowing_add(rhs);
+        self.set_flag(Flag::Carry, carry);
+        // Overflow: operands have the same signs AND the result's sign differs
+        self.set_flag(
+            Flag::Overflow,
+            ((lhs & 0x80) == (rhs & 0x80)) && ((result & 0x80) != (lhs & 0x80)),
+        );
+        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) + (rhs & 0x0F) > 0x0F);
+        self.set_result_flags8(result);
 
         result
     }
