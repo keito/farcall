@@ -282,7 +282,7 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let new_val = self.subtract8(self.get_reg8(Reg8::Al), operand);
+                let new_val = self.subtract8(self.get_reg8(Reg8::Al), operand, false);
                 self.set_reg8(Reg8::Al, new_val);
             }
             0x31 => {
@@ -309,7 +309,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand8(memory, &rm)?;
-                self.subtract8(self.get_reg8(dest_reg), rm_value);
+                self.subtract8(self.get_reg8(dest_reg), rm_value, false);
             }
             0x3B => {
                 // CMP r16, r/m16
@@ -326,7 +326,7 @@ impl Cpu {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
-                self.subtract8(self.get_reg8(Reg8::Al), operand);
+                self.subtract8(self.get_reg8(Reg8::Al), operand, false);
             }
             0x3D => {
                 // CMP AX, imm16
@@ -455,22 +455,22 @@ impl Cpu {
                 let destination = self.read_operand8(memory, &rm)?;
                 let mut is_cmp = false;
                 let value = match reg_field {
-                    0 => self.add8(destination, immediate), // ADD
+                    0 => self.add8(destination, immediate, false), // ADD
                     1 => {
                         // OR
                         let result = destination | immediate;
                         self.update_logic_flags8(result);
                         result
                     }
-                    // 2: ADC
-                    // 3: SBB
+                    2 => self.add8(destination, immediate, self.get_flag(Flag::Carry)), // ADC
+                    3 => self.subtract8(destination, immediate, self.get_flag(Flag::Carry)), // SBB
                     4 => {
                         // AND
                         let result = destination & immediate;
                         self.update_logic_flags8(result);
                         result
                     }
-                    5 => self.subtract8(destination, immediate), // SUB
+                    5 => self.subtract8(destination, immediate, false), // SUB
                     6 => {
                         // XOR
                         let result = destination ^ immediate;
@@ -480,7 +480,7 @@ impl Cpu {
                     7 => {
                         // CMP
                         is_cmp = true;
-                        self.subtract8(destination, immediate)
+                        self.subtract8(destination, immediate, false)
                     }
                     _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
                 };
@@ -767,18 +767,23 @@ impl Cpu {
 
     /// Implements shared functionality for subtracting an 8-bit rhs
     /// from an 8-bit lhs and setting the correct flags.
-    fn subtract8(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let (result, borrow) = lhs.overflowing_sub(rhs);
+    fn subtract8(&mut self, lhs: u8, rhs: u8, borrow_in: bool) -> u8 {
+        let new_rhs = rhs as u16 + borrow_in as u16;
+        let wide_lhs = lhs as u16;
+        let result = wide_lhs.wrapping_sub(new_rhs) as u8;
 
         // Carry flag: did subtraction require a borrow?
-        self.set_flag(Flag::Carry, borrow);
+        self.set_flag(Flag::Carry, wide_lhs < new_rhs);
         // Overflow: (1) old_reg and operand have different signs, AND
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
             ((lhs & 0x80) != (rhs & 0x80)) && ((result & 0x80) != (lhs & 0x80)),
         );
-        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) < (rhs & 0x0F));
+        self.set_flag(
+            Flag::AuxiliaryCarry,
+            (wide_lhs & 0x0F) < ((rhs & 0x0F) + borrow_in as u8) as u16,
+        );
         self.set_result_flags8(result);
 
         result
@@ -801,15 +806,20 @@ impl Cpu {
         result
     }
 
-    fn add8(&mut self, lhs: u8, rhs: u8) -> u8 {
-        let (result, carry) = lhs.overflowing_add(rhs);
-        self.set_flag(Flag::Carry, carry);
+    fn add8(&mut self, lhs: u8, rhs: u8, carry_in: bool) -> u8 {
+        let big_result = lhs as u16 + rhs as u16 + carry_in as u16;
+        let result = big_result as u8;
+
+        self.set_flag(Flag::Carry, big_result > 0xFF);
         // Overflow: operands have the same signs AND the result's sign differs
         self.set_flag(
             Flag::Overflow,
             ((lhs & 0x80) == (rhs & 0x80)) && ((result & 0x80) != (lhs & 0x80)),
         );
-        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) + (rhs & 0x0F) > 0x0F);
+        self.set_flag(
+            Flag::AuxiliaryCarry,
+            (lhs & 0x0F) + (rhs & 0x0F) + carry_in as u8 > 0x0F,
+        );
         self.set_result_flags8(result);
 
         result
