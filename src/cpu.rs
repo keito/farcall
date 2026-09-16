@@ -124,7 +124,7 @@ impl Cpu {
         }
     }
 
-    fn get_segment_reg(&self, reg: SegmentReg) -> u16 {
+    pub(crate) fn get_segment_reg(&self, reg: SegmentReg) -> u16 {
         match reg {
             SegmentReg::Es => self.es,
             SegmentReg::Cs => self.cs,

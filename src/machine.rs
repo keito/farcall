@@ -7,7 +7,7 @@ use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
-use crate::registers::{Reg8, Reg16};
+use crate::registers::{Reg8, Reg16, SegmentReg};
 
 mod console;
 #[cfg(test)]
@@ -53,6 +53,8 @@ enum MachineError {
     CpuError(#[from] CpuError),
     #[error("Boot Sector error: {0}")]
     BootSectorError(String),
+    #[error("Disk Service error: {0}")]
+    DiskServiceError(String),
 }
 
 enum InterruptResult {
@@ -255,6 +257,57 @@ impl Machine {
         }
     }
 
+    /// Emulates the BIOS disk service
+    fn disk_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let operation = self.cpu.get_reg8(Reg8::Ah);
+        let sector_count = self.cpu.get_reg8(Reg8::Al);
+        let cylinder = self.cpu.get_reg8(Reg8::Ch);
+        let sector_num = self.cpu.get_reg8(Reg8::Cl) as usize;
+        let head = self.cpu.get_reg8(Reg8::Dh);
+        let drive = self.cpu.get_reg8(Reg8::Dl);
+        let dest = PhysAddr::new(
+            self.cpu.get_segment_reg(SegmentReg::Es),
+            self.cpu.get_reg16(Reg16::Bx),
+        );
+
+        // TODO: We only read one sector from drive 0, cylinder 0, head 0.
+        // We also only read sector numbers 1 or 2.
+        if operation != 0x02
+            || sector_count != 1
+            || drive != 0
+            || cylinder != 0
+            || head != 0
+            || (sector_num != 1 && sector_num != 2)
+        {
+            self.cpu.set_reg8(Reg8::Ah, 0x01);
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        }
+
+        let Some(image) = &self.floppy_image else {
+            self.cpu.set_reg8(Reg8::Ah, 0x80);
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+
+        let image_offset = (sector_num - 1) * 512;
+        // Make sure the disk image is at least image_offset + 512 bytes long
+        if image_offset + 512 > image.len() {
+            self.cpu.set_reg8(Reg8::Ah, 0x04);
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        }
+
+        // Write sector to destination
+        let validated_buffer = validate_buffer(&mut self.memory, dest, 512)?;
+        write_buffer(validated_buffer, &image[image_offset..image_offset + 512])?;
+
+        self.cpu.set_reg8(Reg8::Ah, 0);
+        self.cpu.set_flag(Flag::Carry, false);
+
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -298,7 +351,9 @@ impl Machine {
 
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
+            // BIOS services
             0x10 => self.video_service(),
+            0x13 => self.disk_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
             // DOS services
             0x21 => {
