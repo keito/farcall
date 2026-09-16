@@ -235,19 +235,35 @@ impl Cpu {
 
     /// Fetch, decode, and execute one instruction
     pub(crate) fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
-        let mut byte = self.fetch_next_byte_and_advance_ip(memory);
+        let mut byte;
+        let mut segment_override = None;
+        let mut rep_prefix = None;
 
-        // Check for segment override prefix; fetch another byte if it is
-        let segment_override = match byte {
-            0x2E => Some(SegmentReg::Cs),
-            0x26 => Some(SegmentReg::Es),
-            0x36 => Some(SegmentReg::Ss),
-            0x3E => Some(SegmentReg::Ds),
-            _ => None,
-        };
-        if let Some(seg) = segment_override {
-            eprint!("\x1b[1m{:#04X}\x1b[0m \x1b[92m({})\x1b[0m ", byte, seg);
+        loop {
             byte = self.fetch_next_byte_and_advance_ip(memory);
+
+            // Check for segment override prefix
+            let prefix_segment = match byte {
+                0x2E => Some(SegmentReg::Cs),
+                0x26 => Some(SegmentReg::Es),
+                0x36 => Some(SegmentReg::Ss),
+                0x3E => Some(SegmentReg::Ds),
+                _ => None,
+            };
+            if let Some(seg) = prefix_segment {
+                segment_override = Some(seg);
+                eprint!("\x1b[1m{:#04X}\x1b[0m \x1b[92m({})\x1b[0m ", byte, seg);
+                continue;
+            }
+
+            // Check for REPE/REPNE prefix
+            if byte == 0xF2 || byte == 0xF3 {
+                rep_prefix = Some(byte);
+                eprint!("\x1b[1m{:#04X}\x1b[0m ", byte);
+                continue;
+            }
+
+            break;
         }
 
         let mut result = CpuStepResult::Continue;
@@ -772,15 +788,23 @@ impl Cpu {
             }
             0xAC => {
                 // LODSB
-                print_instruction(byte, &format_args!("lodsb"));
-                let seg = segment_override.unwrap_or(SegmentReg::Ds);
-                let seg_addr = self.get_segment_reg(seg);
-                let byte = read_byte(memory, PhysAddr::new(seg_addr, self.si))?;
-                self.set_reg8(Reg8::Al, byte);
-                if self.get_flag(Flag::Direction) {
-                    self.si = self.si.wrapping_sub(1);
-                } else {
-                    self.si = self.si.wrapping_add(1);
+                // Repeat if REP prefix was set
+                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // TODO: Support interrupt/resume between repetitions
+                for _ in 0..reps {
+                    print_instruction(byte, &format_args!("lodsb"));
+                    let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    let seg_addr = self.get_segment_reg(seg);
+                    let byte = read_byte(memory, PhysAddr::new(seg_addr, self.si))?;
+                    self.set_reg8(Reg8::Al, byte);
+                    if self.get_flag(Flag::Direction) {
+                        self.si = self.si.wrapping_sub(1);
+                    } else {
+                        self.si = self.si.wrapping_add(1);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        self.cx = self.cx.wrapping_sub(1);
+                    }
                 }
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register

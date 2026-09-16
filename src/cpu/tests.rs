@@ -8,6 +8,7 @@ mod interrupts;
 mod memory_access;
 mod mul;
 mod or;
+mod rep_lodsb;
 mod segment_override;
 mod shl;
 mod xor;
