@@ -398,6 +398,30 @@ impl Cpu {
                 print_instruction(byte, &format_args!("pop ds"));
                 self.ds = self.pop_from_stack(memory)?;
             }
+            0x28 => {
+                // SUB r/m8, r8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("sub {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand8(memory, &rm)?;
+                let value = self.subtract8(rm_value, self.get_reg8(source_reg), false);
+                self.write_operand8(memory, &rm, value)?;
+            }
+            0x2A => {
+                // SUB r8, r/m8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("sub {}, {}", dest_reg, rm));
+
+                let rm_value = self.read_operand8(memory, &rm)?;
+                let value = self.subtract8(self.get_reg8(dest_reg), rm_value, false);
+                self.set_reg8(dest_reg, value);
+            }
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
@@ -418,6 +442,21 @@ impl Cpu {
                 let value = reg_value ^ rm_value;
                 self.write_operand16(memory, &rm, value)?;
                 self.update_logic_flags16(value);
+            }
+            0x32 => {
+                // XOR REG8, REG8/MEM8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("xor {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg8(dest_reg);
+                let rm_value = self.read_operand8(memory, &rm)?;
+
+                let value = reg_value ^ rm_value;
+                self.set_reg8(dest_reg, value);
+                self.update_logic_flags8(value);
             }
             0x33 => {
                 // XOR REG16, REG16/MEM16
@@ -788,6 +827,7 @@ impl Cpu {
             }
             0xA6 => {
                 // CMPSB DEST-STR8, SRC-STR8
+                print_instruction(byte, &format_args!("cmpsb"));
                 let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let source_seg = segment_override.unwrap_or(SegmentReg::Ds);
@@ -820,11 +860,11 @@ impl Cpu {
             }
             0xAC => {
                 // LODSB
+                print_instruction(byte, &format_args!("lodsb"));
                 // Repeat if REP prefix was set
                 let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
-                    print_instruction(byte, &format_args!("lodsb"));
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
                     let seg_addr = self.get_segment_reg(seg);
                     let byte = read_byte(memory, PhysAddr::new(seg_addr, self.si))?;
