@@ -224,17 +224,13 @@ impl Cpu {
     fn update_logic_flags8(&mut self, result: u8) {
         self.set_flag(Flag::Carry, false);
         self.set_flag(Flag::Overflow, false);
-        self.set_flag(Flag::Zero, result == 0);
-        self.set_flag(Flag::Sign, result & 0x80 != 0);
-        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
+        self.set_result_flags8(result);
     }
 
     fn update_logic_flags16(&mut self, result: u16) {
         self.set_flag(Flag::Carry, false);
         self.set_flag(Flag::Overflow, false);
-        self.set_flag(Flag::Zero, result == 0);
-        self.set_flag(Flag::Sign, result & 0x8000 != 0);
-        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
+        self.set_result_flags16(result);
     }
 
     /// Fetch, decode, and execute one instruction
@@ -315,22 +311,15 @@ impl Cpu {
                 self.set_flag(Flag::Overflow, old_si == 0x7FFF);
                 // Was original low nibble 0b1111
                 self.set_flag(Flag::AuxiliaryCarry, old_si & 0xF == 0xF);
-                self.set_flag(Flag::Zero, self.si == 0);
-                self.set_flag(Flag::Sign, self.si & (1 << 15) != 0);
-                self.set_flag(Flag::Parity, (self.si as u8).count_ones() % 2 == 0);
+                self.set_result_flags16(self.si);
             }
             0x49 => {
                 print_instruction(byte, &format_args!("dec cx"));
                 let old_cx = self.cx;
                 self.cx = self.cx.wrapping_sub(1);
-                // Set or clear the zero flag
-                self.set_flag(Flag::Zero, self.cx == 0);
+                self.set_result_flags16(self.cx);
                 // Overflow: 0x8000 became 0x7FFF, meaning -32768 became +32767
                 self.set_flag(Flag::Overflow, old_cx == 0x8000);
-                // Is bit 15 set (i.e., negative)
-                self.set_flag(Flag::Sign, self.cx & (1 << 15) != 0);
-                // Parity (even number of 1s in the lower byte)
-                self.set_flag(Flag::Parity, (self.cx as u8).count_ones() % 2 == 0);
                 // Did decrementing borrowing into lower nibble (was it 0)
                 self.set_flag(Flag::AuxiliaryCarry, old_cx & 0x0F == 0);
             }
@@ -651,6 +640,14 @@ impl Cpu {
         self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
     }
 
+    fn set_result_flags16(&mut self, result: u16) {
+        self.set_flag(Flag::Zero, result == 0);
+        // Is bit 15 set (i.e., negative)
+        self.set_flag(Flag::Sign, result & (1 << 15) != 0);
+        // Parity (even number of 1s in the lower byte)
+        self.set_flag(Flag::Parity, (result as u8).count_ones() % 2 == 0);
+    }
+
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
         Ok(write_word(memory, PhysAddr::new(self.ss, self.sp), word)?)
@@ -686,17 +683,14 @@ impl Cpu {
 
         // Carry flag: did subtraction require a borrow?
         self.set_flag(Flag::Carry, borrow);
-        // Set or clear the zero flag
-        self.set_flag(Flag::Zero, result == 0);
         // Overflow: (1) old_reg and operand have different signs, AND
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
             ((old_reg & 0x80) != (operand & 0x80)) && ((result & 0x80) != (old_reg & 0x80)),
         );
-        self.set_flag(Flag::Sign, result & (1 << 7) != 0);
-        self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
         self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+        self.set_result_flags8(result);
 
         result
     }
@@ -707,17 +701,14 @@ impl Cpu {
 
         // Carry flag: did subtraction require a borrow?
         self.set_flag(Flag::Carry, borrow);
-        // Set or clear the zero flag
-        self.set_flag(Flag::Zero, result == 0);
         // Overflow: (1) old_reg and operand have different signs, AND
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
             ((old_reg & 0x8000) != (operand & 0x8000)) && ((result & 0x8000) != (old_reg & 0x8000)),
         );
-        self.set_flag(Flag::Sign, result & (1 << 15) != 0);
-        self.set_flag(Flag::Parity, result.to_le_bytes()[0].count_ones() % 2 == 0);
         self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+        self.set_result_flags16(result);
 
         result
     }
