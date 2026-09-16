@@ -617,8 +617,16 @@ impl Cpu {
             0xE8 => {
                 // Fetch 16-bit relative displacement
                 let displacement = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("call {:X}h", displacement));
                 // Push the current IP - it now points after the entire CALL instruction
                 self.push_onto_stack(memory, self.ip)?;
+                // Add the displacement to IP with 16-bit wrapping
+                self.ip = self.ip.wrapping_add(displacement)
+            }
+            0xE9 => {
+                // near relative JMP
+                let displacement = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("jmp {:X}h", displacement));
                 // Add the displacement to IP with 16-bit wrapping
                 self.ip = self.ip.wrapping_add(displacement)
             }
