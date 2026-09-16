@@ -398,7 +398,12 @@ impl Machine {
     }
 }
 
-pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
+pub(crate) enum LoadMode {
+    Com,
+    Boot,
+}
+
+pub fn main_loop(file_path: &str, load_mode: LoadMode) -> anyhow::Result<u8> {
     let memory_size = 0x100_000; // Physical memory: 1 MiB
 
     let mut machine = Machine {
@@ -413,7 +418,10 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     machine.handles.resize(20, None);
 
     let data: Vec<u8> = fs::read(file_path)?;
-    machine.load_com(&data)?;
+    match load_mode {
+        LoadMode::Com => machine.load_com(&data)?,
+        LoadMode::Boot => machine.load_boot_sector(&data)?,
+    }
 
     machine.cpu.trace();
     loop {
