@@ -282,7 +282,7 @@ impl Cpu {
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let new_val = self.subtract8(Reg8::Al, operand);
+                let new_val = self.subtract8(self.get_reg8(Reg8::Al), operand);
                 self.set_reg8(Reg8::Al, new_val);
             }
             0x31 => {
@@ -309,7 +309,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand8(memory, &rm)?;
-                self.subtract8(dest_reg, rm_value);
+                self.subtract8(self.get_reg8(dest_reg), rm_value);
             }
             0x3B => {
                 // CMP r16, r/m16
@@ -320,19 +320,19 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand16(memory, &rm)?;
-                self.subtract16(dest_reg, rm_value);
+                self.subtract16(self.get_reg16(dest_reg), rm_value);
             }
             0x3C => {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
-                self.subtract8(Reg8::Al, operand);
+                self.subtract8(self.get_reg8(Reg8::Al), operand);
             }
             0x3D => {
                 // CMP AX, imm16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
-                self.subtract16(Reg16::Ax, operand);
+                self.subtract16(self.get_reg16(Reg16::Ax), operand);
             }
             0x46 => {
                 print_instruction(byte, &format_args!("inc si"));
@@ -723,11 +723,10 @@ impl Cpu {
         u16::from_le_bytes([lob, hob])
     }
 
-    /// Implements shared functionality for subtracting an 8-bit immediate
-    /// from an 8-bit register and setting the correct flags.
-    fn subtract8(&mut self, reg: Reg8, operand: u8) -> u8 {
-        let old_reg = self.get_reg8(reg);
-        let (result, borrow) = old_reg.overflowing_sub(operand);
+    /// Implements shared functionality for subtracting an 8-bit rhs
+    /// from an 8-bit lhs and setting the correct flags.
+    fn subtract8(&mut self, lhs: u8, rhs: u8) -> u8 {
+        let (result, borrow) = lhs.overflowing_sub(rhs);
 
         // Carry flag: did subtraction require a borrow?
         self.set_flag(Flag::Carry, borrow);
@@ -735,17 +734,16 @@ impl Cpu {
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
-            ((old_reg & 0x80) != (operand & 0x80)) && ((result & 0x80) != (old_reg & 0x80)),
+            ((lhs & 0x80) != (rhs & 0x80)) && ((result & 0x80) != (lhs & 0x80)),
         );
-        self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) < (rhs & 0x0F));
         self.set_result_flags8(result);
 
         result
     }
 
-    fn subtract16(&mut self, reg: Reg16, operand: u16) -> u16 {
-        let old_reg = self.get_reg16(reg);
-        let (result, borrow) = old_reg.overflowing_sub(operand);
+    fn subtract16(&mut self, lhs: u16, rhs: u16) -> u16 {
+        let (result, borrow) = lhs.overflowing_sub(rhs);
 
         // Carry flag: did subtraction require a borrow?
         self.set_flag(Flag::Carry, borrow);
@@ -753,9 +751,9 @@ impl Cpu {
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
-            ((old_reg & 0x8000) != (operand & 0x8000)) && ((result & 0x8000) != (old_reg & 0x8000)),
+            ((lhs & 0x8000) != (rhs & 0x8000)) && ((result & 0x8000) != (lhs & 0x8000)),
         );
-        self.set_flag(Flag::AuxiliaryCarry, (old_reg & 0x0F) < (operand & 0x0F));
+        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) < (rhs & 0x0F));
         self.set_result_flags16(result);
 
         result
