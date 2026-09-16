@@ -46,10 +46,12 @@ enum MachineError {
     PrintStringServiceError(String),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
-    #[error("Video Service Error: {0}")]
+    #[error("Video Service error: {0}")]
     VideoServiceError(String),
     #[error("CPU Error: {0}")]
     CpuError(#[from] CpuError),
+    #[error("Boot Sector error: {0}")]
+    BootSectorError(String),
 }
 
 enum InterruptResult {
@@ -376,6 +378,22 @@ impl Machine {
         )?;
         write_buffer(validated_buffer, bytes)?;
         self.cpu.ip = prog_offset as u16;
+        Ok(())
+    }
+
+    fn load_boot_sector(&mut self, bytes: &[u8]) -> Result<(), MachineError> {
+        if bytes.len() < 512 {
+            return Err(MachineError::BootSectorError(
+                "Boot sector must be at least 512 bytes long".to_string(),
+            ));
+        }
+        // Copy first 512 bytes of the boot sector to 0000:7C00h
+        let validated_buffer = validate_buffer(&mut self.memory, PhysAddr::new(0, 0x7C00), 512)?;
+        write_buffer(validated_buffer, &bytes[0..512])?;
+        self.cpu.cs = 0;
+        self.cpu.ip = 0x7C00;
+        // Pretend we loaded the boot sector from the first floppy drive
+        self.cpu.set_reg8(Reg8::Dl, 0);
         Ok(())
     }
 }
