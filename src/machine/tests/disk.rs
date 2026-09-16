@@ -107,6 +107,71 @@ fn int13_reads_exactly_one_sector_and_sets_success_status() {
 }
 
 #[test]
+fn int13_reads_multiple_sectors_within_a_track() {
+    // Explicit offsets keep expectations independent of the CHS helper.
+    for (cx, dx, count, offset) in [
+        (0x0001, 0x0000, 2u16, 0),
+        (0x0002, 0x0000, 2, 512),
+        (0x0003, 0x0000, 3, 1024),
+        (0x0008, 0x0000, 2, 3584),   // Ends exactly at sector 9.
+        (0x0001, 0x0100, 9, 4608),   // Entire track on head 1.
+        (0x2708, 0x0100, 2, 367616), // Ends at the end of the disk.
+    ] {
+        let length = usize::from(count) * 512;
+        for extra_bytes in [0, 1] {
+            for flags in [0xF002, 0xFFD7] {
+                let image = disk_image(offset + length + extra_bytes);
+                let mut machine = machine_with_image(Some(image.clone()));
+                machine.cpu.ax = 0x0200 | count;
+                machine.cpu.cx = cx;
+                machine.cpu.dx = dx;
+                machine.cpu.flags = flags;
+                let mut expected_registers = registers(&machine.cpu);
+                expected_registers[0] = count;
+                let mut expected_memory = machine.memory.clone();
+                expected_memory[0x17E00..0x17E00 + length]
+                    .copy_from_slice(&image[offset..offset + length]);
+
+                assert!(matches!(
+                    machine.handle_interrupt(0x13).unwrap(),
+                    InterruptResult::ResumeExecution
+                ));
+
+                assert_eq!(registers(&machine.cpu), expected_registers);
+                assert_eq!(machine.cpu.flags, flags & !1);
+                assert!(
+                    machine.memory == expected_memory,
+                    "CX={cx:04X}, DX={dx:04X}, count={count}, extra_bytes={extra_bytes}"
+                );
+                assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+            }
+        }
+    }
+}
+
+#[test]
+fn int13_rejects_reads_crossing_a_track_without_copying() {
+    // This is our current conservative service policy. Bytes on the next track
+    // exist, so the rejection must not depend on reaching the image's end.
+    for (sector, count) in [(1, 10), (5, 6), (8, 3), (9, 2)] {
+        for head in [0, 1] {
+            for flags in [0xF002, 0xFFD7] {
+                let mut machine = machine_with_image(Some(disk_image(360 * 1024)));
+                machine.cpu.ax = 0x0200 | count;
+                machine.cpu.cx = sector;
+                machine.cpu.dx = head << 8;
+                machine.cpu.flags = flags;
+                assert_guest_error(
+                    &mut machine,
+                    0x01,
+                    &format!("head={head}, sector={sector}, count={count}"),
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn int13_uses_es_bx_including_nonzero_and_aliasing_segments() {
     for (es, bx, physical, memory_len) in [
         (0x0000, 0x7E00, 0x07E00, 0x40000),
@@ -147,7 +212,6 @@ fn int13_rejects_parameters_outside_the_current_supported_subset() {
         ("writes not supported", 0x0301, 0x0002, 0x0000),
         ("unknown operation", 0xFF01, 0x0002, 0x0000),
         ("zero sectors", 0x0200, 0x0002, 0x0000),
-        ("multiple sectors", 0x0202, 0x0002, 0x0000),
         ("large count", 0x02FF, 0x0002, 0x0000),
         ("second floppy", 0x0201, 0x0002, 0x0001),
         ("hard disk", 0x0201, 0x0002, 0x0080),
@@ -322,15 +386,25 @@ fn int13_without_an_inserted_floppy_returns_not_ready() {
 
 #[test]
 fn int13_missing_or_partial_sector_returns_sector_not_found_without_copying() {
-    for (sector, image_len) in [(1, 0), (1, 511), (2, 512), (2, 513), (2, 1023)] {
+    for (sector, count, image_len) in [
+        (1, 1, 0),
+        (1, 1, 511),
+        (2, 1, 512),
+        (2, 1, 513),
+        (2, 1, 1023),
+        (2, 2, 1024), // First requested sector exists; second is absent.
+        (2, 2, 1535), // Second sector is one byte short.
+        (1, 9, 4607), // Whole-track read is one byte short.
+    ] {
         for flags in [0xF002, 0xFFD7] {
             let mut machine = machine_with_image(Some(disk_image(image_len)));
+            machine.cpu.ax = 0x0200 | count;
             machine.cpu.cx = sector;
             machine.cpu.flags = flags;
             assert_guest_error(
                 &mut machine,
                 0x04,
-                &format!("sector={sector}, image_len={image_len}"),
+                &format!("sector={sector}, count={count}, image_len={image_len}"),
             );
         }
     }
@@ -340,9 +414,10 @@ fn int13_missing_or_partial_sector_returns_sector_not_found_without_copying() {
 fn int13_validates_the_entire_destination_before_writing_to_undersized_memory() {
     // An undersized host memory allocation is an emulator MemoryError. This
     // is separate from BIOS disk statuses and does not emulate DMA boundaries.
-    for memory_len in [0x200, 0x201, 0x3FF] {
-        let image = disk_image(1024);
+    for (count, memory_len) in [(1, 0x200), (1, 0x201), (1, 0x3FF), (2, 0x400), (2, 0x5FF)] {
+        let image = disk_image(1536);
         let mut machine = machine_with_image(Some(image.clone()));
+        machine.cpu.ax = 0x0200 | count;
         machine.cpu.es = 0;
         machine.cpu.bx = 0x0200;
         machine.memory.resize(memory_len, 0xCC);

@@ -36,7 +36,7 @@ impl Machine {
     }
 
     fn operation_read(&mut self) -> Result<InterruptResult, MachineError> {
-        let sector_count = self.cpu.get_reg8(Reg8::Al);
+        let sector_count = self.cpu.get_reg8(Reg8::Al) as usize;
         let cylinder = self.cpu.get_reg8(Reg8::Ch) as usize;
         let sector_num = self.cpu.get_reg8(Reg8::Cl) as usize;
         let head = self.cpu.get_reg8(Reg8::Dh) as usize;
@@ -44,13 +44,6 @@ impl Machine {
             self.cpu.get_segment_reg(SegmentReg::Es),
             self.cpu.get_reg16(Reg16::Bx),
         );
-
-        // TODO: Read more sectors.
-        if sector_count != 1 {
-            self.cpu.set_reg8(Reg8::Ah, 0x01);
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        }
 
         let Some(image) = &self.floppy_image else {
             self.cpu.set_reg8(Reg8::Ah, 0x80);
@@ -63,16 +56,27 @@ impl Machine {
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
-        // Make sure the disk image is at least image_offset + 512 bytes long
-        if image_offset + 512 > image.len() {
+        let num_bytes = 512 * sector_count;
+
+        if sector_count == 0 || sector_count > 10 - sector_num {
+            self.cpu.set_reg8(Reg8::Ah, 0x01);
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        }
+
+        // Make sure the disk image is long enough
+        if image_offset + num_bytes > image.len() {
             self.cpu.set_reg8(Reg8::Ah, 0x04);
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         }
 
         // Write sector to destination
-        let validated_buffer = validate_buffer(&mut self.memory, dest, 512)?;
-        write_buffer(validated_buffer, &image[image_offset..image_offset + 512])?;
+        let validated_buffer = validate_buffer(&mut self.memory, dest, num_bytes)?;
+        write_buffer(
+            validated_buffer,
+            &image[image_offset..image_offset + num_bytes],
+        )?;
 
         self.cpu.set_reg8(Reg8::Ah, 0);
         self.cpu.set_flag(Flag::Carry, false);
