@@ -19,6 +19,7 @@ struct Machine {
     memory: Vec<u8>,
     // Handle table
     handles: Vec<Option<Resource>>,
+    floppy_image: Option<Vec<u8>>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -391,7 +392,7 @@ impl Machine {
         Ok(())
     }
 
-    fn load_boot_sector(&mut self, bytes: &[u8]) -> Result<(), MachineError> {
+    fn load_boot_sector(&mut self, bytes: Vec<u8>) -> Result<(), MachineError> {
         if bytes.len() < 512 {
             return Err(MachineError::BootSectorError(
                 "Boot sector must be at least 512 bytes long".to_string(),
@@ -404,6 +405,10 @@ impl Machine {
         self.cpu.ip = 0x7C00;
         // Pretend we loaded the boot sector from the first floppy drive
         self.cpu.set_reg8(Reg8::Dl, 0);
+
+        // Keep the floppy image in machine
+        self.floppy_image = Some(bytes);
+
         Ok(())
     }
 }
@@ -424,13 +429,14 @@ pub fn main_loop(file_path: &str, load_mode: LoadMode) -> anyhow::Result<u8> {
             Some(Resource::Stdout),
             Some(Resource::Console),
         ],
+        floppy_image: None,
     };
     machine.handles.resize(20, None);
 
     let data: Vec<u8> = fs::read(file_path)?;
     match load_mode {
         LoadMode::Com => machine.load_com(&data)?,
-        LoadMode::Boot => machine.load_boot_sector(&data)?,
+        LoadMode::Boot => machine.load_boot_sector(data)?,
     }
 
     machine.cpu.trace();

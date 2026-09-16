@@ -6,6 +6,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         cpu: Cpu::new(),
         memory: vec![0xCC; 0x40000],
         handles: vec![],
+        floppy_image: None,
     };
     machine.cpu.cs = 0x1000;
     machine.cpu.ip = 0x0100;
@@ -78,6 +79,7 @@ fn write_service_clears_only_carry() {
         cpu: Cpu::new(),
         memory: vec![0; 16],
         handles: vec![],
+        floppy_image: None,
     };
     machine.cpu.ax = 0x4000;
     machine.cpu.bx = 1;
@@ -101,6 +103,7 @@ fn dos_termination_returns_al_as_exit_code() {
             cpu: Cpu::new(),
             memory: vec![],
             handles: vec![],
+            floppy_image: None,
         };
         machine.cpu.ax = ax;
 
