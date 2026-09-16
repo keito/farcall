@@ -320,7 +320,7 @@ impl Machine {
                     service => Err(MachineError::UnsupportedService(service)),
                 }
             }
-            0x60 => self.handle_guest_interrupt(interrupt),
+            0x00 | 0x60 => self.handle_guest_interrupt(interrupt),
             _ => Err(MachineError::UnsupportedInterrupt(interrupt)),
         }
     }

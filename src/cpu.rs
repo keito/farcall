@@ -240,6 +240,19 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
+            0x01 => {
+                // ADD r/m16, r16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                print_instruction(byte, &format_args!("add {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg16(source_reg);
+                let rm_value = self.read_operand16(memory, &rm)?;
+                let value = self.add16(reg_value, rm_value, false);
+                self.write_operand16(memory, &rm, value)?;
+            }
             0x03 => {
                 // ADD r16, r/m16
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -803,6 +816,7 @@ impl Cpu {
                     // 0b010 => 0, // NOT r/m 16
                     // 0b011 => 0, // NEG r/m 16
                     0b100 => {
+                        // MUL r/m 16
                         print_instruction(byte, &format_args!("mul {}", rm));
                         let ax = self.get_reg16(Reg16::Ax);
                         let value = (ax as u32) * (operand as u32);
@@ -811,9 +825,27 @@ impl Cpu {
                         let upper_half_non_zero = self.dx != 0;
                         self.set_flag(Flag::Carry, upper_half_non_zero);
                         self.set_flag(Flag::Overflow, upper_half_non_zero);
-                    } // MUL r/m 16
+                    }
                     // 0b101 => 0, // IMUL r/m 16
-                    // 0b110 => 0, // DIV r/m 16
+                    0b110 => {
+                        // DIV r/m 16
+                        print_instruction(byte, &format_args!("div {}", rm));
+                        let dx = self.get_reg16(Reg16::Dx);
+                        let ax = self.get_reg16(Reg16::Ax);
+                        let lhs = ((dx as u32) << 16) + (ax as u32);
+                        if operand == 0 {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let quotient = lhs / operand as u32;
+                        if quotient > 0xFFFF {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let remainder = lhs % operand as u32;
+                        self.ax = quotient as u16;
+                        self.dx = remainder as u16;
+                    }
                     // 0b111 => 0, // IDIV r/m 16
                     _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
                 }
