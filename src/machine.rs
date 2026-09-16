@@ -324,25 +324,64 @@ impl Machine {
             }
         }
     }
+
+    fn load_com(&mut self, bytes: &[u8]) -> Result<(), MachineError> {
+        /*
+        Offset within segment
+        0000
+              PSP: 256 bytes
+        00FF
+        ...
+        0100
+              Contents of COM file
+              ...unused space...
+              ^ Stack grows this way
+        FFFE Zero return address
+        FFFF Zero return address
+        */
+
+        let segment = 0x1_000; // Segment where we're loading our program
+        let segment_size = 0x10_000; // COM segment size (64 KiB)
+
+        // Set up the program segment prefix (PSP) as DOS would
+        // INT 20h at 0000h - 0001h
+        write_byte(&mut self.memory, PhysAddr::new(segment, 0x0000), 0xCD)?;
+        write_byte(&mut self.memory, PhysAddr::new(segment, 0x0001), 0x20)?;
+
+        // Zero word at FFFEh - FFFh
+        write_byte(&mut self.memory, PhysAddr::new(segment, 0xFFFE), 0x00)?;
+        write_byte(&mut self.memory, PhysAddr::new(segment, 0xFFFF), 0x00)?;
+        let reserved_bytes = 2;
+
+        // Initialize registers
+        self.cpu.sp = 0xFFFE; // Make room for the 2 bytes above
+        self.cpu.cs = segment;
+        self.cpu.ds = segment;
+        self.cpu.es = segment;
+        self.cpu.ss = segment;
+
+        // Load binary into segment at offset 0x100, by convention
+        let prog_offset = 0x100;
+        if prog_offset + bytes.len() + reserved_bytes > segment_size {
+            return Err(MachineError::NotEnoughMemory(
+                prog_offset + bytes.len() + reserved_bytes,
+                segment_size,
+            )
+            .into());
+        }
+        let validated_buffer = validate_buffer(
+            &mut self.memory,
+            PhysAddr::new(segment, prog_offset as u16),
+            bytes.len(),
+        )?;
+        write_buffer(validated_buffer, bytes)?;
+        self.cpu.ip = prog_offset as u16;
+        Ok(())
+    }
 }
 
 pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
-    /*
-    Offset within segment
-    0000
-          PSP: 256 bytes
-    00FF
-    ...
-    0100
-          Contents of COM file
-          ...unused space...
-          ^ Stack grows this way
-    FFFE Zero return address
-    FFFF Zero return address
-    */
     let memory_size = 0x100_000; // Physical memory: 1 MiB
-    let segment = 0x1_000; // Segment where we're loading our program
-    let segment_size = 0x10_000; // COM segment size (64 KiB)
 
     let mut machine = Machine {
         cpu: Cpu::new(),
@@ -355,40 +394,8 @@ pub fn main_loop(file_path: &str) -> anyhow::Result<u8> {
     };
     machine.handles.resize(20, None);
 
-    // Set up the program segment prefix (PSP) as DOS would
-    // INT 20h at 0000h - 0001h
-    write_byte(&mut machine.memory, PhysAddr::new(segment, 0x0000), 0xCD)?;
-    write_byte(&mut machine.memory, PhysAddr::new(segment, 0x0001), 0x20)?;
-
-    // Zero word at FFFEh - FFFh
-    write_byte(&mut machine.memory, PhysAddr::new(segment, 0xFFFE), 0x00)?;
-    write_byte(&mut machine.memory, PhysAddr::new(segment, 0xFFFF), 0x00)?;
-    let reserved_bytes = 2;
-
-    // Initialize registers
-    machine.cpu.sp = 0xFFFE; // Make room for the 2 bytes above
-    machine.cpu.cs = segment;
-    machine.cpu.ds = segment;
-    machine.cpu.es = segment;
-    machine.cpu.ss = segment;
-
-    // Load binary into segment at offset 0x100, by convention
     let data: Vec<u8> = fs::read(file_path)?;
-    let prog_offset = 0x100;
-    if prog_offset + data.len() + reserved_bytes > segment_size {
-        return Err(MachineError::NotEnoughMemory(
-            prog_offset + data.len() + reserved_bytes,
-            segment_size,
-        )
-        .into());
-    }
-    let validated_buffer = validate_buffer(
-        &mut machine.memory,
-        PhysAddr::new(segment, prog_offset as u16),
-        data.len(),
-    )?;
-    write_buffer(validated_buffer, &data)?;
-    machine.cpu.ip = prog_offset as u16;
+    machine.load_com(&data)?;
 
     machine.cpu.trace();
     loop {
