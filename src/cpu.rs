@@ -342,6 +342,11 @@ impl Cpu {
                 print_instruction(byte, &format_args!("push cs"));
                 self.push_onto_stack(memory, self.cs)?;
             }
+            0x1E => {
+                // PUSH DS
+                print_instruction(byte, &format_args!("push ds"));
+                self.push_onto_stack(memory, self.ds)?;
+            }
             0x1F => {
                 // POP DS
                 print_instruction(byte, &format_args!("pop ds"));
@@ -626,6 +631,7 @@ impl Cpu {
                 self.write_operand16(memory, &rm, value)?;
             }
             0x8A => {
+                // MOV REG8, R/M8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg8::try_from(parsed.reg_field)?;
@@ -633,6 +639,16 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = self.read_operand8(memory, &rm)?;
                 self.set_reg8(reg, value);
+            }
+            0x8B => {
+                // MOV REG16, R/M16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
+                let value = self.read_operand16(memory, &rm)?;
+                self.set_reg16(reg, value);
             }
             0x8C => {
                 // MOV r/m16, segment register
@@ -689,6 +705,15 @@ impl Cpu {
                 let mem_value = read_byte(memory, PhysAddr::new(seg_addr, mem_addr))?;
                 self.set_reg8(Reg8::Al, mem_value);
             }
+            0xA1 => {
+                // MOV AX, MEM16
+                let mem_addr = self.fetch_next_word_and_advance_ip(memory);
+                let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                print_instruction(byte, &format_args!("mov ax, [{}:{:04X}h]", seg, mem_addr));
+                let seg_addr = self.get_segment_reg(seg);
+                let mem_value = read_word(memory, PhysAddr::new(seg_addr, mem_addr))?;
+                self.set_reg16(Reg16::Ax, mem_value);
+            }
             0xA2 => {
                 // MOV MEM8, AL
                 let mem_addr = self.fetch_next_word_and_advance_ip(memory);
@@ -726,10 +751,40 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov al, {:X}h", operand));
                 self.set_reg8(Reg8::Al, operand);
             }
+            0xB1 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov cl, {:X}h", operand));
+                self.set_reg8(Reg8::Cl, operand);
+            }
+            0xB2 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov dl, {:X}h", operand));
+                self.set_reg8(Reg8::Dl, operand);
+            }
+            0xB3 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov bl, {:X}h", operand));
+                self.set_reg8(Reg8::Bl, operand);
+            }
             0xB4 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("mov ah, {:X}h", operand));
                 self.set_reg8(Reg8::Ah, operand);
+            }
+            0xB5 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov ch, {:X}h", operand));
+                self.set_reg8(Reg8::Ch, operand);
+            }
+            0xB6 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov dh, {:X}h", operand));
+                self.set_reg8(Reg8::Dh, operand);
+            }
+            0xB7 => {
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("mov bh, {:X}h", operand));
+                self.set_reg8(Reg8::Bh, operand);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
             0xB8 => {
