@@ -664,6 +664,13 @@ impl Cpu {
                 print_instruction(byte, &format_args!("int {:X}h", operand));
                 result = CpuStepResult::Interrupt(operand);
             }
+            0xCF => {
+                // IRET
+                print_instruction(byte, &format_args!("iret"));
+                self.ip = self.pop_from_stack(memory)?;
+                self.cs = self.pop_from_stack(memory)?;
+                self.flags = self.pop_from_stack(memory)?;
+            }
             // CALL
             0xE8 => {
                 // Fetch 16-bit relative displacement
@@ -722,6 +729,28 @@ impl Cpu {
         }
         self.trace();
         Ok(result)
+    }
+
+    pub(crate) fn enter_interrupt(
+        &mut self,
+        memory: &mut [u8],
+        interrupt: u8,
+    ) -> Result<(), CpuError> {
+        // Push the original FLAGS
+        self.push_onto_stack(memory, self.flags)?;
+        // Clear IF and TF
+        self.set_flag(Flag::InterruptEnable, false);
+        self.set_flag(Flag::Trap, false);
+        // Push CS
+        self.push_onto_stack(memory, self.cs)?;
+        // Push the return IP
+        self.push_onto_stack(memory, self.ip)?;
+        // Load IP and CS from the interrupt vector table
+        let ip_vec_offset = (interrupt as u16) * 4;
+        let cs_vec_offset = (interrupt as u16) * 4 + 2;
+        self.ip = read_word(memory, PhysAddr::new(0, ip_vec_offset))?;
+        self.cs = read_word(memory, PhysAddr::new(0, cs_vec_offset))?;
+        Ok(())
     }
 
     fn set_result_flags8(&mut self, result: u8) {

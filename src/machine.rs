@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuStepResult, Flag};
+use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
@@ -48,6 +48,8 @@ enum MachineError {
     MemoryError(#[from] MemoryError),
     #[error("Video Service Error: {0}")]
     VideoServiceError(String),
+    #[error("CPU Error: {0}")]
+    CpuError(#[from] CpuError),
 }
 
 enum InterruptResult {
@@ -276,14 +278,19 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    fn handle_guest_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
+        self.cpu.enter_interrupt(&mut self.memory, interrupt)?;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         match interrupt {
             0x10 => self.video_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
+            // DOS services
             0x21 => {
                 // AH contains the service ID
-                let service = ((self.cpu.ax & 0xFF00) >> 8) as u8;
-                match service {
+                match self.cpu.get_reg8(Reg8::Ah) {
                     0x01 => self.read_char_with_echo_service(),
                     0x02 => self.output_char_service(),
                     0x09 => self.print_string_service(),
@@ -294,14 +301,15 @@ impl Machine {
                     0x40 => self.write_service(),
                     0x45 => self.duplicate_file_handle_service(),
                     0x4C => self.termination_service(),
-                    _ => Err(MachineError::UnsupportedService(service)),
+                    service => Err(MachineError::UnsupportedService(service)),
                 }
             }
+            0x60 => self.handle_guest_interrupt(interrupt),
             _ => Err(MachineError::UnsupportedInterrupt(interrupt)),
         }
     }
 
-    fn step(&mut self) -> anyhow::Result<MachineStepResult> {
+    fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         let result = self.cpu.step(&mut self.memory)?;
         match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
