@@ -28,7 +28,7 @@ pub(crate) struct Cpu {
 
 #[derive(Error, Debug)]
 pub(crate) enum CpuError {
-    #[error("Unsupported instruction: {0:X}")]
+    #[error("Unsupported instruction: {0:02X}h")]
     UnsupportedInstruction(u8),
     #[error("Unsupported mod field: {0}")]
     UnsupportedModField(u8),
@@ -278,6 +278,16 @@ impl Cpu {
                 let value = operand | self.get_reg8(Reg8::Al);
                 self.set_reg8(Reg8::Al, value);
                 self.update_logic_flags8(value);
+            }
+            0x0E => {
+                // PUSH CS
+                print_instruction(byte, &format_args!("push cs"));
+                self.push_onto_stack(memory, self.cs)?;
+            }
+            0x1F => {
+                // POP DS
+                print_instruction(byte, &format_args!("pop ds"));
+                self.ds = self.pop_from_stack(memory)?;
             }
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -689,6 +699,19 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {}", rm, immediate));
                 self.write_operand8(memory, &rm, immediate)?;
             }
+            // MOV r/m16, imm16
+            0xC7 => {
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                if parsed.reg_field != 0 {
+                    // The register value is required to be 0
+                    return Err(CpuError::InvalidRegisterValue(parsed.reg_field));
+                }
+                let rm = self.decode_rm16_operand(memory, parsed)?;
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+
+                print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
+                self.write_operand16(memory, &rm, immediate)?;
+            }
             // Interrupts
             0xCD => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -723,6 +746,13 @@ impl Cpu {
             0xFA => {
                 print_instruction(byte, &format_args!("cli"));
                 self.set_flag(Flag::InterruptEnable, false);
+            }
+            // STI
+            0xFB => {
+                // TODO: When hardware IRQs are implemented, defer maskable interrupt delivery
+                // until after the next instruction.
+                print_instruction(byte, &format_args!("sti"));
+                self.set_flag(Flag::InterruptEnable, true);
             }
             // CLD
             0xFC => {

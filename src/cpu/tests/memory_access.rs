@@ -27,6 +27,357 @@ fn cpu_for_memory_access() -> Cpu {
 }
 
 #[test]
+fn accumulator_stores_use_ds_and_preserve_registers_and_flags() {
+    for opcode in [0xA2, 0xA3] {
+        for (ax, low, high) in [
+            (0xABCD, 0xCD, 0xAB),
+            (0x0000, 0x00, 0x00),
+            (0xFFFF, 0xFF, 0xFF),
+        ] {
+            for flags in [0x0000, 0x0FD7] {
+                let mut cpu = cpu_for_memory_access();
+                cpu.cs = 0x3000; // Instruction bytes come from CS, the destination uses DS.
+                cpu.ax = ax;
+                cpu.flags = flags;
+                let original_registers = registers(&cpu);
+                let mut memory = vec![0xCC; 0x40000];
+                memory[0x30100..0x30103].copy_from_slice(&[opcode, 0x35, 0x12]);
+                let mut expected_memory = memory.clone();
+                // DS:1235 = 1000:1235 = physical 11235, an odd address.
+                expected_memory[0x11235] = low;
+                if opcode == 0xA3 {
+                    expected_memory[0x11236] = high;
+                }
+
+                assert!(matches!(
+                    cpu.step(&mut memory).unwrap(),
+                    CpuStepResult::Continue
+                ));
+
+                assert_eq!(registers(&cpu), original_registers);
+                assert_eq!(cpu.flags, flags, "MOV must preserve every flag");
+                assert_eq!(cpu.ip, 0x0103, "both instructions consume a word offset");
+                assert!(
+                    memory == expected_memory,
+                    "opcode={opcode:02X}, AX={ax:04X}: wrong address, byte order, or write width"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn accumulator_stores_fetch_word_offsets_across_ip_wrap() {
+    for opcode in [0xA2, 0xA3] {
+        for (ip, low_address, high_address, next_ip) in [
+            (0xFFFD, 0x3FFFE, 0x3FFFF, 0x0000),
+            (0xFFFE, 0x3FFFF, 0x30000, 0x0001),
+            (0xFFFF, 0x30000, 0x30001, 0x0002),
+        ] {
+            let mut cpu = cpu_for_memory_access();
+            cpu.cs = 0x3000;
+            cpu.ip = ip;
+            let original_registers = registers(&cpu);
+            let mut memory = vec![0xCC; 0x50000];
+            memory[0x30000 + usize::from(ip)] = opcode;
+            memory[low_address] = 0x34;
+            memory[high_address] = 0x12;
+            let mut expected_memory = memory.clone();
+            expected_memory[0x11234] = 0x5A;
+            if opcode == 0xA3 {
+                expected_memory[0x11235] = 0xA5;
+            }
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(cpu.ip, next_ip);
+            assert_eq!(registers(&cpu), original_registers);
+            assert_eq!(cpu.flags, 0x0FD7);
+            assert!(
+                memory == expected_memory,
+                "opcode={opcode:02X}, initial IP={ip:04X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn accumulator_stores_wrap_at_the_twenty_bit_bus_boundary() {
+    for opcode in [0xA2, 0xA3] {
+        // Literal physical addresses keep expectations independent of PhysAddr.
+        for (offset, low_address, high_address) in [
+            (0x000Fu16, 0xFFFFF, 0x00000), // A word straddles the 1 MiB boundary.
+            (0x0020u16, 0x00010, 0x00011), // The starting address itself wraps.
+        ] {
+            let mut cpu = cpu_for_memory_access();
+            cpu.ds = 0xFFFF;
+            let original_registers = registers(&cpu);
+            let [low, high] = offset.to_le_bytes();
+            let mut memory = vec![0xCC; 0x100000];
+            memory[0x0100..0x0103].copy_from_slice(&[opcode, low, high]);
+            let mut expected_memory = memory.clone();
+            expected_memory[low_address] = 0x5A;
+            if opcode == 0xA3 {
+                expected_memory[high_address] = 0xA5;
+            }
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(registers(&cpu), original_registers);
+            assert_eq!(cpu.flags, 0x0FD7);
+            assert_eq!(cpu.ip, 0x0103);
+            assert!(
+                memory == expected_memory,
+                "opcode={opcode:02X}, offset={offset:04X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a2_can_write_the_last_available_byte_without_accessing_a_second_byte() {
+    let mut cpu = cpu_for_memory_access();
+    cpu.ds = 0;
+    let original_registers = registers(&cpu);
+    let mut memory = vec![0xCC; 0x0200];
+    memory[0x0100..0x0103].copy_from_slice(&[0xA2, 0xFF, 0x01]);
+    let mut expected_memory = memory.clone();
+    expected_memory[0x01FF] = 0x5A;
+
+    assert!(matches!(
+        cpu.step(&mut memory).unwrap(),
+        CpuStepResult::Continue
+    ));
+
+    assert_eq!(registers(&cpu), original_registers);
+    assert_eq!(cpu.flags, 0x0FD7);
+    assert_eq!(cpu.ip, 0x0103);
+    assert_eq!(memory, expected_memory);
+}
+
+#[test]
+fn accumulator_store_bounds_errors_preserve_memory_registers_and_flags() {
+    for (opcode, offset) in [(0xA2, 0x0200u16), (0xA3, 0x01FF), (0xA3, 0x0200)] {
+        let mut cpu = cpu_for_memory_access();
+        cpu.ds = 0;
+        let original_registers = registers(&cpu);
+        let [low, high] = offset.to_le_bytes();
+        let mut memory = vec![0xCC; 0x0200];
+        memory[0x0100..0x0103].copy_from_slice(&[opcode, low, high]);
+        let original_memory = memory.clone();
+
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+        ));
+
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        // In particular, A3 must not write its low byte when the high byte is missing.
+        assert_eq!(memory, original_memory);
+    }
+}
+
+#[test]
+fn c7_writes_every_word_register_and_preserves_flags_and_memory() {
+    // r/m field order: AX, CX, DX, BX, SP, BP, SI, DI.
+    for destination in 0..8 {
+        for immediate in [0x0000u16, 0x0080, 0x1234, 0x8000, 0xFFFF] {
+            for flags in [0x0000, 0x0FD7] {
+                let mut cpu = cpu_for_memory_access();
+                cpu.flags = flags;
+                let mut expected_registers = registers(&cpu);
+                expected_registers[destination] = immediate;
+                let [low, high] = immediate.to_le_bytes();
+                let mut memory = vec![0xCC; 0x0200];
+                memory[0x0100..0x0104].copy_from_slice(&[
+                    0xC7,
+                    0xC0 | destination as u8,
+                    low,
+                    high,
+                ]);
+                let original_memory = memory.clone();
+
+                assert!(matches!(
+                    cpu.step(&mut memory).unwrap(),
+                    CpuStepResult::Continue
+                ));
+
+                assert_eq!(
+                    registers(&cpu),
+                    expected_registers,
+                    "destination={destination}, immediate={immediate:04X}"
+                );
+                assert_eq!(cpu.flags, flags);
+                assert_eq!(cpu.ip, 0x0104);
+                assert_eq!(memory, original_memory);
+            }
+        }
+    }
+}
+
+#[test]
+fn c7_memory_consumes_displacement_before_immediate_and_uses_ds_or_ss() {
+    // Each instruction stores ABCD. Destination addresses are literal expectations.
+    for (instruction, physical) in [
+        (&[0xC7, 0x06, 0x35, 0x12, 0xCD, 0xAB][..], 0x11235), // [DS:1235], odd address.
+        (&[0xC7, 0x00, 0xCD, 0xAB][..], 0x10B00),             // [BX+SI], no displacement.
+        (&[0xC7, 0x02, 0xCD, 0xAB][..], 0x21000),             // [BP+SI] selects SS.
+        (&[0xC7, 0x46, 0xFE, 0xCD, 0xAB][..], 0x207FE),       // [BP-2], signed disp8.
+        (&[0xC7, 0x47, 0x7F, 0xCD, 0xAB][..], 0x1037F),       // [BX+127], positive disp8.
+        (&[0xC7, 0x80, 0x34, 0x12, 0xCD, 0xAB][..], 0x11D34), // [BX+SI+1234], disp16.
+        (&[0xC7, 0x86, 0xFE, 0xFF, 0xCD, 0xAB][..], 0x207FE), // [BP+FFFE], disp16 wraps.
+        (&[0xC7, 0x84, 0x00, 0xF8, 0xCD, 0xAB][..], 0x10000), // SI=0800; offset wraps to zero.
+    ] {
+        for flags in [0x0000, 0x0FD7] {
+            let mut cpu = cpu_for_memory_access();
+            cpu.flags = flags;
+            let original_registers = registers(&cpu);
+            let mut memory = vec![0xCC; 0x30000];
+            memory[0x0100..0x0100 + instruction.len()].copy_from_slice(instruction);
+            let mut expected_memory = memory.clone();
+            expected_memory[physical] = 0xCD;
+            expected_memory[physical + 1] = 0xAB;
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(registers(&cpu), original_registers);
+            assert_eq!(cpu.flags, flags);
+            assert_eq!(cpu.ip, 0x0100 + instruction.len() as u16);
+            assert!(
+                memory == expected_memory,
+                "instruction={instruction:02X?}: only the destination word may change"
+            );
+        }
+    }
+}
+
+#[test]
+fn c7_fetches_mod_rm_displacement_and_immediate_across_ip_wrap_using_cs() {
+    let instruction = [0xC7, 0x06, 0x35, 0x12, 0xCD, 0xAB]; // MOV word [DS:1235], ABCD.
+    for (ip, next_ip) in [
+        (0xFFFA, 0x0000),
+        (0xFFFB, 0x0001),
+        (0xFFFC, 0x0002),
+        (0xFFFD, 0x0003),
+        (0xFFFE, 0x0004),
+        (0xFFFF, 0x0005),
+    ] {
+        let mut cpu = cpu_for_memory_access();
+        cpu.cs = 0x3000;
+        cpu.ip = ip;
+        let original_registers = registers(&cpu);
+        let mut memory = vec![0xCC; 0x50000];
+        let before_wrap = 0x10000 - usize::from(ip);
+        memory[0x30000 + usize::from(ip)..0x40000].copy_from_slice(&instruction[..before_wrap]);
+        memory[0x30000..0x30000 + instruction.len() - before_wrap]
+            .copy_from_slice(&instruction[before_wrap..]);
+        let mut expected_memory = memory.clone();
+        expected_memory[0x11235] = 0xCD;
+        expected_memory[0x11236] = 0xAB;
+
+        assert!(matches!(
+            cpu.step(&mut memory).unwrap(),
+            CpuStepResult::Continue
+        ));
+
+        assert_eq!(cpu.ip, next_ip);
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert!(memory == expected_memory, "initial IP={ip:04X}");
+    }
+}
+
+#[test]
+fn c7_memory_destination_wraps_at_the_twenty_bit_bus_boundary() {
+    for (offset, low_address, high_address) in [
+        (0x000Fu16, 0xFFFFF, 0x00000), // The word straddles 1 MiB.
+        (0x0020u16, 0x00010, 0x00011), // The starting address wraps.
+    ] {
+        let mut cpu = cpu_for_memory_access();
+        cpu.ds = 0xFFFF;
+        let original_registers = registers(&cpu);
+        let [low, high] = offset.to_le_bytes();
+        let mut memory = vec![0xCC; 0x100000];
+        memory[0x0100..0x0106].copy_from_slice(&[0xC7, 0x06, low, high, 0x34, 0x12]);
+        let mut expected_memory = memory.clone();
+        expected_memory[low_address] = 0x34;
+        expected_memory[high_address] = 0x12;
+
+        assert!(matches!(
+            cpu.step(&mut memory).unwrap(),
+            CpuStepResult::Continue
+        ));
+
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(cpu.ip, 0x0106);
+        assert!(memory == expected_memory, "offset={offset:04X}");
+    }
+}
+
+#[test]
+fn c7_rejects_nonzero_opcode_extensions_without_writing() {
+    for extension in 1..=7 {
+        // Valid register, direct memory, disp8, and disp16 destinations expose
+        // accidentally treating the reg field as a source register.
+        for operand in [0xC0, 0x06, 0x46, 0x86] {
+            let mut cpu = cpu_for_memory_access();
+            let original_registers = registers(&cpu);
+            let mut memory = vec![0xCC; 0x30000];
+            memory[0x0100..0x0106].copy_from_slice(&[0xC7, operand | (extension << 3), 0, 0, 0, 0]);
+            let original_memory = memory.clone();
+
+            assert!(
+                matches!(cpu.step(&mut memory), Err(CpuError::InvalidRegisterValue(actual)) if actual == extension)
+            );
+
+            assert_eq!(registers(&cpu), original_registers);
+            assert_eq!(cpu.flags, 0x0FD7);
+            assert!(
+                memory == original_memory,
+                "extension={extension}, operand={operand:02X}"
+            );
+        }
+    }
+}
+
+#[test]
+fn c7_bounds_errors_preserve_registers_flags_and_both_destination_bytes() {
+    for offset in [0x01FFu16, 0x0200] {
+        // First the high byte is missing, then both destination bytes are missing.
+        let mut cpu = cpu_for_memory_access();
+        cpu.ds = 0;
+        let original_registers = registers(&cpu);
+        let [low, high] = offset.to_le_bytes();
+        let mut memory = vec![0xCC; 0x0200];
+        memory[0x0100..0x0106].copy_from_slice(&[0xC7, 0x06, low, high, 0x34, 0x12]);
+        let original_memory = memory.clone();
+
+        assert!(matches!(
+            cpu.step(&mut memory),
+            Err(CpuError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+        ));
+
+        assert_eq!(registers(&cpu), original_registers);
+        assert_eq!(cpu.flags, 0x0FD7);
+        assert_eq!(
+            memory, original_memory,
+            "a missing high byte must not cause a partial write"
+        );
+    }
+}
+
+#[test]
 fn c6_writes_each_byte_register_preserving_its_other_half_and_flags() {
     // Register field order: AL, CL, DL, BL, AH, CH, DH, BH.
     let expected_words = [
