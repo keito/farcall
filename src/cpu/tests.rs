@@ -9,6 +9,7 @@ mod memory_access;
 mod mul;
 mod or;
 mod segment_override;
+mod shl;
 mod xor;
 
 #[test]

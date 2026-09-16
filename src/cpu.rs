@@ -877,6 +877,39 @@ impl Cpu {
                 self.cs = self.pop_from_stack(memory)?;
                 self.flags = self.pop_from_stack(memory)?;
             }
+            0xD2 => {
+                // Does many things with REG8/MEM8, CL
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                match reg_field {
+                    4 => {
+                        // Shift an 8-bit operand left by CL, and store result in rm
+                        print_instruction(byte, &format_args!("shl {}, cl", rm));
+                        let cl = self.get_reg8(Reg8::Cl);
+                        if cl != 0 {
+                            let operand = self.read_operand8(memory, &rm)?;
+                            let mut result = operand;
+                            let mut last_bit_7 = false;
+                            for _ in 0..cl {
+                                last_bit_7 = (result & 0x80) != 0;
+                                result = result << 1;
+                            }
+                            self.write_operand8(memory, &rm, result)?;
+                            self.set_result_flags8(result);
+                            // Last bit shifted out of bit 7
+                            self.set_flag(Flag::Carry, last_bit_7);
+                            if cl == 1 {
+                                self.set_flag(
+                                    Flag::Overflow,
+                                    ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
+                                )
+                            }
+                        }
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+            }
             // CALL
             0xE8 => {
                 // Fetch 16-bit relative displacement
