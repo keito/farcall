@@ -270,6 +270,15 @@ impl Cpu {
                 self.write_operand16(memory, &rm, value)?;
                 self.update_logic_flags16(value);
             }
+            0x0C => {
+                // OR AL, IMMED8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("or al, {}", operand));
+
+                let value = operand | self.get_reg8(Reg8::Al);
+                self.set_reg8(Reg8::Al, value);
+                self.update_logic_flags8(value);
+            }
             0x2C => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));

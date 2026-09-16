@@ -60,10 +60,29 @@ enum MachineStepResult {
 }
 
 impl Machine {
+    fn read_console_byte(&self, buf: &mut [u8]) -> Result<(), MachineError> {
+        // TODO: Add support for Windows
+        std::fs::File::open("/dev/tty")?.read_exact(buf)?;
+        Ok(())
+    }
+
     /// Emulates the read one character with echo service
     fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
         let mut buf = [0u8; 1];
-        io::stdin().read_exact(&mut buf)?;
+        let Some(Some(resource)) = self.handles.get(0) else {
+            return Err(MachineError::ReadServiceError(
+                "Handle 0 is not set".to_string(),
+            ));
+        };
+        match *resource {
+            Resource::Stdin => io::stdin().read_exact(&mut buf)?,
+            Resource::Console => self.read_console_byte(&mut buf)?,
+            _ => {
+                return Err(MachineError::ReadServiceError(
+                    "Unsupported resource in handle 0".to_string(),
+                ));
+            }
+        };
         io::stdout().write_all(&buf)?;
         io::stdout().flush()?;
         self.cpu.set_reg8(Reg8::Al, buf[0]);
@@ -173,6 +192,18 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the DOS flush and read service
+    fn flush_and_read_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // TODO: Implement input flushing
+        let al = self.cpu.get_reg8(Reg8::Al);
+        return match al {
+            0x01 => self.read_char_with_echo_service(),
+            _ => Err(MachineError::ReadServiceError(
+                "Unsupported mode in 0Ch service".to_string(),
+            )),
+        };
+    }
+
     /// Emulates the DOS termination service
     fn termination_service(&mut self) -> Result<InterruptResult, MachineError> {
         Ok(InterruptResult::Exit((self.cpu.ax & 0xFF) as u8))
@@ -250,6 +281,7 @@ impl Machine {
                     0x01 => self.read_char_with_echo_service(),
                     0x02 => self.output_char_service(),
                     0x09 => self.print_string_service(),
+                    0x0C => self.flush_and_read_service(),
                     0x30 => self.dos_version_service(),
                     0x3E => self.close_handle_service(),
                     0x3F => self.read_service(),
