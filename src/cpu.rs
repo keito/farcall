@@ -786,6 +786,38 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov [{}:{:04X}h], ax", seg, mem_addr));
                 write_word(memory, PhysAddr::new(seg_addr, mem_addr), ax)?;
             }
+            0xA6 => {
+                // CMPSB DEST-STR8, SRC-STR8
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let source_seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    let source_addr = PhysAddr::new(self.get_segment_reg(source_seg), self.si);
+                    let dest_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let source_byte = read_byte(memory, source_addr)?;
+                    let dest_byte = read_byte(memory, dest_addr)?;
+                    self.subtract8(source_byte, dest_byte, false);
+                    if self.get_flag(Flag::Direction) {
+                        self.si = self.si.wrapping_sub(1);
+                        self.di = self.di.wrapping_sub(1);
+                    } else {
+                        self.si = self.si.wrapping_add(1);
+                        self.di = self.di.wrapping_add(1);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        // Compare until a mismatch or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if !self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    } else if rep_prefix == Some(0xF2) {
+                        // Compare until a match or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    }
+                }
+            }
             0xAC => {
                 // LODSB
                 // Repeat if REP prefix was set
