@@ -9,6 +9,7 @@ use crate::memory::{
 };
 use crate::registers::{Reg8, Reg16};
 
+mod console;
 #[cfg(test)]
 mod tests;
 
@@ -60,12 +61,6 @@ enum MachineStepResult {
 }
 
 impl Machine {
-    fn read_console_byte(&self, buf: &mut [u8]) -> Result<(), MachineError> {
-        // TODO: Add support for Windows
-        std::fs::File::open("/dev/tty")?.read_exact(buf)?;
-        Ok(())
-    }
-
     /// Emulates the read one character with echo service
     fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
         let mut buf = [0u8; 1];
