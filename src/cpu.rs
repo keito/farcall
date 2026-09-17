@@ -1709,6 +1709,11 @@ impl Cpu {
                 print_instruction(byte, &format_args!("clc"));
                 self.set_flag(Flag::Carry, false);
             }
+            0xF9 => {
+                // STC
+                print_instruction(byte, &format_args!("stc"));
+                self.set_flag(Flag::Carry, true);
+            }
             0xFA => {
                 // CLI
                 print_instruction(byte, &format_args!("cli"));
@@ -1725,6 +1730,11 @@ impl Cpu {
                 // CLD
                 print_instruction(byte, &format_args!("cld"));
                 self.set_flag(Flag::Direction, false);
+            }
+            0xFD => {
+                // STD
+                print_instruction(byte, &format_args!("std"));
+                self.set_flag(Flag::Direction, true);
             }
             // INC r/m8 or DEC r/m8
             0xFE => {
