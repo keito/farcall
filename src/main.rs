@@ -1,6 +1,7 @@
 use clap::Parser;
 use std::process;
 
+use crate::machine::DiskType;
 use crate::machine::LoadMode;
 
 mod cpu;
@@ -16,6 +17,10 @@ struct Cli {
     /// Treat FILE as a boot sector image
     #[arg(long)]
     boot: bool,
+
+    /// Boot sector image type
+    #[arg(long, value_enum)]
+    image_type: Option<DiskType>,
 }
 
 fn main() {
@@ -25,7 +30,7 @@ fn main() {
     } else {
         LoadMode::Com
     };
-    match machine::main_loop(&cli.file, load_mode) {
+    match machine::main_loop(&cli.file, load_mode, cli.image_type) {
         Ok(code) => {
             eprintln!("Exit code {}", code);
             process::exit(code as i32);

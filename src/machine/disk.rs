@@ -6,6 +6,42 @@ use crate::{
 
 use super::{InterruptResult, Machine, MachineError};
 
+#[cfg(test)]
+mod tests;
+
+#[derive(Clone, clap::ValueEnum)]
+pub enum DiskType {
+    #[value(name = "180k")]
+    Floppy180,
+    #[value(name = "360k")]
+    Floppy360,
+}
+
+pub(super) struct DiskGeometry {
+    pub(super) cylinders: usize,
+    pub(super) heads: usize,
+    pub(super) sectors_per_track: usize,
+}
+
+impl DiskGeometry {
+    fn byte_offset(&self, cylinder: usize, head: usize, sector: usize) -> Option<usize> {
+        if cylinder >= self.cylinders
+            || head >= self.heads
+            || sector == 0
+            || sector > self.sectors_per_track
+        {
+            return None;
+        }
+        let index = (cylinder * self.heads + head) * self.sectors_per_track + sector - 1;
+        Some(index * 512)
+    }
+}
+
+pub(super) struct FloppyDisk {
+    pub(super) bytes: Vec<u8>,
+    pub(super) geometry: DiskGeometry,
+}
+
 impl Machine {
     /// Emulates the BIOS disk service
     pub(super) fn disk_service(&mut self) -> Result<InterruptResult, MachineError> {
@@ -45,27 +81,28 @@ impl Machine {
             self.cpu.get_reg16(Reg16::Bx),
         );
 
-        let Some(image) = &self.floppy_image else {
+        let Some(disk) = &self.floppy_image else {
             self.cpu.set_reg8(Reg8::Ah, 0x80);
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
 
-        let Some(image_offset) = calc_360kib_disk_offset(cylinder, head, sector_num) else {
+        let geometry = &disk.geometry;
+        let Some(image_offset) = geometry.byte_offset(cylinder, head, sector_num) else {
             self.cpu.set_reg8(Reg8::Ah, 0x04);
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
         let num_bytes = 512 * sector_count;
 
-        if sector_count == 0 || sector_count > 10 - sector_num {
+        if sector_count == 0 || sector_count > geometry.sectors_per_track - sector_num + 1 {
             self.cpu.set_reg8(Reg8::Ah, 0x01);
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         }
 
         // Make sure the disk image is long enough
-        if image_offset + num_bytes > image.len() {
+        if image_offset + num_bytes > disk.bytes.len() {
             self.cpu.set_reg8(Reg8::Ah, 0x04);
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
@@ -75,7 +112,7 @@ impl Machine {
         let validated_buffer = validate_buffer(&mut self.memory, dest, num_bytes)?;
         write_buffer(
             validated_buffer,
-            &image[image_offset..image_offset + num_bytes],
+            &disk.bytes[image_offset..image_offset + num_bytes],
         )?;
 
         self.cpu.set_reg8(Reg8::Ah, 0);
@@ -83,18 +120,4 @@ impl Machine {
 
         Ok(InterruptResult::ResumeExecution)
     }
-}
-
-// Calculate the offset in bytes for a 360KiB disk given CHS
-pub(super) fn calc_360kib_disk_offset(
-    cylinder: usize,
-    head: usize,
-    sector: usize,
-) -> Option<usize> {
-    // Floppy has 40 cylinders (0-index) 2 heads (0-index) 9 sectors (1-index)
-    if cylinder > 39 || head > 1 || sector > 9 || sector == 0 {
-        return None;
-    }
-    let sector_index = ((cylinder * 2) + head) * 9 + (sector - 1);
-    Some(sector_index * 512)
 }

@@ -1,6 +1,6 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::MachineError;
-use crate::machine::disk::calc_360kib_disk_offset;
+use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
 use crate::memory::MemoryError;
 
 fn registers(cpu: &Cpu) -> [u16; 13] {
@@ -15,6 +15,30 @@ fn disk_image(size: usize) -> Vec<u8> {
     (0..size)
         .map(|i| ((i % 512) * 37 + (i / 512) * 91 + 17) as u8)
         .collect()
+}
+
+fn floppy_360kib(bytes: Vec<u8>) -> FloppyDisk {
+    FloppyDisk {
+        bytes,
+        geometry: DiskGeometry {
+            cylinders: 40,
+            heads: 2,
+            sectors_per_track: 9,
+        },
+    }
+}
+
+fn disk_snapshot(machine: &Machine) -> Option<(Vec<u8>, [usize; 3])> {
+    machine.floppy_image.as_ref().map(|disk| {
+        (
+            disk.bytes.clone(),
+            [
+                disk.geometry.cylinders,
+                disk.geometry.heads,
+                disk.geometry.sectors_per_track,
+            ],
+        )
+    })
 }
 
 fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
@@ -37,7 +61,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         cpu,
         memory: vec![0xCC; 0x40000],
         handles: vec![],
-        floppy_image: image,
+        floppy_image: image.map(floppy_360kib),
     }
 }
 
@@ -46,7 +70,7 @@ fn assert_guest_error(machine: &mut Machine, status: u8, context: &str) {
     expected_registers[0] = (expected_registers[0] & 0x00FF) | (u16::from(status) << 8);
     let expected_flags = machine.cpu.flags | 1;
     let original_memory = machine.memory.clone();
-    let original_image = machine.floppy_image.clone();
+    let original_image = disk_snapshot(machine);
 
     let result = machine.handle_interrupt(0x13).expect(context);
 
@@ -68,7 +92,8 @@ fn assert_guest_error(machine: &mut Machine, status: u8, context: &str) {
         "{context}: rejected operations must not write RAM"
     );
     assert_eq!(
-        machine.floppy_image, original_image,
+        disk_snapshot(machine),
+        original_image,
         "{context}: disk contents are unchanged"
     );
 }
@@ -101,7 +126,7 @@ fn int13_reads_exactly_one_sector_and_sets_success_status() {
                 machine.memory == expected_memory,
                 "sector={sector}, image_len={image_len}: exactly 512 destination bytes change"
             );
-            assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+            assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
         }
     }
 }
@@ -143,7 +168,7 @@ fn int13_reads_multiple_sectors_within_a_track() {
                     machine.memory == expected_memory,
                     "CX={cx:04X}, DX={dx:04X}, count={count}, extra_bytes={extra_bytes}"
                 );
-                assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+                assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
             }
         }
     }
@@ -200,7 +225,7 @@ fn int13_uses_es_bx_including_nonzero_and_aliasing_segments() {
             machine.memory == expected_memory,
             "destination={es:04X}:{bx:04X}"
         );
-        assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
     }
 }
 
@@ -243,6 +268,7 @@ fn int13_reset_succeeds_without_read_parameters_and_preserves_state() {
                 machine.cpu.bx = 0x1234;
                 let expected_registers = registers(&machine.cpu);
                 let original_memory = machine.memory.clone();
+                let original_disk = disk_snapshot(&machine);
 
                 assert!(matches!(
                     machine.handle_interrupt(0x13).unwrap(),
@@ -255,7 +281,11 @@ fn int13_reset_succeeds_without_read_parameters_and_preserves_state() {
                     machine.memory == original_memory,
                     "reset must not write RAM"
                 );
-                assert_eq!(machine.floppy_image, image, "reset preserves the disk");
+                assert_eq!(
+                    disk_snapshot(&machine),
+                    original_disk,
+                    "reset preserves the disk"
+                );
             }
         }
     }
@@ -281,36 +311,21 @@ fn int13_reset_rejects_unsupported_drives_without_changing_memory() {
 }
 
 #[test]
-fn disk_offset_maps_chs_and_rejects_geometry_boundaries() {
-    for (cylinder, head, sector, offset) in [
-        (0, 0, 1, 0),
-        (0, 0, 2, 512),
-        (0, 0, 9, 4096),
-        (0, 1, 1, 4608),
-        (0, 1, 9, 8704),
-        (1, 0, 1, 9216),
-        (39, 1, 9, 368128),
+fn int13_single_sided_geometry_rejects_a_second_head_and_track_crossing() {
+    for (ax, cx, dx, status) in [
+        (0x0201, 0x0001, 0x0100, 0x04), // Head 1 does not exist.
+        (0x0201, 0x2801, 0x0000, 0x04), // Cylinder 40 does not exist.
+        (0x0201, 0x0000, 0x0000, 0x04), // Sectors start at one.
+        (0x0201, 0x000A, 0x0000, 0x04), // Sector 10 does not exist.
+        (0x0202, 0x0009, 0x0000, 0x01), // Read crosses the track boundary.
     ] {
-        assert_eq!(
-            calc_360kib_disk_offset(cylinder, head, sector),
-            Some(offset),
-            "CHS={cylinder}/{head}/{sector}"
-        );
-    }
-    for (cylinder, head, sector) in [
-        (40, 0, 1),
-        (0, 2, 1),
-        (0, 0, 0),
-        (0, 0, 10),
-        (usize::MAX, 0, 1),
-        (0, usize::MAX, 1),
-        (0, 0, usize::MAX),
-    ] {
-        assert_eq!(
-            calc_360kib_disk_offset(cylinder, head, sector),
-            None,
-            "CHS={cylinder}/{head}/{sector}"
-        );
+        // Extra bytes ensure that geometry, not image length, rejects the read.
+        let mut machine = machine_with_image(Some(disk_image(360 * 1024)));
+        machine.floppy_image.as_mut().unwrap().geometry.heads = 1;
+        machine.cpu.ax = ax;
+        machine.cpu.cx = cx;
+        machine.cpu.dx = dx;
+        assert_guest_error(&mut machine, status, "single-sided geometry");
     }
 }
 
@@ -346,7 +361,7 @@ fn int13_reads_across_heads_and_cylinders_through_the_last_sector() {
                 machine.memory == expected_memory,
                 "CX={cx:04X}, DX={dx:04X}"
             );
-            assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+            assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
         }
     }
 }
@@ -432,7 +447,7 @@ fn int13_validates_the_entire_destination_before_writing_to_undersized_memory() 
         assert_eq!(registers(&machine.cpu), original_registers);
         assert_eq!(machine.cpu.flags, 0xFFD7);
         assert!(machine.memory == original_memory);
-        assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
+        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
     }
 }
 
@@ -443,7 +458,7 @@ fn int13_success_clears_previous_error_status_and_carry() {
     assert_guest_error(&mut machine, 0x04, "sector 2 is missing");
 
     let image = disk_image(1024);
-    machine.floppy_image = Some(image.clone());
+    machine.floppy_image = Some(floppy_360kib(image.clone()));
     machine.cpu.ax = 0x0201; // Retry the request, preserving the previous CF.
     assert!(matches!(
         machine.handle_interrupt(0x13).unwrap(),
@@ -460,55 +475,84 @@ fn int13_success_clears_previous_error_status_and_carry() {
 }
 
 #[test]
-fn boot_code_reads_sector_two_through_int13_then_executes_it() {
-    let mut image = vec![0; 1024];
-    // MOV AX,0; MOV ES,AX; MOV BX,7E00h; MOV AX,0201h;
-    // MOV CX,2; MOV DX,0; INT 13h; JMP near 7E00h.
-    let stage1 = [
-        0xB8, 0x00, 0x00, 0x8E, 0xC0, 0xBB, 0x00, 0x7E, 0xB8, 0x01, 0x02, 0xB9, 0x02, 0x00, 0xBA,
-        0x00, 0x00, 0xCD, 0x13, 0xE9, 0xEA, 0x01,
-    ];
-    image[..stage1.len()].copy_from_slice(&stage1);
-    image[510..512].copy_from_slice(&[0x55, 0xAA]);
-    image[512..517].copy_from_slice(&[0xB8, 0xEF, 0xBE, 0xEB, 0xFE]); // MOV AX,BEEFh; spin.
-    let expected_sector = image[512..].to_vec();
-    let mut machine = machine_with_image(None);
-    machine.cpu.flags = 0xF003; // Ensure the successful read clears stale CF.
-    machine.load_boot_sector(image.clone()).unwrap();
-    assert!(
-        machine.memory[0x7E00..0x8000]
-            .iter()
-            .all(|&byte| byte == 0xCC),
-        "the boot loader must not preload sector 2"
-    );
+fn boot_code_reads_a_sector_through_int13_then_executes_it() {
+    // Explicit offsets distinguish one-head and two-head layouts at cylinder 1.
+    for (image_type, image_len, cx, dx, sector_offset) in [
+        (None, 180 * 1024, 0x0002u16, 0x0000u16, 512usize),
+        (None, 180 * 1024, 0x0101, 0x0000, 4608),
+        (Some(DiskType::Floppy180), 180 * 1024, 0x0101, 0x0000, 4608),
+        (Some(DiskType::Floppy360), 360 * 1024, 0x0001, 0x0100, 4608),
+        (Some(DiskType::Floppy360), 360 * 1024, 0x0101, 0x0000, 9216),
+    ] {
+        let mut image = vec![0; image_len];
+        // MOV AX,0; MOV ES,AX; MOV BX,7E00h; MOV AX,0201h;
+        // MOV CX,cylinder/sector; MOV DX,head/drive; INT 13h; JMP near 7E00h.
+        let stage1 = [
+            0xB8,
+            0x00,
+            0x00,
+            0x8E,
+            0xC0,
+            0xBB,
+            0x00,
+            0x7E,
+            0xB8,
+            0x01,
+            0x02,
+            0xB9,
+            cx as u8,
+            (cx >> 8) as u8,
+            0xBA,
+            dx as u8,
+            (dx >> 8) as u8,
+            0xCD,
+            0x13,
+            0xE9,
+            0xEA,
+            0x01,
+        ];
+        image[..stage1.len()].copy_from_slice(&stage1);
+        image[510..512].copy_from_slice(&[0x55, 0xAA]);
+        image[sector_offset..sector_offset + 5].copy_from_slice(&[0xB8, 0xEF, 0xBE, 0xEB, 0xFE]); // MOV AX,BEEFh; spin.
+        let expected_sector = image[sector_offset..sector_offset + 512].to_vec();
+        let mut machine = machine_with_image(None);
+        machine.cpu.flags = 0xF003; // Ensure the successful read clears stale CF.
+        machine.load_boot_sector(image.clone(), image_type).unwrap();
+        assert!(
+            machine.memory[0x7E00..0x8000]
+                .iter()
+                .all(|&byte| byte == 0xCC),
+            "the boot loader must not preload the requested sector"
+        );
 
-    // Fixed instruction counts keep the test bounded even if guest jumps break.
-    for _ in 0..7 {
+        // Fixed instruction counts keep the test bounded even if guest jumps break.
+        for _ in 0..7 {
+            assert!(matches!(
+                machine.step().unwrap(),
+                MachineStepResult::Continue
+            ));
+        }
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0, 0x7C13));
+        assert_eq!(machine.cpu.ax, 1);
+        assert_eq!(machine.cpu.flags, 0xF002);
+        assert_eq!(&machine.memory[0x7E00..0x8000], &expected_sector);
+        assert_eq!(&machine.memory[0x7C00..0x7E00], &image[..512]);
+        assert_eq!(
+            machine.cpu.sp, 0x0800,
+            "hosted BIOS call does not enter a guest handler"
+        );
+
         assert!(matches!(
             machine.step().unwrap(),
             MachineStepResult::Continue
         ));
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0, 0x7E00));
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::Continue
+        ));
+        assert_eq!(machine.cpu.ax, 0xBEEF);
+        assert_eq!(machine.cpu.ip, 0x7E03);
+        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
     }
-    assert_eq!((machine.cpu.cs, machine.cpu.ip), (0, 0x7C13));
-    assert_eq!(machine.cpu.ax, 1);
-    assert_eq!(machine.cpu.flags, 0xF002);
-    assert_eq!(&machine.memory[0x7E00..0x8000], &expected_sector);
-    assert_eq!(&machine.memory[0x7C00..0x7E00], &image[..512]);
-    assert_eq!(
-        machine.cpu.sp, 0x0800,
-        "hosted BIOS call does not enter a guest handler"
-    );
-
-    assert!(matches!(
-        machine.step().unwrap(),
-        MachineStepResult::Continue
-    ));
-    assert_eq!((machine.cpu.cs, machine.cpu.ip), (0, 0x7E00));
-    assert!(matches!(
-        machine.step().unwrap(),
-        MachineStepResult::Continue
-    ));
-    assert_eq!(machine.cpu.ax, 0xBEEF);
-    assert_eq!(machine.cpu.ip, 0x7E03);
-    assert_eq!(machine.floppy_image.as_ref().unwrap(), &image);
 }

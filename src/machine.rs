@@ -4,10 +4,13 @@ use std::io::{self, Read, Write};
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
+use crate::machine::disk::{DiskGeometry, FloppyDisk};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
 use crate::registers::{Reg8, Reg16};
+
+pub use disk::DiskType;
 
 mod console;
 mod disk;
@@ -20,7 +23,7 @@ struct Machine {
     memory: Vec<u8>,
     // Handle table
     handles: Vec<Option<Resource>>,
-    floppy_image: Option<Vec<u8>>,
+    floppy_image: Option<FloppyDisk>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -403,7 +406,11 @@ impl Machine {
         Ok(())
     }
 
-    fn load_boot_sector(&mut self, bytes: Vec<u8>) -> Result<(), MachineError> {
+    fn load_boot_sector(
+        &mut self,
+        bytes: Vec<u8>,
+        image_type: Option<DiskType>,
+    ) -> Result<(), MachineError> {
         if bytes.len() < 512 {
             return Err(MachineError::BootSectorError(
                 "Boot sector must be at least 512 bytes long".to_string(),
@@ -418,7 +425,22 @@ impl Machine {
         self.cpu.set_reg8(Reg8::Dl, 0);
 
         // Keep the floppy image in machine
-        self.floppy_image = Some(bytes);
+        let geometry = match image_type {
+            Some(DiskType::Floppy360) => DiskGeometry {
+                cylinders: 40,
+                heads: 2,
+                sectors_per_track: 9,
+            },
+            None | Some(DiskType::Floppy180) => DiskGeometry {
+                cylinders: 40,
+                heads: 1,
+                sectors_per_track: 9,
+            },
+        };
+        self.floppy_image = Some(FloppyDisk {
+            bytes: bytes,
+            geometry: geometry,
+        });
 
         Ok(())
     }
@@ -429,7 +451,11 @@ pub(crate) enum LoadMode {
     Boot,
 }
 
-pub fn main_loop(file_path: &str, load_mode: LoadMode) -> anyhow::Result<u8> {
+pub fn main_loop(
+    file_path: &str,
+    load_mode: LoadMode,
+    image_type: Option<DiskType>,
+) -> anyhow::Result<u8> {
     let memory_size = 0x100_000; // Physical memory: 1 MiB
 
     let mut machine = Machine {
@@ -447,7 +473,7 @@ pub fn main_loop(file_path: &str, load_mode: LoadMode) -> anyhow::Result<u8> {
     let data: Vec<u8> = fs::read(file_path)?;
     match load_mode {
         LoadMode::Com => machine.load_com(&data)?,
-        LoadMode::Boot => machine.load_boot_sector(data)?,
+        LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
     }
 
     machine.cpu.trace();
