@@ -423,6 +423,15 @@ impl Cpu {
                 self.set_reg8(Reg8::Al, value);
                 self.update_logic_flags8(value);
             }
+            0x0D => {
+                // OR AX, IMMED16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("or ax, {}", operand));
+
+                let value = operand | self.get_reg16(Reg16::Ax);
+                self.set_reg16(Reg16::Ax, value);
+                self.update_logic_flags16(value);
+            }
             0x0E => {
                 // PUSH CS
                 print_instruction(byte, &format_args!("push cs"));
@@ -1861,6 +1870,19 @@ impl Cpu {
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
+            }
+            0xD4 => {
+                // AAM: ASCII Adjust after Multiply
+                let base = self.fetch_next_byte_and_advance_ip(memory);
+                if base == 0 {
+                    return Ok(CpuStepResult::Interrupt(0x0));
+                }
+                print_instruction(byte, &format_args!("aam {:X}h", base));
+                let al = self.get_reg8(Reg8::Al);
+                let remainder = al % base;
+                self.set_reg8(Reg8::Ah, al / base);
+                self.set_reg8(Reg8::Al, remainder);
+                self.set_result_flags8(remainder);
             }
             0xE2 => {
                 // LOOP rel8
