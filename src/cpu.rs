@@ -398,6 +398,24 @@ impl Cpu {
                 print_instruction(byte, &format_args!("pop ds"));
                 self.ds = self.pop_from_stack(memory)?;
             }
+            0x24 => {
+                // AND AL, IMMED8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("and al, {:X}h", operand));
+                let reg_value = self.get_reg8(Reg8::Al);
+                let value = reg_value & operand;
+                self.set_reg8(Reg8::Al, value);
+                self.update_logic_flags8(value);
+            }
+            0x25 => {
+                // AND AX, IMMED16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("and ax, {:X}h", operand));
+                let reg_value = self.get_reg16(Reg16::Ax);
+                let value = reg_value & operand;
+                self.set_reg16(Reg16::Ax, value);
+                self.update_logic_flags16(value);
+            }
             0x28 => {
                 // SUB r/m8, r8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
