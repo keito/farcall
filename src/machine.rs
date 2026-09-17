@@ -5,11 +5,12 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
-use crate::machine::disk::{DiskGeometry, FloppyDisk};
 use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
 use crate::registers::{Reg8, Reg16};
+use console::translate_key;
+use disk::{DiskGeometry, FloppyDisk};
 
 pub use disk::DiskType;
 
@@ -28,6 +29,7 @@ struct Machine {
     boot_time: Instant,
     load_mode: LoadMode,
     verbosity: u8,
+    pending_key: Option<(u8, u8)>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -315,19 +317,45 @@ impl Machine {
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
         let operation = self.cpu.get_reg8(Reg8::Ah);
         if self.verbosity > 0 {
-            eprintln!("\x1b[1;91mKeyboard Service op {:X}h\x1b[0m", operation);
+            eprintln!("\x1b[1;93mKeyboard Service op {:X}h\x1b[0m", operation);
         }
         match operation {
-            // 0x00 => {
-            //     // Read key
-            //     let mut buf = [0u8; 1];
-            //     let byte = self.read_console_byte(&mut buf);
-            //     Ok(InterruptResult::ResumeExecution)
-            // }
+            0x00 => {
+                // Read key
+                let key: Option<(u8, u8)> = self.pending_key.take();
+                let (ascii_key, scan_code) = match key {
+                    Some(key) => key,
+                    None => loop {
+                        let mut buf = [0u8; 1];
+                        self.read_console_byte(&mut buf)?;
+                        if let Some(key) = translate_key(buf[0]) {
+                            break key;
+                        }
+                    },
+                };
+                self.cpu.set_reg8(Reg8::Al, ascii_key);
+                self.cpu.set_reg8(Reg8::Ah, scan_code);
+                Ok(InterruptResult::ResumeExecution)
+            }
             0x01 => {
                 // Check key
-                // TODO: Actually do the work
-                self.cpu.set_flag(Flag::Zero, true);
+                let mut key: Option<(u8, u8)> = self.pending_key;
+                if key.is_none() {
+                    // Try reading host input without waiting
+                    if let Some(byte) = self.try_read_console_byte()? {
+                        // Key arrived; translate and cache it
+                        key = translate_key(byte); // Might still return None
+                        self.pending_key = key;
+                    }
+                }
+                // If we have a key
+                if let Some((ascii_key, scan_code)) = key {
+                    self.cpu.set_reg8(Reg8::Al, ascii_key);
+                    self.cpu.set_reg8(Reg8::Ah, scan_code);
+                    self.cpu.set_flag(Flag::Zero, false);
+                } else {
+                    self.cpu.set_flag(Flag::Zero, true);
+                }
                 Ok(InterruptResult::ResumeExecution)
             }
             // 0x02 => {
@@ -582,6 +610,7 @@ pub fn main_loop(
         boot_time: Instant::now(),
         load_mode: load_mode.clone(),
         verbosity,
+        pending_key: None,
     };
     machine.handles.resize(20, None);
 

@@ -25,6 +25,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     boot_time: Instant::now(),
                     verbosity: 0,
                     load_mode: LoadMode::Com,
+                    pending_key: None,
                 };
                 machine.cpu.cs = 0x1000;
                 machine.cpu.ip = ip;
@@ -136,6 +137,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         boot_time: Instant::now(),
         verbosity: 0,
         load_mode: LoadMode::Com,
+        pending_key: None,
     };
     machine.cpu.cs = 0x1000;
     machine.cpu.ip = 0x0100;
@@ -212,6 +214,7 @@ fn write_service_clears_only_carry() {
         boot_time: Instant::now(),
         verbosity: 0,
         load_mode: LoadMode::Com,
+        pending_key: None,
     };
     machine.cpu.ax = 0x4000;
     machine.cpu.bx = 1;
@@ -239,6 +242,7 @@ fn dos_termination_returns_al_as_exit_code() {
             boot_time: Instant::now(),
             verbosity: 0,
             load_mode: LoadMode::Com,
+            pending_key: None,
         };
         machine.cpu.ax = ax;
 
