@@ -62,6 +62,8 @@ enum MachineError {
     BootSectorError(String),
     #[error("Time of Day Service error: {0}")]
     TimeOfDayServiceError(String),
+    #[error("Keyboard Service error: {0}")]
+    KeyboardServiceError(String),
 }
 
 enum InterruptResult {
@@ -309,6 +311,32 @@ impl Machine {
         }
     }
 
+    fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let operation = self.cpu.get_reg8(Reg8::Ah);
+        eprintln!("\x1b[1;91mKeyboard Service op {:X}h\x1b[0m", operation);
+        match operation {
+            // 0x00 => {
+            //     // Read key
+            //     let mut buf = [0u8; 1];
+            //     let byte = self.read_console_byte(&mut buf);
+            //     Ok(InterruptResult::ResumeExecution)
+            // }
+            0x01 => {
+                // Check key
+                // TODO: Actually do the work
+                self.cpu.set_flag(Flag::Zero, true);
+                Ok(InterruptResult::ResumeExecution)
+            }
+            // 0x02 => {
+            //     // Read shift status
+            //     Ok(InterruptResult::ResumeExecution)
+            // }
+            _ => Err(MachineError::KeyboardServiceError(
+                "Unsupported operation".to_string(),
+            )),
+        }
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -358,6 +386,7 @@ impl Machine {
             0x12 => self.amount_conventional_ram_service(),
             0x13 => self.disk_service(),
             0x14 => self.serial_port_service(),
+            0x16 => self.keyboard_service(),
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
             0x20 => {
@@ -367,8 +396,8 @@ impl Machine {
                 }
                 Ok(InterruptResult::Exit(0))
             }
-            // DOS services
             0x21 => {
+                // DOS services
                 // In boot mode, send to the guest
                 if self.load_mode == LoadMode::Boot {
                     return self.handle_guest_interrupt(interrupt);
@@ -387,6 +416,15 @@ impl Machine {
                     0x4C => self.termination_service(),
                     service => Err(MachineError::UnsupportedService(service)),
                 }
+            }
+            0x29 => {
+                // Fast console output
+                // In boot mode, send to the guest
+                if self.load_mode == LoadMode::Boot {
+                    return self.handle_guest_interrupt(interrupt);
+                }
+                // TODO: Emulate in COM mode
+                Err(MachineError::UnsupportedInterrupt(interrupt))
             }
             0x00 | 0x60 => self.handle_guest_interrupt(interrupt),
             _ => Err(MachineError::UnsupportedInterrupt(interrupt)),

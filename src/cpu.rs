@@ -1042,6 +1042,11 @@ impl Cpu {
                         print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
                         self.add16(destination, immediate, false)
                     }
+                    0b010 => {
+                        // ADC r/m16, immed8
+                        print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
+                        self.add16(destination, immediate, self.get_flag(Flag::Carry))
+                    }
                     0b101 => {
                         // SUB R/M16, IMMED8
                         print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
