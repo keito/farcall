@@ -9,7 +9,7 @@ use crate::memory::{
     MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
 };
 use crate::registers::{Reg8, Reg16};
-use console::translate_key;
+use console::{TerminalGuard, translate_key};
 use disk::{DiskGeometry, FloppyDisk};
 
 pub use disk::DiskType;
@@ -30,6 +30,7 @@ struct Machine {
     load_mode: LoadMode,
     verbosity: u8,
     pending_key: Option<(u8, u8)>,
+    terminal: Option<TerminalGuard>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -67,6 +68,8 @@ enum MachineError {
     TimeOfDayServiceError(String),
     #[error("Keyboard Service error: {0}")]
     KeyboardServiceError(String),
+    #[error("Terminal error: {0}")]
+    TerminalError(String),
 }
 
 enum InterruptResult {
@@ -611,6 +614,7 @@ pub fn main_loop(
         load_mode: load_mode.clone(),
         verbosity,
         pending_key: None,
+        terminal: Some(TerminalGuard::new()?),
     };
     machine.handles.resize(20, None);
 

@@ -8,51 +8,36 @@ use super::Machine;
 use super::MachineError;
 
 impl Machine {
-    pub(super) fn read_console_byte(&self, buf: &mut [u8]) -> Result<(), MachineError> {
-        // TODO: Add support for Windows
-        let mut guard = TerminalGuard {
-            terminal: std::fs::File::open("/dev/tty")?,
-            original_settings: None,
+    pub(super) fn read_console_byte(&mut self, buf: &mut [u8]) -> Result<(), MachineError> {
+        let Some(ref mut terminal) = self.terminal else {
+            return Err(MachineError::TerminalError(
+                "Terminal not initialized".to_string(),
+            ));
         };
-        let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
-        guard.original_settings = Some(attrs.clone());
-
-        // Deliver input without waiting for Enter
-        attrs.local_modes.remove(LocalModes::ICANON);
-        // DOS service handles echoing
-        attrs.local_modes.remove(LocalModes::ECHO);
-        attrs.local_modes.remove(LocalModes::ECHONL);
+        let mut attrs = tcgetattr(&terminal.terminal).map_err(std::io::Error::from)?;
         // Wait for at least one byte
         attrs.special_codes[SpecialCodeIndex::VMIN] = 1;
-        attrs.special_codes[SpecialCodeIndex::VTIME] = 0;
-        tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
+        tcsetattr(&terminal.terminal, OptionalActions::Now, &attrs)
+            .map_err(std::io::Error::from)?;
 
-        guard.terminal.read_exact(buf)?;
-
+        terminal.terminal.read_exact(buf)?;
         Ok(())
     }
 
-    pub(super) fn try_read_console_byte(&self) -> Result<Option<u8>, MachineError> {
-        // TODO: Add support for Windows
-        let mut guard = TerminalGuard {
-            terminal: std::fs::File::open("/dev/tty")?,
-            original_settings: None,
+    pub(super) fn try_read_console_byte(&mut self) -> Result<Option<u8>, MachineError> {
+        let Some(ref mut terminal) = self.terminal else {
+            return Err(MachineError::TerminalError(
+                "Terminal not initialized".to_string(),
+            ));
         };
-        let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
-        guard.original_settings = Some(attrs.clone());
-
-        // Deliver input without waiting for Enter
-        attrs.local_modes.remove(LocalModes::ICANON);
-        // DOS service handles echoing
-        attrs.local_modes.remove(LocalModes::ECHO);
-        attrs.local_modes.remove(LocalModes::ECHONL);
+        let mut attrs = tcgetattr(&terminal.terminal).map_err(std::io::Error::from)?;
         // Don't wait for bytes
         attrs.special_codes[SpecialCodeIndex::VMIN] = 0;
-        attrs.special_codes[SpecialCodeIndex::VTIME] = 0;
-        tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
+        tcsetattr(&terminal.terminal, OptionalActions::Now, &attrs)
+            .map_err(std::io::Error::from)?;
 
         let mut buf = [0u8; 1];
-        let result = guard.terminal.read(&mut buf)?;
+        let result = terminal.terminal.read(&mut buf)?;
         if result == 0 {
             Ok(None)
         } else {
@@ -67,9 +52,32 @@ impl Machine {
     }
 }
 
-struct TerminalGuard {
+pub(super) struct TerminalGuard {
     terminal: File,
     original_settings: Option<Termios>,
+}
+
+impl TerminalGuard {
+    pub(super) fn new() -> Result<Self, MachineError> {
+        // TODO: Add support for Windows
+        let mut guard = Self {
+            terminal: std::fs::File::open("/dev/tty")?,
+            original_settings: None,
+        };
+        let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
+        guard.original_settings = Some(attrs.clone());
+
+        // Deliver input without waiting for Enter
+        attrs.local_modes.remove(LocalModes::ICANON);
+        // DOS service handles echoing
+        attrs.local_modes.remove(LocalModes::ECHO);
+        attrs.local_modes.remove(LocalModes::ECHONL);
+
+        attrs.special_codes[SpecialCodeIndex::VTIME] = 0;
+
+        tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
+        Ok(guard)
+    }
 }
 
 impl Drop for TerminalGuard {

@@ -67,6 +67,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         verbosity: 0,
         load_mode: LoadMode::Boot,
         pending_key: None,
+        terminal: None,
     }
 }
 
