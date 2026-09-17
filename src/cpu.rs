@@ -1709,6 +1709,27 @@ impl Cpu {
                         self.cs = target_cs;
                         self.ip = target_ip;
                     }
+                    0b100 => {
+                        // JMP R/M16 (intra)
+                        print_instruction(byte, &format_args!("jmp {}", rm));
+                        self.ip = operand;
+                    }
+                    0b101 => {
+                        // JMP MEM16 (intersegment)
+                        let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
+                            return Err(CpuError::UnsupportedRmField(rm_field));
+                        };
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
+                        let target_ip = u16::from_le_bytes([words[0], words[1]]);
+                        let target_cs = u16::from_le_bytes([words[2], words[3]]);
+                        print_instruction(
+                            byte,
+                            &format_args!("jmp far {:04X}h:{:04X}h", target_cs, target_ip),
+                        );
+                        self.ip = target_ip;
+                        self.cs = target_cs;
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
