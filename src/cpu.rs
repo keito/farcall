@@ -487,6 +487,22 @@ impl Cpu {
                 let result = self.add16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg16(dest_reg, result);
             }
+            0x14 => {
+                // ADC AL, IMMED8
+                let al_val = self.get_reg8(Reg8::Al);
+                let immed = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("adc al, {}", immed));
+                let result = self.add8(al_val, immed, self.get_flag(Flag::Carry));
+                self.set_reg8(Reg8::Al, result);
+            }
+            0x15 => {
+                // ADC AX, IMMED16
+                let ax_val = self.get_reg16(Reg16::Ax);
+                let immed = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("adc ax, {}", immed));
+                let result = self.add16(ax_val, immed, self.get_flag(Flag::Carry));
+                self.set_reg16(Reg16::Ax, result);
+            }
             0x16 => {
                 // PUSH SS
                 self.print_instruction(byte, &format_args!("push ss"));
