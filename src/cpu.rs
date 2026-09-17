@@ -439,6 +439,30 @@ impl Cpu {
                 self.ss = self.pop_from_stack(memory)?;
                 // TODO: delay interrupt recognition until after next instruction
             }
+            0x1A => {
+                // SBB R8,R/M8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let dest_reg_val = self.get_reg8(dest_reg);
+                let operand = self.read_operand8(memory, &rm)?;
+
+                print_instruction(byte, &format_args!("sbb {}, {}", dest_reg, rm));
+                let result = self.subtract8(dest_reg_val, operand, self.get_flag(Flag::Carry));
+                self.set_reg8(dest_reg, result);
+            }
+            0x1B => {
+                // SBB R16,R/M16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let dest_reg_val = self.get_reg16(dest_reg);
+                let operand = self.read_operand16(memory, &rm)?;
+
+                print_instruction(byte, &format_args!("sbb {}, {}", dest_reg, rm));
+                let result = self.subtract16(dest_reg_val, operand, self.get_flag(Flag::Carry));
+                self.set_reg16(dest_reg, result);
+            }
             0x1E => {
                 // PUSH DS
                 print_instruction(byte, &format_args!("push ds"));
