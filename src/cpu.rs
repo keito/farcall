@@ -989,6 +989,32 @@ impl Cpu {
                     self.write_operand16(memory, &rm, value)?;
                 }
             }
+            0x84 => {
+                // TEST R/M8, REG8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let operand = self.read_operand8(memory, &rm)?;
+
+                let reg = Reg8::try_from(parsed.reg_field)?;
+                let reg_value = self.get_reg8(reg);
+
+                print_instruction(byte, &format_args!("test {}, {}", rm, reg));
+                let result = operand & reg_value;
+                self.update_logic_flags8(result);
+            }
+            0x85 => {
+                // TEST R/M16, REG16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let operand = self.read_operand16(memory, &rm)?;
+
+                let reg = Reg16::try_from(parsed.reg_field)?;
+                let reg_value = self.get_reg16(reg);
+
+                print_instruction(byte, &format_args!("test {}, {}", rm, reg));
+                let result = operand & reg_value;
+                self.update_logic_flags16(result);
+            }
             0x86 => {
                 // XCHG REG8,REG8/MEM8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
