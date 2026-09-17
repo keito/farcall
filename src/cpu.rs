@@ -1211,6 +1211,33 @@ impl Cpu {
                     _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
                 };
             }
+            0xD1 => {
+                // Does many things with R/M16, 1
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                match reg_field {
+                    0b000 => {
+                        // ROL r/m16, 1
+                        print_instruction(byte, &format_args!("rol {}, 1", rm));
+                        let operand = self.read_operand16(memory, &rm)?;
+                        let value = operand.rotate_left(1);
+                        self.write_operand16(memory, &rm, value)?;
+                        let cf = (operand & 0x8000) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(Flag::Overflow, ((value & 0x8000) != 0) ^ cf);
+                    }
+                    0b100 => {
+                        // SAL/SHL r/m16, 1
+                        // Shift a 16-bit operand left by 1, and store result in rm
+                        print_instruction(byte, &format_args!("shl {}, 1", rm));
+                        let operand = self.read_operand16(memory, &rm)?;
+                        let result = self.shl16(operand, 1);
+                        self.write_operand16(memory, &rm, result)?;
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+            }
             0xD2 => {
                 // Does many things with REG8/MEM8, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
@@ -1256,22 +1283,8 @@ impl Cpu {
                         let cl = self.get_reg8(Reg8::Cl);
                         if cl != 0 {
                             let operand = self.read_operand16(memory, &rm)?;
-                            let mut result = operand;
-                            let mut last_bit_15 = false;
-                            for _ in 0..cl {
-                                last_bit_15 = (result & 0x8000) != 0;
-                                result = result << 1;
-                            }
+                            let result = self.shl16(operand, cl);
                             self.write_operand16(memory, &rm, result)?;
-                            self.set_result_flags16(result);
-                            // Last bit shifted out of bit 15
-                            self.set_flag(Flag::Carry, last_bit_15);
-                            if cl == 1 {
-                                self.set_flag(
-                                    Flag::Overflow,
-                                    ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
-                                )
-                            }
                         }
                     }
                     _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
@@ -1620,6 +1633,28 @@ impl Cpu {
         // Did decrementing borrowing into lower nibble (was it 0)
         self.set_flag(Flag::AuxiliaryCarry, old_value & 0x0F == 0);
         self.set_result_flags16(new_value);
+    }
+
+    fn shl16(&mut self, value: u16, count: u8) -> u16 {
+        if count == 0 {
+            return value;
+        }
+        let mut result = value;
+        let mut last_bit_15 = false;
+        for _ in 0..count {
+            last_bit_15 = (result & 0x8000) != 0;
+            result = result << 1;
+        }
+        self.set_result_flags16(result);
+        // Last bit shifted out of bit 15
+        self.set_flag(Flag::Carry, last_bit_15);
+        if count == 1 {
+            self.set_flag(
+                Flag::Overflow,
+                ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
+            )
+        }
+        return result;
     }
 
     pub(crate) fn trace(&self) {
