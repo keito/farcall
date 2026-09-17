@@ -1222,6 +1222,27 @@ impl Cpu {
                     }
                 }
             }
+            0xAD => {
+                // LODSW
+                print_instruction(byte, &format_args!("lodsw"));
+                // Repeat if REP prefix was set
+                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // TODO: Support interrupt/resume between repetitions
+                for _ in 0..reps {
+                    let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    let seg_addr = self.get_segment_reg(seg);
+                    let word = read_word(memory, PhysAddr::new(seg_addr, self.si))?;
+                    self.set_reg16(Reg16::Ax, word);
+                    if self.get_flag(Flag::Direction) {
+                        self.si = self.si.wrapping_sub(2);
+                    } else {
+                        self.si = self.si.wrapping_add(2);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        self.cx = self.cx.wrapping_sub(1);
+                    }
+                }
+            }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
