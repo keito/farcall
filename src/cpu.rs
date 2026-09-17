@@ -428,6 +428,50 @@ impl Cpu {
                 print_instruction(byte, &format_args!("push cs"));
                 self.push_onto_stack(memory, self.cs)?;
             }
+            0x10 => {
+                // ADC R/M8,R8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let source_reg_val = self.get_reg8(source_reg);
+                let operand = self.read_operand8(memory, &rm)?;
+                print_instruction(byte, &format_args!("adc {}, {}", rm, source_reg));
+                let result = self.add8(operand, source_reg_val, self.get_flag(Flag::Carry));
+                self.write_operand8(memory, &rm, result)?;
+            }
+            0x11 => {
+                // ADC R/M16,R16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let source_reg_val = self.get_reg16(source_reg);
+                let operand = self.read_operand16(memory, &rm)?;
+                print_instruction(byte, &format_args!("adc {}, {}", rm, source_reg));
+                let result = self.add16(source_reg_val, operand, self.get_flag(Flag::Carry));
+                self.write_operand16(memory, &rm, result)?;
+            }
+            0x12 => {
+                // ADC R8,R/M8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let dest_reg_val = self.get_reg8(dest_reg);
+                let operand = self.read_operand8(memory, &rm)?;
+                print_instruction(byte, &format_args!("adc {}, {}", dest_reg, rm));
+                let result = self.add8(dest_reg_val, operand, self.get_flag(Flag::Carry));
+                self.set_reg8(dest_reg, result);
+            }
+            0x13 => {
+                // ADC R16,R/M16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let dest_reg_val = self.get_reg16(dest_reg);
+                let operand = self.read_operand16(memory, &rm)?;
+                print_instruction(byte, &format_args!("adc {}, {}", dest_reg, rm));
+                let result = self.add16(dest_reg_val, operand, self.get_flag(Flag::Carry));
+                self.set_reg16(dest_reg, result);
+            }
             0x16 => {
                 // PUSH SS
                 print_instruction(byte, &format_args!("push ss"));
