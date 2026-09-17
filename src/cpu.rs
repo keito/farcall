@@ -1314,6 +1314,39 @@ impl Cpu {
                     }
                 }
             }
+            0xA7 => {
+                // CMPSW DEST-STR16, SRC-STR16
+                print_instruction(byte, &format_args!("cmpsw"));
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let source_seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    let source_addr = PhysAddr::new(self.get_segment_reg(source_seg), self.si);
+                    let dest_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let source_word = read_word(memory, source_addr)?;
+                    let dest_word = read_word(memory, dest_addr)?;
+                    self.subtract16(source_word, dest_word, false);
+                    if self.get_flag(Flag::Direction) {
+                        self.si = self.si.wrapping_sub(2);
+                        self.di = self.di.wrapping_sub(2);
+                    } else {
+                        self.si = self.si.wrapping_add(2);
+                        self.di = self.di.wrapping_add(2);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        // Compare until a mismatch or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if !self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    } else if rep_prefix == Some(0xF2) {
+                        // Compare until a match or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    }
+                }
+            }
             0xA8 => {
                 // TEST AL, IMMED8
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
@@ -1677,6 +1710,17 @@ impl Cpu {
                         let cf = (operand & 0x8000) != 0;
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x8000) != 0) ^ cf);
+                    }
+                    0b010 => {
+                        // RCL r/m16, 1
+                        print_instruction(byte, &format_args!("rcl {}, 1", rm));
+                        let operand = self.read_operand16(memory, &rm)?;
+                        let wide_val = ((operand as u32) << 1) | self.get_flag(Flag::Carry) as u32;
+                        let result = wide_val as u16;
+                        self.write_operand16(memory, &rm, result)?;
+                        let cf = (operand & 0x8000) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(Flag::Overflow, ((result & 0x8000) != 0) ^ cf);
                     }
                     0b100 => {
                         // SAL/SHL r/m16, 1
