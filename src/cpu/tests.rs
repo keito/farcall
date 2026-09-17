@@ -17,6 +17,7 @@ mod mul;
 mod neg;
 mod or;
 mod rep_lodsb;
+mod scas;
 mod segment_override;
 mod shl;
 mod stos;

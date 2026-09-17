@@ -1322,6 +1322,64 @@ impl Cpu {
                     }
                 }
             }
+            0xAE => {
+                // SCASB: compare AL with [ES:DI], then advance DI
+                print_instruction(byte, &format_args!("scasb"));
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let al = self.get_reg8(Reg8::Al);
+                    let esdi_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let esdi_byte = read_byte(memory, esdi_addr)?;
+                    self.subtract8(al, esdi_byte, false);
+                    if self.get_flag(Flag::Direction) {
+                        self.di = self.di.wrapping_sub(1);
+                    } else {
+                        self.di = self.di.wrapping_add(1);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        // Compare until a mismatch or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if !self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    } else if rep_prefix == Some(0xF2) {
+                        // Compare until a match or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    }
+                }
+            }
+            0xAF => {
+                // SCASW: compare AX with [ES:DI], then advance DI
+                print_instruction(byte, &format_args!("scasw"));
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let ax = self.get_reg16(Reg16::Ax);
+                    let esdi_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let esdi_word = read_word(memory, esdi_addr)?;
+                    self.subtract16(ax, esdi_word, false);
+                    if self.get_flag(Flag::Direction) {
+                        self.di = self.di.wrapping_sub(2);
+                    } else {
+                        self.di = self.di.wrapping_add(2);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        // Compare until a mismatch or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if !self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    } else if rep_prefix == Some(0xF2) {
+                        // Compare until a match or CX reaches zero
+                        self.cx = self.cx.wrapping_sub(1);
+                        if self.get_flag(Flag::Zero) {
+                            break;
+                        }
+                    }
+                }
+            }
             // B0-B7: move an 8-bit immediate into an 8-bit register
             0xB0 => {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
