@@ -59,7 +59,7 @@ impl Cpu {
     fn decode_effective_address(
         &mut self,
         memory: &[u8],
-        fields: ModRmFields,
+        fields: &ModRmFields,
         segment_override: Option<SegmentReg>,
     ) -> Result<(SegmentReg, u16), CpuError> {
         match fields.mod_field {
@@ -102,7 +102,7 @@ impl Cpu {
     pub(super) fn decode_rm8_operand(
         &mut self,
         memory: &[u8],
-        fields: ModRmFields,
+        fields: &ModRmFields,
         segment_override: Option<SegmentReg>,
     ) -> Result<RegisterOrMemoryOperand<Reg8>, CpuError> {
         match fields.mod_field {
@@ -123,7 +123,7 @@ impl Cpu {
     pub(super) fn decode_rm16_operand(
         &mut self,
         memory: &[u8],
-        fields: ModRmFields,
+        fields: &ModRmFields,
         segment_override: Option<SegmentReg>,
     ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
         match fields.mod_field {
