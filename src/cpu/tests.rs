@@ -7,6 +7,7 @@ mod div;
 mod far_call;
 mod group1_byte;
 mod group1_word;
+mod indirect_jump;
 mod interrupts;
 mod lds;
 mod memory_access;
