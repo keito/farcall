@@ -525,34 +525,22 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
                 self.subtract16(self.get_reg16(Reg16::Ax), operand);
             }
-            0x46 => {
-                print_instruction(byte, &format_args!("inc si"));
-                let old_si = self.si;
-                self.si = self.si.wrapping_add(1);
-                // Signed overflow: 0x7FFF became 0x8000, meaning +32767 became -32768
-                self.set_flag(Flag::Overflow, old_si == 0x7FFF);
-                // Was original low nibble 0b1111
-                self.set_flag(Flag::AuxiliaryCarry, old_si & 0xF == 0xF);
-                self.set_result_flags16(self.si);
-            }
-            0x47 => {
-                print_instruction(byte, &format_args!("inc di"));
-                let old_di = self.di;
-                self.di = self.di.wrapping_add(1);
-                self.set_flag(Flag::Overflow, old_di == 0x7FFF);
-                self.set_flag(Flag::AuxiliaryCarry, old_di & 0xF == 0xF);
-                self.set_result_flags16(self.di);
-            }
-            0x49 => {
-                print_instruction(byte, &format_args!("dec cx"));
-                let old_cx = self.cx;
-                self.cx = self.cx.wrapping_sub(1);
-                self.set_result_flags16(self.cx);
-                // Overflow: 0x8000 became 0x7FFF, meaning -32768 became +32767
-                self.set_flag(Flag::Overflow, old_cx == 0x8000);
-                // Did decrementing borrowing into lower nibble (was it 0)
-                self.set_flag(Flag::AuxiliaryCarry, old_cx & 0x0F == 0);
-            }
+            0x40 => self.inc16(byte, Reg16::Ax),
+            0x41 => self.inc16(byte, Reg16::Cx),
+            0x42 => self.inc16(byte, Reg16::Dx),
+            0x43 => self.inc16(byte, Reg16::Bx),
+            0x44 => self.inc16(byte, Reg16::Sp),
+            0x45 => self.inc16(byte, Reg16::Bp),
+            0x46 => self.inc16(byte, Reg16::Si),
+            0x47 => self.inc16(byte, Reg16::Di),
+            0x48 => self.dec16(byte, Reg16::Ax),
+            0x49 => self.dec16(byte, Reg16::Cx),
+            0x4A => self.dec16(byte, Reg16::Dx),
+            0x4B => self.dec16(byte, Reg16::Bx),
+            0x4C => self.dec16(byte, Reg16::Sp),
+            0x4D => self.dec16(byte, Reg16::Bp),
+            0x4E => self.dec16(byte, Reg16::Si),
+            0x4F => self.dec16(byte, Reg16::Di),
             // PUSH/POP 50-5F
             0x50 => {
                 print_instruction(byte, &format_args!("push ax"));
@@ -1352,6 +1340,30 @@ impl Cpu {
         self.set_result_flags16(result);
 
         result
+    }
+
+    fn inc16(&mut self, instruction: u8, reg: Reg16) {
+        print_instruction(instruction, &format_args!("inc {}", reg));
+        let old_value = self.get_reg16(reg);
+        let new_value = old_value.wrapping_add(1);
+        self.set_reg16(reg, new_value);
+        // Signed overflow: 0x7FFF became 0x8000, meaning +32767 became -32768
+        self.set_flag(Flag::Overflow, old_value == 0x7FFF);
+        // Was original low nibble 0b1111
+        self.set_flag(Flag::AuxiliaryCarry, old_value & 0xF == 0xF);
+        self.set_result_flags16(new_value);
+    }
+
+    fn dec16(&mut self, instruction: u8, reg: Reg16) {
+        print_instruction(instruction, &format_args!("dec {}", reg));
+        let old_value = self.get_reg16(reg);
+        let new_value = old_value.wrapping_sub(1);
+        self.set_reg16(reg, new_value);
+        // Overflow: 0x8000 became 0x7FFF, meaning -32768 became +32767
+        self.set_flag(Flag::Overflow, old_value == 0x8000);
+        // Did decrementing borrowing into lower nibble (was it 0)
+        self.set_flag(Flag::AuxiliaryCarry, old_value & 0x0F == 0);
+        self.set_result_flags16(new_value);
     }
 
     pub(crate) fn trace(&self) {
