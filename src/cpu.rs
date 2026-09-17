@@ -1630,7 +1630,11 @@ impl Cpu {
                         self.update_logic_flags16(result);
                     }
                     // 0b010 => 0, // NOT r/m 16
-                    // 0b011 => 0, // NEG r/m 16
+                    0b011 => {
+                        // NEG r/m 16
+                        let result = self.subtract16(0, operand, false);
+                        self.write_operand16(memory, &rm, result)?;
+                    }
                     0b100 => {
                         // MUL r/m 16
                         print_instruction(byte, &format_args!("mul {}", rm));
