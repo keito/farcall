@@ -876,6 +876,22 @@ impl Cpu {
                 self.di = self.pop_from_stack(memory)?;
             }
             // Jumps
+            0x70 => {
+                // Jump if Overflow
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                self.print_instruction(byte, &format_args!("jo {:X}h", operand));
+                if self.get_flag(Flag::Overflow) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x71 => {
+                // Jump if No Overflow
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                self.print_instruction(byte, &format_args!("jno {:X}h", operand));
+                if !self.get_flag(Flag::Overflow) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x72 => {
                 // Jump if Below
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
