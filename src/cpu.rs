@@ -1021,6 +1021,20 @@ impl Cpu {
                 let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
             }
+            0x8F => {
+                // POP R/M16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                if parsed.reg_field != 0 {
+                    // The register value is required to be 0
+                    return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
+                }
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                print_instruction(byte, &format_args!("pop {}", rm));
+
+                let value = self.pop_from_stack(memory)?;
+                self.write_operand16(memory, &rm, value)?;
+            }
             // XCHG AX,
             0x90 => {
                 // XCHG AX, AX (NOP)
@@ -1819,6 +1833,7 @@ impl Cpu {
                     }
                     0b110 => {
                         // PUSH r/m16
+                        print_instruction(byte, &format_args!("push {}", rm));
                         let value = match rm {
                             RegisterOrMemoryOperand::Register(Reg16::Sp) => {
                                 // 8086/8088 hardware quirk for PUSH SP
