@@ -1517,6 +1517,16 @@ impl Cpu {
                             self.write_operand16(memory, &rm, result)?;
                         }
                     }
+                    0b101 => {
+                        // SHR R/M16, CL
+                        print_instruction(byte, &format_args!("shr {}, cl", rm));
+                        let cl = self.get_reg8(Reg8::Cl);
+                        if cl != 0 {
+                            let operand = self.read_operand16(memory, &rm)?;
+                            let result = self.shr16(operand, cl);
+                            self.write_operand16(memory, &rm, result)?;
+                        }
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
@@ -1584,14 +1594,24 @@ impl Cpu {
                 // Does many things with REG8/MEM8(, IMMED8)
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let operand = self.read_operand8(memory, &rm)?;
                 match parsed.reg_field {
-                    0 => {
+                    0b000 => {
                         // TEST R/M8, IMMED8
                         let immediate = self.fetch_next_byte_and_advance_ip(memory);
                         print_instruction(byte, &format_args!("test {}, {:X}h", rm, immediate));
-                        let operand = self.read_operand8(memory, &rm)?;
                         let result = operand & immediate;
                         self.update_logic_flags8(result);
+                    }
+                    0b100 => {
+                        // MUL R/M8 (AX := AL * r/m8).
+                        print_instruction(byte, &format_args!("mul {}", rm));
+                        let al = self.get_reg8(Reg8::Al);
+                        let value = (al as u16) * (operand as u16);
+                        self.ax = value;
+                        let upper_half_non_zero = value >> 8 != 0;
+                        self.set_flag(Flag::Carry, upper_half_non_zero);
+                        self.set_flag(Flag::Overflow, upper_half_non_zero);
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
