@@ -433,7 +433,7 @@ fn c7_rejects_nonzero_opcode_extensions_without_writing() {
             let original_memory = memory.clone();
 
             assert!(
-                matches!(cpu.step(&mut memory), Err(CpuError::InvalidRegisterValue(actual)) if actual == extension)
+                matches!(cpu.step(&mut memory), Err(CpuError::UnsupportedRegisterField(_, actual)) if actual == extension)
             );
 
             assert_eq!(registers(&cpu), original_registers);
@@ -548,7 +548,7 @@ fn c6_rejects_nonzero_opcode_extensions_without_writing() {
         assert!(
             matches!(
                 result,
-                Err(CpuError::InvalidRegisterValue(actual)) if actual == extension
+                Err(CpuError::UnsupportedRegisterField(_, actual)) if actual == extension
             ),
             "must report the rejected extension {extension}"
         );

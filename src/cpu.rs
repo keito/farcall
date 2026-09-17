@@ -36,6 +36,8 @@ pub(crate) enum CpuError {
     InvalidRegisterValue(u8),
     #[error("Unsupported r/m field: {0}")]
     UnsupportedRmField(u8),
+    #[error("Unsupported ModRm register field value in instruction {0:02X}h: {0}")]
+    UnsupportedRegisterField(u8, u8),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
 }
@@ -547,7 +549,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand16(memory, &rm)?;
-                self.subtract16(self.get_reg16(dest_reg), rm_value);
+                self.subtract16(self.get_reg16(dest_reg), rm_value, false);
             }
             0x3C => {
                 // CMP AL, imm8 - basically SUB AL that doesn't change AL
@@ -559,7 +561,7 @@ impl Cpu {
                 // CMP AX, imm16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
-                self.subtract16(self.get_reg16(Reg16::Ax), operand);
+                self.subtract16(self.get_reg16(Reg16::Ax), operand, false);
             }
             0x40 => self.inc16(byte, Reg16::Ax),
             0x41 => self.inc16(byte, Reg16::Cx),
@@ -785,10 +787,71 @@ impl Cpu {
                         is_cmp = true;
                         self.subtract8(destination, immediate, false)
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
                 if !is_cmp {
                     self.write_operand8(memory, &rm, value)?;
+                }
+            }
+            0x81 => {
+                // Does a lot of things on R/M16, IMMED16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                let destination = self.read_operand16(memory, &rm)?;
+                let mut is_cmp = false;
+                let value = match reg_field {
+                    0 => {
+                        print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
+                        self.add16(destination, immediate, false)
+                    } // ADD
+                    1 => {
+                        // OR
+                        print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
+                        let result = destination | immediate;
+                        self.update_logic_flags16(result);
+                        result
+                    }
+                    2 => {
+                        // ADC
+                        print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
+                        self.add16(destination, immediate, self.get_flag(Flag::Carry))
+                    }
+                    3 => {
+                        // SBB
+                        print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
+                        self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
+                    }
+                    4 => {
+                        // AND
+                        print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
+                        let result = destination & immediate;
+                        self.update_logic_flags16(result);
+                        result
+                    }
+                    5 => {
+                        // SUB
+                        print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
+                        self.subtract16(destination, immediate, false)
+                    }
+                    6 => {
+                        // XOR
+                        print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
+                        let result = destination ^ immediate;
+                        self.update_logic_flags16(result);
+                        result
+                    }
+                    7 => {
+                        // CMP
+                        print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
+                        is_cmp = true;
+                        self.subtract16(destination, immediate, false)
+                    }
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
+                };
+                if !is_cmp {
+                    self.write_operand16(memory, &rm, value)?;
                 }
             }
             0x83 => {
@@ -804,7 +867,7 @@ impl Cpu {
                         print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
                         self.add16(destination, immediate, false)
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
                 self.write_operand16(memory, &rm, value)?;
             }
@@ -1208,7 +1271,7 @@ impl Cpu {
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 if parsed.reg_field != 0 {
                     // The register value is required to be 0
-                    return Err(CpuError::InvalidRegisterValue(parsed.reg_field));
+                    return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
                 }
                 let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
@@ -1221,7 +1284,7 @@ impl Cpu {
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 if parsed.reg_field != 0 {
                     // The register value is required to be 0
-                    return Err(CpuError::InvalidRegisterValue(parsed.reg_field));
+                    return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
                 }
                 let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
@@ -1258,7 +1321,7 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
             0xD1 => {
@@ -1285,7 +1348,7 @@ impl Cpu {
                         let result = self.shl16(operand, 1);
                         self.write_operand16(memory, &rm, result)?;
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
             0xD2 => {
@@ -1318,7 +1381,7 @@ impl Cpu {
                             }
                         }
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
             0xD3 => {
@@ -1337,7 +1400,7 @@ impl Cpu {
                             self.write_operand16(memory, &rm, result)?;
                         }
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
             0xE2 => {
@@ -1414,7 +1477,7 @@ impl Cpu {
                         let result = operand & immediate;
                         self.update_logic_flags8(result);
                     }
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
             0xF7 => {
@@ -1463,7 +1526,7 @@ impl Cpu {
                         self.dx = remainder as u16;
                     }
                     // 0b111 => 0, // IDIV r/m 16
-                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 }
             }
             // Flag operations
@@ -1496,7 +1559,7 @@ impl Cpu {
                 let is_inc = match parsed.reg_field {
                     0 => true,
                     1 => false,
-                    _ => return Err(CpuError::InvalidRegisterValue(parsed.reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
                 let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
                 print_instruction(
@@ -1614,18 +1677,23 @@ impl Cpu {
         result
     }
 
-    fn subtract16(&mut self, lhs: u16, rhs: u16) -> u16 {
-        let (result, borrow) = lhs.overflowing_sub(rhs);
+    fn subtract16(&mut self, lhs: u16, rhs: u16, borrow_in: bool) -> u16 {
+        let new_rhs = rhs as u32 + borrow_in as u32;
+        let wide_lhs = lhs as u32;
+        let result = wide_lhs.wrapping_sub(new_rhs) as u16;
 
         // Carry flag: did subtraction require a borrow?
-        self.set_flag(Flag::Carry, borrow);
+        self.set_flag(Flag::Carry, wide_lhs < new_rhs);
         // Overflow: (1) old_reg and operand have different signs, AND
         // (2) the result's sign differs from old_reg's sign
         self.set_flag(
             Flag::Overflow,
             ((lhs & 0x8000) != (rhs & 0x8000)) && ((result & 0x8000) != (lhs & 0x8000)),
         );
-        self.set_flag(Flag::AuxiliaryCarry, (lhs & 0x0F) < (rhs & 0x0F));
+        self.set_flag(
+            Flag::AuxiliaryCarry,
+            (wide_lhs & 0x0F) < ((rhs & 0x0F) + borrow_in as u16) as u32,
+        );
         self.set_result_flags16(result);
 
         result
