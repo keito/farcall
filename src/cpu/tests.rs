@@ -8,6 +8,7 @@ mod group1_byte;
 mod group1_word;
 mod interrupts;
 mod memory_access;
+mod movs;
 mod mul;
 mod or;
 mod rep_lodsb;
