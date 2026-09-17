@@ -572,17 +572,67 @@ impl Cpu {
                 print_instruction(byte, &format_args!("push ax"));
                 self.push_onto_stack(memory, self.ax)?;
             }
+            0x51 => {
+                print_instruction(byte, &format_args!("push cx"));
+                self.push_onto_stack(memory, self.cx)?;
+            }
+            0x52 => {
+                print_instruction(byte, &format_args!("push dx"));
+                self.push_onto_stack(memory, self.dx)?;
+            }
             0x53 => {
                 print_instruction(byte, &format_args!("push bx"));
                 self.push_onto_stack(memory, self.bx)?;
+            }
+            0x54 => {
+                print_instruction(byte, &format_args!("push sp"));
+                // 8086/8088 hardware quirk
+                let value = self.sp.wrapping_sub(2);
+                self.push_onto_stack(memory, value)?;
+            }
+            0x55 => {
+                print_instruction(byte, &format_args!("push bp"));
+                self.push_onto_stack(memory, self.bp)?;
+            }
+            0x56 => {
+                print_instruction(byte, &format_args!("push si"));
+                self.push_onto_stack(memory, self.si)?;
+            }
+            0x57 => {
+                print_instruction(byte, &format_args!("push di"));
+                self.push_onto_stack(memory, self.di)?;
             }
             0x58 => {
                 print_instruction(byte, &format_args!("pop ax"));
                 self.ax = self.pop_from_stack(memory)?;
             }
+            0x59 => {
+                print_instruction(byte, &format_args!("pop cx"));
+                self.cx = self.pop_from_stack(memory)?;
+            }
+            0x5A => {
+                print_instruction(byte, &format_args!("pop dx"));
+                self.dx = self.pop_from_stack(memory)?;
+            }
             0x5B => {
                 print_instruction(byte, &format_args!("pop bx"));
                 self.bx = self.pop_from_stack(memory)?;
+            }
+            0x5C => {
+                print_instruction(byte, &format_args!("pop sp"));
+                self.sp = self.pop_from_stack(memory)?;
+            }
+            0x5D => {
+                print_instruction(byte, &format_args!("pop bp"));
+                self.bp = self.pop_from_stack(memory)?;
+            }
+            0x5E => {
+                print_instruction(byte, &format_args!("pop si"));
+                self.si = self.pop_from_stack(memory)?;
+            }
+            0x5F => {
+                print_instruction(byte, &format_args!("pop di"));
+                self.di = self.pop_from_stack(memory)?;
             }
             // Jumps
             0x72 => {
