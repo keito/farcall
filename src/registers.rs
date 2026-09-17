@@ -1,5 +1,11 @@
-use crate::cpu::CpuError;
+use crate::cpu::{Cpu, CpuError};
 use std::fmt;
+
+pub(crate) trait Register {
+    type Value;
+    fn get(self, cpu: &Cpu) -> Self::Value;
+    fn set(self, cpu: &mut Cpu, value: Self::Value);
+}
 
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
@@ -46,6 +52,18 @@ impl TryFrom<u8> for Reg8 {
     }
 }
 
+impl Register for Reg8 {
+    type Value = u8;
+
+    fn get(self, cpu: &Cpu) -> u8 {
+        cpu.get_reg8(self)
+    }
+
+    fn set(self, cpu: &mut Cpu, value: u8) {
+        cpu.set_reg8(self, value);
+    }
+}
+
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
 pub(crate) enum Reg16 {
@@ -88,6 +106,18 @@ impl TryFrom<u8> for Reg16 {
             0b111 => Ok(Reg16::Di),
             _ => Err(CpuError::InvalidRegisterValue(value)),
         }
+    }
+}
+
+impl Register for Reg16 {
+    type Value = u16;
+
+    fn get(self, cpu: &Cpu) -> u16 {
+        cpu.get_reg16(self)
+    }
+
+    fn set(self, cpu: &mut Cpu, value: u16) {
+        cpu.set_reg16(self, value);
     }
 }
 

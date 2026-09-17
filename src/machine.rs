@@ -102,7 +102,7 @@ impl Machine {
         };
         io::stdout().write_all(&buf)?;
         io::stdout().flush()?;
-        self.cpu.set_reg8(Reg8::Al, buf[0]);
+        self.cpu.set_reg(Reg8::Al, buf[0]);
         Ok(InterruptResult::ResumeExecution)
     }
 
@@ -155,14 +155,14 @@ impl Machine {
         io::stdout().flush()?;
 
         // Observed in real DOS
-        self.cpu.set_reg8(Reg8::Al, 0x24);
+        self.cpu.set_reg(Reg8::Al, 0x24);
 
         return Ok(InterruptResult::ResumeExecution);
     }
 
     /// Emulates the DOS output char service
     fn output_char_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let c = self.cpu.get_reg8(Reg8::Dl);
+        let c = self.cpu.get_reg(Reg8::Dl);
         let Some(Some(resource)) = self.handles.get(1) else {
             return Err(MachineError::WriteServiceError(
                 "Handle 1 is not set".to_string(),
@@ -223,7 +223,7 @@ impl Machine {
             _ => {}
         };
 
-        let al = self.cpu.get_reg8(Reg8::Al);
+        let al = self.cpu.get_reg(Reg8::Al);
         return match al {
             0x01 => self.read_char_with_echo_service(),
             _ => Err(MachineError::ReadServiceError(
@@ -240,8 +240,8 @@ impl Machine {
     /// Emulates the DOS version service
     fn dos_version_service(&mut self) -> Result<InterruptResult, MachineError> {
         // Report DOS version 2.0
-        self.cpu.set_reg8(Reg8::Al, 2);
-        self.cpu.set_reg8(Reg8::Ah, 0);
+        self.cpu.set_reg(Reg8::Al, 2);
+        self.cpu.set_reg(Reg8::Ah, 0);
         self.cpu.bx = 0;
         self.cpu.cx = 0;
         Ok(InterruptResult::ResumeExecution)
@@ -249,10 +249,10 @@ impl Machine {
 
     /// Emulates the Video Service
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
-        match self.cpu.get_reg8(Reg8::Ah) {
+        match self.cpu.get_reg(Reg8::Ah) {
             // BIOS character output
             0xe => {
-                let c = self.cpu.get_reg8(Reg8::Al);
+                let c = self.cpu.get_reg(Reg8::Al);
                 io::stdout().write_all(b"\x1b[92m")?;
                 io::stdout().write_all(&[c])?;
                 io::stdout().write_all(b"\x1b[0m")?;
@@ -261,9 +261,9 @@ impl Machine {
             }
             // Get current video mode
             0xf => {
-                self.cpu.set_reg8(Reg8::Al, 0x3); // 80x25 color text mode
-                self.cpu.set_reg8(Reg8::Ah, 80); // 80 columns in decimal
-                self.cpu.set_reg8(Reg8::Bh, 0); // active display page
+                self.cpu.set_reg(Reg8::Al, 0x3); // 80x25 color text mode
+                self.cpu.set_reg(Reg8::Ah, 80); // 80 columns in decimal
+                self.cpu.set_reg(Reg8::Bh, 0); // active display page
                 Ok(InterruptResult::ResumeExecution)
             }
             _ => Err(MachineError::VideoServiceError(
@@ -289,7 +289,7 @@ impl Machine {
     /// Emulates the Printer Service
     fn printer_service(&mut self) -> Result<InterruptResult, MachineError> {
         // Unavailable or timed-out hardware
-        self.cpu.set_reg8(Reg8::Ah, 0x01);
+        self.cpu.set_reg(Reg8::Ah, 0x01);
         Ok(InterruptResult::ResumeExecution)
     }
 
@@ -300,7 +300,7 @@ impl Machine {
     }
 
     fn time_of_day_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let operation = self.cpu.get_reg8(Reg8::Ah);
+        let operation = self.cpu.get_reg(Reg8::Ah);
         match operation {
             0x00 => {
                 // Read the clock (divide by 55 for approximate tick rate)
@@ -308,7 +308,7 @@ impl Machine {
                 self.cpu.cx = (ticks >> 16) as u16;
                 self.cpu.dx = ticks as u16;
                 // TODO: Support day rollover
-                self.cpu.set_reg8(Reg8::Al, 0);
+                self.cpu.set_reg(Reg8::Al, 0);
                 Ok(InterruptResult::ResumeExecution)
             }
             _ => Err(MachineError::TimeOfDayServiceError(
@@ -318,7 +318,7 @@ impl Machine {
     }
 
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let operation = self.cpu.get_reg8(Reg8::Ah);
+        let operation = self.cpu.get_reg(Reg8::Ah);
         if self.verbosity > 0 {
             eprintln!("\x1b[1;93mKeyboard Service op {:X}h\x1b[0m", operation);
         }
@@ -336,8 +336,8 @@ impl Machine {
                         }
                     },
                 };
-                self.cpu.set_reg8(Reg8::Al, ascii_key);
-                self.cpu.set_reg8(Reg8::Ah, scan_code);
+                self.cpu.set_reg(Reg8::Al, ascii_key);
+                self.cpu.set_reg(Reg8::Ah, scan_code);
                 Ok(InterruptResult::ResumeExecution)
             }
             0x01 => {
@@ -353,8 +353,8 @@ impl Machine {
                 }
                 // If we have a key
                 if let Some((ascii_key, scan_code)) = key {
-                    self.cpu.set_reg8(Reg8::Al, ascii_key);
-                    self.cpu.set_reg8(Reg8::Ah, scan_code);
+                    self.cpu.set_reg(Reg8::Al, ascii_key);
+                    self.cpu.set_reg(Reg8::Ah, scan_code);
                     self.cpu.set_flag(Flag::Zero, false);
                 } else {
                     self.cpu.set_flag(Flag::Zero, true);
@@ -373,7 +373,7 @@ impl Machine {
 
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let handle_num = self.cpu.get_reg16(Reg16::Bx);
+        let handle_num = self.cpu.get_reg(Reg16::Bx);
         let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
             // Unknown handle number
             self.cpu.ax = 6;
@@ -394,7 +394,7 @@ impl Machine {
 
     /// Emulates the Close Handle Service
     fn close_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let handle_num = self.cpu.get_reg16(Reg16::Bx);
+        let handle_num = self.cpu.get_reg(Reg16::Bx);
         if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
             // Handle is already closed or nonexistent
             self.cpu.ax = 6;
@@ -437,7 +437,7 @@ impl Machine {
                     return self.handle_guest_interrupt(interrupt);
                 }
                 // AH contains the service ID
-                match self.cpu.get_reg8(Reg8::Ah) {
+                match self.cpu.get_reg(Reg8::Ah) {
                     0x01 => self.read_char_with_echo_service(),
                     0x02 => self.output_char_service(),
                     0x09 => self.print_string_service(),
@@ -563,7 +563,7 @@ impl Machine {
         self.cpu.cs = 0;
         self.cpu.ip = 0x7C00;
         // Pretend we loaded the boot sector from the first floppy drive
-        self.cpu.set_reg8(Reg8::Dl, 0);
+        self.cpu.set_reg(Reg8::Dl, 0);
 
         // Keep the floppy image in machine
         let geometry = match image_type {
