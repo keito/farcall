@@ -280,6 +280,12 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the Amount Conventional Ram Service
+    fn amount_conventional_ram_service(&mut self) -> Result<InterruptResult, MachineError> {
+        self.cpu.ax = 640; // decimal
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -326,6 +332,7 @@ impl Machine {
             // BIOS services
             0x10 => self.video_service(),
             0x11 => self.equipment_list_service(),
+            0x12 => self.amount_conventional_ram_service(),
             0x13 => self.disk_service(),
             0x14 => self.serial_port_service(),
             0x17 => self.printer_service(),
