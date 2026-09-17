@@ -1094,6 +1094,55 @@ fn push_ax_stores_a_little_endian_word_and_preserves_registers_and_flags() {
 }
 
 #[test]
+fn push_sp_modrm_stores_the_decremented_sp() {
+    assert_push_sp_modrm(0x1000, 0x0FFE, [0xFE, 0x0F]);
+}
+
+#[test]
+fn push_sp_modrm_wraps_sp_from_zero_to_fffe() {
+    assert_push_sp_modrm(0x0000, 0xFFFE, [0xFE, 0xFF]);
+}
+
+fn assert_push_sp_modrm(initial_sp: u16, expected_sp: u16, stack_bytes: [u8; 2]) {
+    for initial_flags in [0x0000, 0x0FD7] {
+        let mut cpu = Cpu::new();
+        [cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di] =
+            [0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A];
+        [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
+        cpu.sp = initial_sp;
+        cpu.ip = 0x0100;
+        cpu.flags = initial_flags;
+        let other_registers = [
+            cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss,
+            cpu.es,
+        ];
+        let mut memory = vec![0xCC; 0x50000];
+        memory[0x10100..0x10102].copy_from_slice(&[0xFF, 0xF4]); // PUSH SP via FF /6.
+        let mut expected_memory = memory.clone();
+        let address = 0x30000 + usize::from(expected_sp);
+        expected_memory[address..address + 2].copy_from_slice(&stack_bytes);
+
+        let result = cpu.step(&mut memory).expect("FF F4 should push SP");
+
+        assert!(matches!(result, CpuStepResult::Continue));
+        assert_eq!(cpu.sp, expected_sp);
+        assert_eq!(cpu.ip, 0x0102, "consume both opcode and ModR/M byte");
+        assert_eq!(cpu.flags, initial_flags, "PUSH preserves every flag");
+        assert_eq!(
+            [
+                cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds,
+                cpu.ss, cpu.es,
+            ],
+            other_registers
+        );
+        assert!(
+            memory == expected_memory,
+            "8086/8088 PUSH SP writes the decremented value only at SS:SP"
+        );
+    }
+}
+
+#[test]
 fn consecutive_pushes_grow_downward_without_overwriting_previous_words() {
     let mut cpu = Cpu::new();
     cpu.sp = 0x0200;

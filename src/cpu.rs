@@ -1817,6 +1817,17 @@ impl Cpu {
                         self.ip = target_ip;
                         self.cs = target_cs;
                     }
+                    0b110 => {
+                        // PUSH r/m16
+                        let value = match rm {
+                            RegisterOrMemoryOperand::Register(Reg16::Sp) => {
+                                // 8086/8088 hardware quirk for PUSH SP
+                                self.sp.wrapping_sub(2)
+                            }
+                            _ => self.read_operand16(memory, &rm)?,
+                        };
+                        self.push_onto_stack(memory, value)?;
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
