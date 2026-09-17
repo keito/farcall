@@ -266,6 +266,20 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the Serial Port Service
+    fn serial_port_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // Serial port unavailable
+        self.cpu.ax = 0x8000;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// Emulates the Printer Service
+    fn printer_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // Unavailable or timed-out hardware
+        self.cpu.set_reg8(Reg8::Ah, 0x01);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -313,6 +327,8 @@ impl Machine {
             0x10 => self.video_service(),
             0x11 => self.equipment_list_service(),
             0x13 => self.disk_service(),
+            0x14 => self.serial_port_service(),
+            0x17 => self.printer_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
             // DOS services
             0x21 => {
