@@ -974,6 +974,33 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov [{}:{:04X}h], ax", seg, mem_addr));
                 write_word(memory, PhysAddr::new(seg_addr, mem_addr), ax)?;
             }
+            0xA5 => {
+                // MOVSW
+                print_instruction(byte, &format_args!("movsw"));
+                // Repeat if REP prefix was set
+                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // TODO: Support interrupt/resume between repetitions
+                for _ in 0..reps {
+                    let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                    let value =
+                        read_word(memory, PhysAddr::new(self.get_segment_reg(seg), self.si))?;
+                    write_word(
+                        memory,
+                        PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di),
+                        value,
+                    )?;
+                    if self.get_flag(Flag::Direction) {
+                        self.di = self.di.wrapping_sub(2);
+                        self.si = self.si.wrapping_sub(2);
+                    } else {
+                        self.di = self.di.wrapping_add(2);
+                        self.si = self.si.wrapping_add(2);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        self.cx = self.cx.wrapping_sub(1);
+                    }
+                }
+            }
             0xA6 => {
                 // CMPSB DEST-STR8, SRC-STR8
                 print_instruction(byte, &format_args!("cmpsb"));
