@@ -13,6 +13,7 @@ mod lds;
 mod memory_access;
 mod movs;
 mod mul;
+mod neg;
 mod or;
 mod rep_lodsb;
 mod segment_override;

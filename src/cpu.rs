@@ -899,6 +899,11 @@ impl Cpu {
                         print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
                         self.add16(destination, immediate, false)
                     }
+                    0b101 => {
+                        // SUB R/M16, IMMED8
+                        print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
+                        self.subtract16(destination, immediate, false)
+                    }
                     0b111 => {
                         // CMP R/M16, IMMED8
                         print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
@@ -1632,6 +1637,7 @@ impl Cpu {
                     // 0b010 => 0, // NOT r/m 16
                     0b011 => {
                         // NEG r/m 16
+                        print_instruction(byte, &format_args!("neg {}", rm));
                         let result = self.subtract16(0, operand, false);
                         self.write_operand16(memory, &rm, result)?;
                     }
