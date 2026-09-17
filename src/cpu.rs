@@ -36,7 +36,7 @@ pub(crate) enum CpuError {
     InvalidRegisterValue(u8),
     #[error("Unsupported r/m field: {0}")]
     UnsupportedRmField(u8),
-    #[error("Unsupported ModRm register field value in instruction {0:02X}h: {0}")]
+    #[error("Unsupported ModRm register field in {0:02X}h: {1}")]
     UnsupportedRegisterField(u8, u8),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
