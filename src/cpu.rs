@@ -36,7 +36,7 @@ pub(crate) enum CpuError {
     InvalidRegisterValue(u8),
     #[error("Unsupported r/m field: {0}")]
     UnsupportedRmField(u8),
-    #[error("Unsupported ModRm register field in {0:02X}h: {1}")]
+    #[error("Unsupported ModRm register field in {0:02X}h: {1} ({1:b})")]
     UnsupportedRegisterField(u8, u8),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
@@ -1321,6 +1321,14 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
                     }
+                    0b101 => {
+                        // SHR r/m8, 1
+                        // Shift a 8-bit operand right by 1, and store result in rm
+                        print_instruction(byte, &format_args!("shr {}, 1", rm));
+                        let operand = self.read_operand8(memory, &rm)?;
+                        let result = self.shr8(operand, 1);
+                        self.write_operand8(memory, &rm, result)?;
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
             }
@@ -1346,6 +1354,14 @@ impl Cpu {
                         print_instruction(byte, &format_args!("shl {}, 1", rm));
                         let operand = self.read_operand16(memory, &rm)?;
                         let result = self.shl16(operand, 1);
+                        self.write_operand16(memory, &rm, result)?;
+                    }
+                    0b101 => {
+                        // SHR r/m16, 1
+                        // Shift a 16-bit operand right by 1, and store result in rm
+                        print_instruction(byte, &format_args!("shr {}, 1", rm));
+                        let operand = self.read_operand16(memory, &rm)?;
+                        let result = self.shr16(operand, 1);
                         self.write_operand16(memory, &rm, result)?;
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
@@ -1779,6 +1795,44 @@ impl Cpu {
                 Flag::Overflow,
                 ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
             )
+        }
+        return result;
+    }
+
+    fn shr8(&mut self, value: u8, count: u8) -> u8 {
+        if count == 0 {
+            return value;
+        }
+        let mut result = value;
+        let mut last_bit_0 = false;
+        for _ in 0..count {
+            last_bit_0 = (result & 1) != 0;
+            result >>= 1;
+        }
+        self.set_result_flags8(result);
+        // Last bit shifted out of bit 0
+        self.set_flag(Flag::Carry, last_bit_0);
+        if count == 1 {
+            self.set_flag(Flag::Overflow, (value & 0x80) != 0);
+        }
+        return result;
+    }
+
+    fn shr16(&mut self, value: u16, count: u8) -> u16 {
+        if count == 0 {
+            return value;
+        }
+        let mut result = value;
+        let mut last_bit_0 = false;
+        for _ in 0..count {
+            last_bit_0 = (result & 1) != 0;
+            result >>= 1;
+        }
+        self.set_result_flags16(result);
+        // Last bit shifted out of bit 0
+        self.set_flag(Flag::Carry, last_bit_0);
+        if count == 1 {
+            self.set_flag(Flag::Overflow, (value & 0x8000) != 0);
         }
         return result;
     }
