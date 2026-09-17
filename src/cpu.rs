@@ -1,7 +1,7 @@
 use crate::memory::{
     MemoryError, PhysAddr, read_byte, read_far_pointer, read_word, write_byte, write_word,
 };
-use crate::registers::{Reg8, Reg16, Register, SegmentReg};
+use crate::registers::{GeneralReg, Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
 use thiserror::Error;
@@ -165,11 +165,11 @@ impl Cpu {
         }
     }
 
-    pub(crate) fn get_reg<R: Register>(&self, reg: R) -> R::Value {
+    pub(crate) fn get_reg<R: GeneralReg>(&self, reg: R) -> R::Value {
         reg.get(self)
     }
 
-    pub(crate) fn set_reg<R: Register>(&mut self, reg: R, value: R::Value) {
+    pub(crate) fn set_reg<R: GeneralReg>(&mut self, reg: R, value: R::Value) {
         reg.set(self, value)
     }
 

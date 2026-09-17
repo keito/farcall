@@ -1,7 +1,7 @@
 use crate::cpu::{Cpu, CpuError};
 use std::fmt;
 
-pub(crate) trait Register {
+pub(crate) trait GeneralReg {
     type Value;
     fn get(self, cpu: &Cpu) -> Self::Value;
     fn set(self, cpu: &mut Cpu, value: Self::Value);
@@ -52,7 +52,7 @@ impl TryFrom<u8> for Reg8 {
     }
 }
 
-impl Register for Reg8 {
+impl GeneralReg for Reg8 {
     type Value = u8;
 
     fn get(self, cpu: &Cpu) -> u8 {
@@ -109,7 +109,7 @@ impl TryFrom<u8> for Reg16 {
     }
 }
 
-impl Register for Reg16 {
+impl GeneralReg for Reg16 {
     type Value = u16;
 
     fn get(self, cpu: &Cpu) -> u16 {
