@@ -1,8 +1,8 @@
-use crate::cpu::{Cpu, CpuError};
+use crate::cpu::{Cpu, CpuError, CpuValue};
 use std::fmt;
 
 pub(crate) trait GeneralReg {
-    type Value;
+    type Value: CpuValue;
     fn get(self, cpu: &Cpu) -> Self::Value;
     fn set(self, cpu: &mut Cpu, value: Self::Value);
 }
