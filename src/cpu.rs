@@ -79,7 +79,7 @@ impl Cpu {
             ds: 0x0,
             es: 0x0,
             ss: 0x0,
-            flags: 0,
+            flags: normalize_flags(0),
         }
     }
 
@@ -1082,6 +1082,16 @@ impl Cpu {
                 print_instruction(byte, &format_args!("cbw"));
                 self.set_reg16(Reg16::Ax, value);
             }
+            0x9C => {
+                // PUSHF
+                print_instruction(byte, &format_args!("pushf"));
+                self.push_onto_stack(memory, self.flags)?;
+            }
+            0x9D => {
+                // POPF
+                print_instruction(byte, &format_args!("popf"));
+                self.flags = normalize_flags(self.pop_from_stack(memory)?);
+            }
             0xA0 => {
                 // MOV AL, MEM8
                 let mem_addr = self.fetch_next_word_and_advance_ip(memory);
@@ -1461,7 +1471,7 @@ impl Cpu {
                 print_instruction(byte, &format_args!("iret"));
                 self.ip = self.pop_from_stack(memory)?;
                 self.cs = self.pop_from_stack(memory)?;
-                self.flags = self.pop_from_stack(memory)?;
+                self.flags = normalize_flags(self.pop_from_stack(memory)?);
             }
             0xD0 => {
                 // Does many things with REG8/MEM8, 1
@@ -2136,4 +2146,9 @@ fn print_instruction(op: u8, instruction: &dyn fmt::Debug) {
         "\x1b[1m{:#04X}\x1b[0m \x1b[94m({:?})\x1b[0m",
         op, instruction
     );
+}
+
+/// Normalize bits in flags to avoid writing reserved bits
+fn normalize_flags(flags: u16) -> u16 {
+    (flags & 0x0FD5) | 0xF002
 }
