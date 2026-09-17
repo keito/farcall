@@ -2183,6 +2183,13 @@ impl Cpu {
                         self.set_flag(Flag::Carry, carry);
                         self.write_operand16(memory, &rm, new_value)?;
                     }
+                    0b010 => {
+                        // CALL R/M16 (intrasegment)
+                        self.print_instruction(byte, &format_args!("call {}", rm));
+                        let target_ip = self.read_operand16(memory, &rm)?;
+                        self.push_onto_stack(memory, self.ip)?;
+                        self.ip = target_ip;
+                    }
                     0b011 => {
                         // CALL MEM16 (intersegment)
                         self.print_instruction(byte, &format_args!("call {}", rm));
