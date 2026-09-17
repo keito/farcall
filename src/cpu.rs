@@ -1580,10 +1580,13 @@ impl Cpu {
                 // let immediate = self.fetch_next_byte_and_advance_ip(memory);
                 let operand = self.read_operand16(memory, &rm)?;
                 match reg_field {
-                    // 0b000 => {
-                    //     // TEST r/m 16, imm16
-                    //     let immed16 = self.fetch_next_word_and_advance_ip(memory);
-                    // }
+                    0b000 => {
+                        // TEST r/m 16, imm16
+                        let immediate = self.fetch_next_word_and_advance_ip(memory);
+                        print_instruction(byte, &format_args!("test {}, {:X}h", rm, immediate));
+                        let result = operand & immediate;
+                        self.update_logic_flags16(result);
+                    }
                     // 0b010 => 0, // NOT r/m 16
                     // 0b011 => 0, // NEG r/m 16
                     0b100 => {
