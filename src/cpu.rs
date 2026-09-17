@@ -1159,6 +1159,22 @@ impl Cpu {
                     }
                 }
             }
+            0xA8 => {
+                // TEST AL, IMMED8
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("test al, {:X}h", immediate));
+                let reg_val = self.get_reg8(Reg8::Al);
+                let result = reg_val & immediate;
+                self.update_logic_flags8(result);
+            }
+            0xA9 => {
+                // TEST AX, IMMED16
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("test ax, {:X}h", immediate));
+                let reg_val = self.get_reg16(Reg16::Ax);
+                let result = reg_val & immediate;
+                self.update_logic_flags16(result);
+            }
             0xAA => {
                 // STOSB ("store string byte")
                 print_instruction(byte, &format_args!("stosb"));
