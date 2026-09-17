@@ -340,6 +340,16 @@ impl Cpu {
                 let value = self.add16(reg_value, immediate, false);
                 self.set_reg16(Reg16::Ax, value);
             }
+            0x06 => {
+                // PUSH ES
+                print_instruction(byte, &format_args!("push es"));
+                self.push_onto_stack(memory, self.es)?;
+            }
+            0x07 => {
+                // POP ES
+                print_instruction(byte, &format_args!("pop es"));
+                self.es = self.pop_from_stack(memory)?;
+            }
             0x08 => {
                 // OR REG8/MEM8, REG8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
