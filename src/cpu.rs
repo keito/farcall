@@ -1489,7 +1489,6 @@ impl Cpu {
             0xD3 => {
                 // Does many things with R/M16, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let reg_field = parsed.reg_field;
                 let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0b100 => {
@@ -1502,7 +1501,7 @@ impl Cpu {
                             self.write_operand16(memory, &rm, result)?;
                         }
                     }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
+                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
             0xE2 => {
@@ -1690,12 +1689,12 @@ impl Cpu {
                 // Does a lot of things! on MEM16 and R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
-                let operand = self.read_operand16(memory, &rm)?;
                 match parsed.reg_field {
                     0b000 => {
                         // INC r/m 16
                         print_instruction(byte, &format_args!("inc {}", rm));
                         let carry = self.get_flag(Flag::Carry);
+                        let operand = self.read_operand16(memory, &rm)?;
                         let new_value = self.add16(operand, 1, false);
                         // Must preserve carry
                         self.set_flag(Flag::Carry, carry);
@@ -1720,7 +1719,7 @@ impl Cpu {
                     0b100 => {
                         // JMP R/M16 (intra)
                         print_instruction(byte, &format_args!("jmp {}", rm));
-                        self.ip = operand;
+                        self.ip = self.read_operand16(memory, &rm)?;
                     }
                     0b101 => {
                         // JMP MEM16 (intersegment)
