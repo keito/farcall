@@ -1333,8 +1333,16 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
                 self.write_operand16(memory, &rm, immediate)?;
             }
-            // Interrupts
+            0xCB => {
+                // Far return (pops IP *and* CS)
+                print_instruction(byte, &format_args!("retf"));
+                let ip = self.pop_from_stack(memory)?;
+                let cs = self.pop_from_stack(memory)?;
+                self.ip = ip;
+                self.cs = cs;
+            }
             0xCD => {
+                // INT
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("int {:X}h", operand));
                 result = CpuStepResult::Interrupt(operand);
