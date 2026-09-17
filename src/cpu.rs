@@ -466,6 +466,18 @@ impl Cpu {
                 let value = self.subtract8(rm_value, self.get_reg8(source_reg), false);
                 self.write_operand8(memory, &rm, value)?;
             }
+            0x29 => {
+                // SUB r/m16, r16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("sub {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand16(memory, &rm)?;
+                let value = self.subtract16(rm_value, self.get_reg16(source_reg), false);
+                self.write_operand16(memory, &rm, value)?;
+            }
             0x2A => {
                 // SUB r8, r/m8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -478,11 +490,31 @@ impl Cpu {
                 let value = self.subtract8(self.get_reg8(dest_reg), rm_value, false);
                 self.set_reg8(dest_reg, value);
             }
+            0x2B => {
+                // SUB r16, r/m16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("sub {}, {}", dest_reg, rm));
+
+                let rm_value = self.read_operand16(memory, &rm)?;
+                let value = self.subtract16(self.get_reg16(dest_reg), rm_value, false);
+                self.set_reg16(dest_reg, value);
+            }
             0x2C => {
+                // SUB AL, IMMED8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 print_instruction(byte, &format_args!("sub al, {:X}h", operand));
                 let new_val = self.subtract8(self.get_reg8(Reg8::Al), operand, false);
                 self.set_reg8(Reg8::Al, new_val);
+            }
+            0x2D => {
+                // SUB AX, IMMED16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("sub ax, {:X}h", operand));
+                let new_val = self.subtract16(self.get_reg16(Reg16::Ax), operand, false);
+                self.set_reg16(Reg16::Ax, new_val);
             }
             0x31 => {
                 // XOR REG16/MEM16, REG16
