@@ -1949,6 +1949,14 @@ impl Cpu {
                 self.set_reg8(Reg8::Al, new_al);
                 self.set_result_flags8(new_al);
             }
+            0xD7 => {
+                // XLAT SOURCE-TABLE
+                self.print_instruction(byte, &format_args!("xlat"));
+                let offset = self.bx.wrapping_add(self.get_reg8(Reg8::Al) as u16);
+                let seg_addr = self.get_segment_reg(segment_override.unwrap_or(SegmentReg::Ds));
+                let result = read_byte(memory, PhysAddr::new(seg_addr, offset))?;
+                self.set_reg8(Reg8::Al, result);
+            }
             0xE0 => {
                 // LOOPNE rel8
                 let displacement = self.fetch_next_byte_and_advance_ip(memory);
