@@ -782,46 +782,6 @@ impl Cpu {
                 self.set_reg8(first_reg, second_value);
                 self.write_operand8(memory, &rm, first_value)?;
             }
-            // XCHG AX,
-            0x90 => {
-                // XCHG AX, AX (NOP)
-                print_instruction(byte, &format_args!("xchg ax, ax"));
-            }
-            0x91 => {
-                // XCHG AX, CX
-                print_instruction(byte, &format_args!("xchg ax, cx"));
-                std::mem::swap(&mut self.ax, &mut self.cx);
-            }
-            0x92 => {
-                // XCHG AX, DX
-                print_instruction(byte, &format_args!("xchg ax, dx"));
-                std::mem::swap(&mut self.ax, &mut self.dx);
-            }
-            0x93 => {
-                // XCHG AX, BX
-                print_instruction(byte, &format_args!("xchg ax, bx"));
-                std::mem::swap(&mut self.ax, &mut self.bx);
-            }
-            0x94 => {
-                // XCHG AX, SP
-                print_instruction(byte, &format_args!("xchg ax, sp"));
-                std::mem::swap(&mut self.ax, &mut self.sp);
-            }
-            0x95 => {
-                // XCHG AX, BP
-                print_instruction(byte, &format_args!("xchg ax, bp"));
-                std::mem::swap(&mut self.ax, &mut self.bp);
-            }
-            0x96 => {
-                // XCHG AX, SI
-                print_instruction(byte, &format_args!("xchg ax, si"));
-                std::mem::swap(&mut self.ax, &mut self.si);
-            }
-            0x97 => {
-                // XCHG AX, DI
-                print_instruction(byte, &format_args!("xchg ax, di"));
-                std::mem::swap(&mut self.ax, &mut self.di);
-            }
             // MOVs
             0x88 => {
                 // Mov reg8/mem8, reg8
@@ -903,6 +863,46 @@ impl Cpu {
 
                 let value = self.read_operand16(memory, &rm)?;
                 self.set_segment_reg(dest_segment, value);
+            }
+            // XCHG AX,
+            0x90 => {
+                // XCHG AX, AX (NOP)
+                print_instruction(byte, &format_args!("xchg ax, ax"));
+            }
+            0x91 => {
+                // XCHG AX, CX
+                print_instruction(byte, &format_args!("xchg ax, cx"));
+                std::mem::swap(&mut self.ax, &mut self.cx);
+            }
+            0x92 => {
+                // XCHG AX, DX
+                print_instruction(byte, &format_args!("xchg ax, dx"));
+                std::mem::swap(&mut self.ax, &mut self.dx);
+            }
+            0x93 => {
+                // XCHG AX, BX
+                print_instruction(byte, &format_args!("xchg ax, bx"));
+                std::mem::swap(&mut self.ax, &mut self.bx);
+            }
+            0x94 => {
+                // XCHG AX, SP
+                print_instruction(byte, &format_args!("xchg ax, sp"));
+                std::mem::swap(&mut self.ax, &mut self.sp);
+            }
+            0x95 => {
+                // XCHG AX, BP
+                print_instruction(byte, &format_args!("xchg ax, bp"));
+                std::mem::swap(&mut self.ax, &mut self.bp);
+            }
+            0x96 => {
+                // XCHG AX, SI
+                print_instruction(byte, &format_args!("xchg ax, si"));
+                std::mem::swap(&mut self.ax, &mut self.si);
+            }
+            0x97 => {
+                // XCHG AX, DI
+                print_instruction(byte, &format_args!("xchg ax, di"));
+                std::mem::swap(&mut self.ax, &mut self.di);
             }
             0x98 => {
                 // CBW
