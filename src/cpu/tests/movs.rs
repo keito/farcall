@@ -25,6 +25,133 @@ fn step(cpu: &mut Cpu, memory: &mut [u8]) {
 }
 
 #[test]
+fn movsb_copies_one_byte_in_either_direction_without_changing_ax_cx_or_flags() {
+    for (flags, next_si, next_di) in [(0x0BD7, 0x2001, 0x3001), (0x0FD7, 0x1FFF, 0x2FFF)] {
+        for count in [0, 3] {
+            let (mut cpu, mut memory) = setup(&[0xA4]);
+            cpu.cx = count; // Without REP, copy once regardless of CX.
+            cpu.flags = flags;
+            memory[0x22000] = 0x42;
+            let mut expected_memory = memory.clone();
+            expected_memory[0x43000] = 0x42;
+            let mut expected = registers(&cpu);
+            expected[6] = next_si;
+            expected[7] = next_di;
+
+            step(&mut cpu, &mut memory);
+
+            assert_eq!(registers(&cpu), expected);
+            assert_eq!(cpu.flags, flags);
+            assert_eq!(cpu.ip, 0x0101);
+            assert!(
+                memory == expected_memory,
+                "only one destination byte should change"
+            );
+        }
+    }
+}
+
+#[test]
+fn rep_movsb_copies_full_cx_adjacent_bytes_in_both_directions_regardless_of_zf() {
+    for count in [3u16, 0x0101] {
+        for flags in [0x0B97, 0x0BD7, 0x0F97, 0x0FD7] {
+            let (mut cpu, mut memory) = setup(&[0xF3, 0xA4]);
+            cpu.cx = count;
+            cpu.flags = flags;
+            let backwards = flags & 0x0400 != 0;
+            let mut expected_memory = memory.clone();
+            for index in 0..usize::from(count) {
+                let source = if backwards {
+                    0x22000 - index
+                } else {
+                    0x22000 + index
+                };
+                let dest = if backwards {
+                    0x43000 - index
+                } else {
+                    0x43000 + index
+                };
+                let value = index as u8;
+                memory[source] = value;
+                expected_memory[source] = value;
+                expected_memory[dest] = value;
+            }
+            let mut expected = registers(&cpu);
+            expected[1] = 0;
+            expected[6] = if backwards {
+                0x2000 - count
+            } else {
+                0x2000 + count
+            };
+            expected[7] = if backwards {
+                0x3000 - count
+            } else {
+                0x3000 + count
+            };
+
+            step(&mut cpu, &mut memory);
+
+            assert_eq!(registers(&cpu), expected);
+            assert_eq!(cpu.flags, flags);
+            assert_eq!(cpu.ip, 0x0102);
+            assert!(memory == expected_memory, "CX={count}, flags={flags:04X}");
+        }
+    }
+}
+
+#[test]
+fn rep_movsb_wraps_both_indexes_by_one_within_their_segments() {
+    for (flags, offsets, next_index) in [
+        (0x0BD7, [0xFFFFu16, 0x0000, 0x0001], 0x0002),
+        (0x0FD7, [0x0000, 0xFFFF, 0xFFFE], 0xFFFD),
+    ] {
+        let (mut cpu, mut memory) = setup(&[0xF3, 0xA4]);
+        cpu.cx = 3;
+        cpu.si = offsets[0];
+        cpu.di = offsets[0];
+        cpu.flags = flags;
+        for (offset, value) in offsets.into_iter().zip([0x11, 0x22, 0x33]) {
+            memory[0x20000 + usize::from(offset)] = value;
+        }
+        let mut expected_memory = memory.clone();
+        for (offset, value) in offsets.into_iter().zip([0x11, 0x22, 0x33]) {
+            expected_memory[0x40000 + usize::from(offset)] = value;
+        }
+        let mut expected = registers(&cpu);
+        expected[1] = 0;
+        expected[6] = next_index;
+        expected[7] = next_index;
+
+        step(&mut cpu, &mut memory);
+
+        assert_eq!(registers(&cpu), expected);
+        assert_eq!(cpu.flags, flags);
+        assert_eq!(cpu.ip, 0x0102);
+        assert!(memory == expected_memory);
+    }
+}
+
+#[test]
+fn rep_movsb_zero_count_does_not_access_either_operand() {
+    for flags in [0, 0x0FD7] {
+        let mut cpu = Cpu::new();
+        cpu.ax = 0xA55A;
+        [cpu.ds, cpu.es, cpu.si, cpu.di] = [0x2000, 0x4000, 0xFFFF, 0xFFFF];
+        cpu.flags = flags;
+        let original = registers(&cpu);
+        // Neither operand exists in this slice; CX=0 must skip both accesses.
+        let mut memory = [0xF3, 0xA4];
+
+        step(&mut cpu, &mut memory);
+
+        assert_eq!(registers(&cpu), original);
+        assert_eq!(cpu.flags, flags);
+        assert_eq!(cpu.ip, 2);
+        assert_eq!(memory, [0xF3, 0xA4]);
+    }
+}
+
+#[test]
 fn movsw_copies_one_word_in_either_direction_without_changing_ax_cx_or_flags() {
     for (flags, next_si, next_di) in [(0x0BD7, 0x2002, 0x3002), (0x0FD7, 0x1FFE, 0x2FFE)] {
         for count in [0, 3] {
