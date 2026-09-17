@@ -708,6 +708,17 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x7E => {
+                // JLE/JNG
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jle {:X}h", operand));
+                // If ZF or SF != OF
+                if self.get_flag(Flag::Zero)
+                    || (self.get_flag(Flag::Sign) != self.get_flag(Flag::Overflow))
+                {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x7F => {
                 // JNLE/JG (jump if not less than or equal)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
@@ -808,6 +819,18 @@ impl Cpu {
                 let second_value = self.read_operand8(memory, &rm)?;
                 self.set_reg8(first_reg, second_value);
                 self.write_operand8(memory, &rm, first_value)?;
+            }
+            0x87 => {
+                // XCHG REG16, R/M16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let first_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("xchg {}, {}", first_reg, rm));
+
+                let first_value = self.get_reg16(first_reg);
+                let second_value = self.read_operand16(memory, &rm)?;
+                self.set_reg16(first_reg, second_value);
+                self.write_operand16(memory, &rm, first_value)?;
             }
             // MOVs
             0x88 => {
@@ -1324,6 +1347,14 @@ impl Cpu {
                 self.cx = self.cx.wrapping_sub(1);
                 if self.cx != 0 {
                     self.ip = self.ip.wrapping_add_signed((displacement as i8) as i16);
+                }
+            }
+            0xE3 => {
+                // JCXZ: Jump if CX is zero
+                let displacement = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jcxz {:X}h", displacement));
+                if self.cx == 0 {
+                    self.ip = self.ip.wrapping_add_signed(displacement as i16);
                 }
             }
             0xE6 => {
