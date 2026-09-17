@@ -1944,7 +1944,7 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("aad {:X}h", base));
                 let al = self.get_reg8(Reg8::Al) as u16;
                 let ah = self.get_reg8(Reg8::Ah) as u16;
-                let new_al = ((al + ah * base) % 256) as u8;
+                let new_al = (al + ah * base) as u8;
                 self.set_reg8(Reg8::Ah, 0);
                 self.set_reg8(Reg8::Al, new_al);
                 self.set_result_flags8(new_al);
