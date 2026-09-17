@@ -1011,6 +1011,25 @@ impl Cpu {
                 self.cs = self.pop_from_stack(memory)?;
                 self.flags = self.pop_from_stack(memory)?;
             }
+            0xD0 => {
+                // Does many things with REG8/MEM8, 1
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                match reg_field {
+                    0 => {
+                        // ROL r/m8, 1
+                        print_instruction(byte, &format_args!("rol {}, 1", rm));
+                        let operand = self.read_operand8(memory, &rm)?;
+                        let value = operand.rotate_left(1);
+                        self.write_operand8(memory, &rm, value)?;
+                        let cf = (operand & 0x80) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+            }
             0xD2 => {
                 // Does many things with REG8/MEM8, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
