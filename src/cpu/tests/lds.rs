@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup() -> Cpu {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     [
         cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
     ] = [

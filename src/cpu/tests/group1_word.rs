@@ -93,7 +93,7 @@ fn check_81_register_cases(extension: u8, cases: &[WordCase]) {
         for &(operand, immediate, carry, result, arithmetic) in cases {
             for base_flags in [0, 0x0FD6] {
                 let flags = base_flags | u16::from(carry);
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 let mut values = [
                     0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A, 0x89AB,
                 ];
@@ -188,7 +188,7 @@ fn group_81_memory_forms_decode_displacements_before_immediates_and_honor_segmen
                 (Some(0x36), 0x30000),
                 (Some(0x3E), 0x20000),
             ] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 [
                     cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
                 ] = [
@@ -235,7 +235,7 @@ fn group_81_memory_forms_decode_displacements_before_immediates_and_honor_segmen
 #[test]
 fn group_81_fetches_both_immediate_bytes_across_ip_wrap() {
     for ip in [0xFFFCu16, 0xFFFD, 0xFFFE, 0xFFFF] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.cs = 0x1000;
         cpu.ip = ip;
         cpu.ax = 0x1234;
@@ -277,7 +277,7 @@ fn add_83_sign_extends_the_byte_and_updates_the_full_word_register_and_flags() {
     for reg in 0..8 {
         for (operand, immediate, result, arithmetic_flags) in cases {
             for flags in [0, 0x0FD7] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 let mut values = [
                     0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A, 0x89AB,
                 ];
@@ -339,7 +339,7 @@ fn add_83_updates_both_memory_bytes_and_fetches_the_immediate_after_displacement
         ),
     ] {
         for flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = 0xA55A;
             cpu.bp = 0x2002;
             [cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000];

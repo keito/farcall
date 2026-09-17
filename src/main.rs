@@ -1,3 +1,4 @@
+use clap::ArgAction;
 use clap::Parser;
 use std::process;
 
@@ -21,6 +22,10 @@ struct Cli {
     /// Boot sector image type
     #[arg(long, value_enum)]
     image_type: Option<DiskType>,
+
+    /// How much verbose debug output to print
+    #[arg(short, long, default_value = "0", action = ArgAction::Count)]
+    verbose: u8,
 }
 
 fn main() {
@@ -30,7 +35,7 @@ fn main() {
     } else {
         LoadMode::Com
     };
-    match machine::main_loop(&cli.file, load_mode, cli.image_type) {
+    match machine::main_loop(&cli.file, load_mode, cli.image_type, cli.verbose) {
         Ok(code) => {
             eprintln!("Exit code {}", code);
             process::exit(code as i32);

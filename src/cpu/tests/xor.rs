@@ -25,7 +25,7 @@ fn xor_33_sets_word_flags_and_preserves_the_source() {
         (0xAAAA, 0x5555, 0xFFFF, 0x0084),
     ] {
         for initial_flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = destination;
             cpu.bx = source;
             cpu.flags = initial_flags;
@@ -53,7 +53,7 @@ fn xor_33_register_encoding_covers_every_destination_source_and_self_xor() {
     ];
     for destination in 0..8 {
         for source in 0..8 {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             [
                 cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
             ] = initial;
@@ -91,7 +91,7 @@ fn xor_33_reads_segmented_memory_without_writing_it() {
         (&[0x33, 0x06, 0xFF, 0x00][..], 0xFFFF, 0x000EF, 0x000F0), // Address wraps at 1 MiB.
         (&[0x33, 0x06, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000), // Word straddles 1 MiB.
     ] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xA55A;
         cpu.si = 0x0800;
         cpu.bp = 0x0800;
@@ -125,7 +125,7 @@ fn xor_33_reads_segmented_memory_without_writing_it() {
 #[test]
 fn xor_33_memory_error_preserves_destination_flags_and_memory() {
     for offset in [0x01FFu16, 0x0200] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xFFFF;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);
@@ -155,7 +155,7 @@ fn xor_word_results_set_flags_and_preserve_the_source() {
         (0xAAAA, 0x5555, 0xFFFF, 0x0084), // Exercise all result bits.
     ] {
         for initial_flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = source;
             cpu.bx = destination;
             cpu.flags = initial_flags;
@@ -181,7 +181,7 @@ fn xor_register_encoding_covers_every_source_destination_and_self_xor() {
     ];
     for source in 0..8 {
         for destination in 0..8 {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             [
                 cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
             ] = initial;
@@ -220,7 +220,7 @@ fn xor_memory_writes_a_little_endian_word_using_the_decoded_segment() {
         (&[0x31, 0x06, 0xFF, 0x00][..], 0xFFFF, 0x000EF, 0x000F0), // Address wraps at 1 MiB.
         (&[0x31, 0x06, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000), // Word straddles 1 MiB.
     ] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xA55A;
         cpu.si = 0x0800;
         cpu.bp = 0x0800;
@@ -254,7 +254,7 @@ fn xor_memory_writes_a_little_endian_word_using_the_decoded_segment() {
 fn xor_out_of_bounds_word_returns_error_without_partial_write_or_flag_changes() {
     for offset in [0x01FFu16, 0x0200] {
         // Missing high byte, then missing both bytes.
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xFFFF;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);

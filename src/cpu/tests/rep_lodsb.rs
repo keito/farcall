@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8], ip: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ax = 0xA55A;
     cpu.cx = 3;
     cpu.dx = 0x1234;
@@ -75,7 +75,7 @@ fn rep_lodsb_uses_full_cx_and_leaves_the_last_byte_in_al_regardless_of_zf() {
 #[test]
 fn rep_lodsb_zero_count_does_not_access_memory_or_change_state() {
     for flags in [0, 0x0FD7] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xA55A;
         cpu.ds = 0x2000;
         cpu.si = 0xFFFF;

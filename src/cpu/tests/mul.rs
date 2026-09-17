@@ -22,7 +22,7 @@ fn mul_byte_computes_every_unsigned_product_and_sets_or_clears_cf_of() {
     for al in 0..=255u16 {
         for bl in 0..=255u16 {
             for flags in [0x0000, 0x0FD7] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 cpu.ax = 0xAB00 | al; // Old AH must not contribute to the product.
                 cpu.bx = 0xCD00 | bl;
                 cpu.dx = 0xDEAD; // Byte MUL leaves DX unchanged.
@@ -57,7 +57,7 @@ fn mul_byte_reads_every_register_before_overwriting_ax() {
         0x4101, 0x0183, 0x0285, 0x0387, 0x0102, 0x0204, 0x0306, 0x0408,
     ];
     for (source, product) in expected_products.into_iter().enumerate() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0x0281;
         cpu.cx = 0x0403;
         cpu.dx = 0x0605;
@@ -91,7 +91,7 @@ fn mul_byte_reads_segmented_memory_and_handles_bus_wrapping_without_writing() {
         (&[0xF6, 0x26, 0x20, 0x00][..], 0xFFFF, 0x00010), // Wrap the 20-bit address.
         (&[0xF6, 0x26, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF), // Last byte of memory.
     ] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xABFF;
         cpu.dx = 0xDEAD;
         cpu.si = 0x0800;
@@ -124,7 +124,7 @@ fn mul_byte_reads_segmented_memory_and_handles_bus_wrapping_without_writing() {
 fn mul_byte_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
     let instruction = [0xF6, 0x26, 0x34, 0x12];
     for (ip, next_ip) in [(0xFFFC, 0), (0xFFFD, 1), (0xFFFE, 2), (0xFFFF, 3)] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.cs = 0x3000;
         cpu.ds = 0x1000;
         cpu.ip = ip;
@@ -154,7 +154,7 @@ fn mul_byte_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
 
 #[test]
 fn mul_byte_memory_errors_preserve_registers_flags_and_memory() {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ax = 0x1234;
     cpu.dx = 0x5678;
     cpu.flags = 0x0FD7;
@@ -184,7 +184,7 @@ fn mul_word_computes_full_unsigned_product_and_sets_or_clears_cf_of() {
         (0xFFFF, 0xFFFF, 0xFFFE, 0x0001, 0x0801), // Largest possible product.
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = ax;
             cpu.bx = bx;
             cpu.dx = 0xDEAD; // MUL ignores the old high half and replaces it.
@@ -225,7 +225,7 @@ fn mul_word_reads_every_register_before_overwriting_ax_and_dx() {
         (0x0004, 0x0008),
     ];
     for (source, (dx, ax)) in expected_products.into_iter().enumerate() {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         [
             cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
         ] = initial;
@@ -257,7 +257,7 @@ fn mul_word_reads_segmented_memory_and_handles_bus_wrapping_without_writing() {
         (&[0xF7, 0x26, 0x20, 0x00][..], 0xFFFF, 0x00010, 0x00011),
         (&[0xF7, 0x26, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000),
     ] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0x0100;
         cpu.dx = 0xDEAD;
         cpu.si = 0x0800;
@@ -291,7 +291,7 @@ fn mul_word_reads_segmented_memory_and_handles_bus_wrapping_without_writing() {
 fn mul_word_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
     let instruction = [0xF7, 0x26, 0x34, 0x12];
     for (ip, next_ip) in [(0xFFFC, 0), (0xFFFD, 1), (0xFFFE, 2), (0xFFFF, 3)] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.cs = 0x3000;
         cpu.ds = 0x1000;
         cpu.ip = ip;
@@ -322,7 +322,7 @@ fn mul_word_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
 #[test]
 fn mul_word_memory_errors_preserve_registers_flags_and_memory() {
     for offset in [0x01FFu16, 0x0200] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0x1234;
         cpu.dx = 0x5678;
         cpu.flags = 0x0FD7;

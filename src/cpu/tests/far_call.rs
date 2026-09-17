@@ -10,7 +10,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8], ip: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     [
         cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
     ] = [
@@ -175,7 +175,7 @@ fn indirect_far_call_rejects_register_operands_without_pushing_a_return_address(
 #[test]
 fn indirect_far_call_requires_the_complete_pointer_before_changing_the_stack() {
     for available in 0..4 {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ip = 0x0100;
         cpu.sp = 0x0080;
         cpu.flags = 0x0FD7;

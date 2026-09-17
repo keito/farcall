@@ -43,7 +43,7 @@ fn disk_snapshot(machine: &Machine) -> Option<(Vec<u8>, [usize; 3])> {
 }
 
 fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ax = 0x0201; // Read one sector.
     cpu.cx = 0x0002; // Cylinder 0, sector 2.
     cpu.dx = 0x0000; // Head 0, drive 0.
@@ -64,6 +64,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         handles: vec![],
         floppy_image: image.map(floppy_360kib),
         boot_time: Instant::now(),
+        verbosity: 0,
         load_mode: LoadMode::Boot,
     }
 }

@@ -55,7 +55,7 @@ fn check_register_pairs(opcode: u8, cases: &[Case]) {
                     continue;
                 }
                 for base_flags in [0xF002, 0xFFD6] {
-                    let mut cpu = Cpu::new();
+                    let mut cpu = Cpu::new(0);
                     if word {
                         let mut words = [0xA55A; 8];
                         words[destination] = lhs;
@@ -181,7 +181,7 @@ fn adc_memory_direction_addressing_and_segment_overrides() {
                 (Some(0x36), 0x30000),
                 (Some(0x3E), 0x20000),
             ] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
                 [cpu.bx, cpu.si, cpu.bp, cpu.di] = [0x0100, 0x0020, 0x0300, 0x0040];
                 cpu.ip = 0x0800;
@@ -209,7 +209,7 @@ fn adc_wraps_instruction_fetch_and_operand_physical_addresses() {
                 (0xFFFF, 0x000F, 0xFFFFF), // Word's second byte wraps the bus.
                 (0xFFFF, 0x0020, 0x00010),
             ] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 cpu.cs = 0x1000;
                 cpu.es = segment;
                 cpu.ip = ip;
@@ -224,7 +224,7 @@ fn adc_wraps_instruction_fetch_and_operand_physical_addresses() {
 #[test]
 fn adc_memory_address_uses_register_value_before_destination_changes() {
     for opcode in 0x10..=0x13 {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.bx = 0x0101;
         cpu.flags = 0xF003;
         let mut memory = vec![0xCC; 0x0300];
@@ -255,7 +255,7 @@ fn adc_memory_address_uses_register_value_before_destination_changes() {
 fn adc_reads_exact_operand_width_and_preserves_state_on_missing_memory() {
     for opcode in 0x10..=0x13 {
         for offset in [0x01FEu16, 0x01FF, 0x0200] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = 2;
             cpu.flags = 0xFFD7;
             let [low, high] = offset.to_le_bytes();

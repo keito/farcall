@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8]) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     [cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp] = [0xA55A, 2, 0x1234, 0x5678, 0x0800, 0x0900];
     [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
     cpu.si = 0x2000;
@@ -134,7 +134,7 @@ fn rep_movsb_wraps_both_indexes_by_one_within_their_segments() {
 #[test]
 fn rep_movsb_zero_count_does_not_access_either_operand() {
     for flags in [0, 0x0FD7] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xA55A;
         [cpu.ds, cpu.es, cpu.si, cpu.di] = [0x2000, 0x4000, 0xFFFF, 0xFFFF];
         cpu.flags = flags;
@@ -299,7 +299,7 @@ fn rep_movsw_segment_prefixes_override_only_the_source_in_either_order() {
 #[test]
 fn rep_movsw_zero_count_does_not_access_either_operand() {
     for flags in [0, 0x0FD7] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xA55A;
         [cpu.ds, cpu.es, cpu.si, cpu.di] = [0x2000, 0x4000, 0xFFFF, 0xFFFF];
         cpu.flags = flags;

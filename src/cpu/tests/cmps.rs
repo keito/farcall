@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8], ip: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     [cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp] = [0xA55A, 3, 0x1234, 0x5678, 0x0800, 0x0900];
     [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
     cpu.si = 0x2000;
@@ -211,7 +211,7 @@ fn repeated_cmpsb_is_limited_by_full_cx_instead_of_the_prefix_byte() {
 fn repeated_cmpsb_with_zero_cx_does_not_read_either_operand_or_change_flags() {
     for prefix in [0xF2, 0xF3] {
         for flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ds = 0x2000;
             cpu.es = 0x4000;
             cpu.si = 0xFFFF;

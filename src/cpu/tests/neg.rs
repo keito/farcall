@@ -25,7 +25,7 @@ fn neg_word_updates_every_register_and_all_arithmetic_flags() {
     for reg in 0..8 {
         for (operand, result, arithmetic_flags) in cases {
             for flags in [0, 0x0FD7] {
-                let mut cpu = Cpu::new();
+                let mut cpu = Cpu::new(0);
                 let mut values = [
                     0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A, 0x89AB,
                 ];
@@ -75,7 +75,7 @@ fn neg_word_memory_uses_default_and_overridden_segments_and_writes_only_two_byte
             (Some(0x36), 0x30000),
             (Some(0x3E), 0x20000),
         ] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
             [cpu.bx, cpu.bp, cpu.si] = [0x0200, 0x0300, 0x0040];
             cpu.ax = 0xA55A;
@@ -106,7 +106,7 @@ fn neg_word_memory_uses_default_and_overridden_segments_and_writes_only_two_byte
 
 #[test]
 fn neg_word_reads_and_writes_across_the_twenty_bit_bus_boundary() {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ds = 0xFFFF;
     cpu.ip = 0x0100;
     cpu.flags = 0x0FD7;
@@ -134,7 +134,7 @@ fn neg_word_reads_and_writes_across_the_twenty_bit_bus_boundary() {
 fn neg_word_fetches_prefix_opcode_mod_rm_and_displacement_across_ip_wrap() {
     let instruction = [0x26, 0xF7, 0x1E, 0x34, 0x12]; // NEG word [ES:1234].
     for ip in 0xFFFBu16..=0xFFFF {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.cs = 0x3000;
         cpu.es = 0x1000;
         cpu.ip = ip;
@@ -162,7 +162,7 @@ fn neg_word_fetches_prefix_opcode_mod_rm_and_displacement_across_ip_wrap() {
 #[test]
 fn neg_word_memory_errors_preserve_registers_flags_and_memory() {
     for offset in [0x01FFu16, 0x0200] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0x1234;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);

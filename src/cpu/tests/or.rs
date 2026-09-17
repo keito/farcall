@@ -24,7 +24,7 @@ fn or_byte_sets_flags_and_preserves_source_and_other_register_halves() {
         (0x00, 0x01, 0x01, 0x0000), // Clear stale ZF/SF/PF.
     ] {
         for initial_flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = 0xA500 | source;
             cpu.bx = 0x5A00 | destination;
             cpu.flags = initial_flags;
@@ -52,7 +52,7 @@ fn or_byte_handles_high_registers_and_aliasing_within_ax() {
         (0xC4, 0x3624), // OR AH, AL.
         (0xE4, 0x1224), // OR AH, AH leaves the value unchanged.
     ] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0x1224;
         cpu.flags = 0x0FD7;
         let mut expected_registers = registers(&cpu);
@@ -82,7 +82,7 @@ fn or_word_sets_word_sign_and_low_byte_parity_preserving_source() {
         (0x0100, 0x0001, 0x0101, 0x0000), // Whole word even parity, low byte odd.
     ] {
         for initial_flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = source;
             cpu.bx = destination;
             cpu.flags = initial_flags;
@@ -106,7 +106,7 @@ fn or_word_sets_word_sign_and_low_byte_parity_preserving_source() {
 #[test]
 fn or_ax_ax_checks_mores_read_count_without_changing_it() {
     for (ax, flags) in [(0, 0x0044), (7, 0x0000), (0x1000, 0x0004)] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = ax;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);
@@ -134,7 +134,7 @@ fn or_memory_uses_the_correct_width_segment_displacement_and_bus_wrapping() {
             (&[0x06, 0xFF, 0x00][..], 0xFFFF, 0x000EF, 0x000F0), // Address wraps.
             (&[0x06, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000), // Word wraps.
         ] {
-            let mut cpu = Cpu::new();
+            let mut cpu = Cpu::new(0);
             cpu.ax = 0xA55A;
             cpu.si = 0x0800;
             cpu.bp = 0x0800;
@@ -177,7 +177,7 @@ fn or_memory_uses_the_correct_width_segment_displacement_and_bus_wrapping() {
 #[test]
 fn or_invalid_memory_returns_error_without_partial_write_or_flag_changes() {
     for (opcode, offset) in [(0x08, 0x0200u16), (0x09, 0x0200), (0x09, 0x01FF)] {
-        let mut cpu = Cpu::new();
+        let mut cpu = Cpu::new(0);
         cpu.ax = 0xFFFF;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);

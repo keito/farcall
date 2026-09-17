@@ -27,6 +27,7 @@ struct Machine {
     floppy_image: Option<FloppyDisk>,
     boot_time: Instant,
     load_mode: LoadMode,
+    verbosity: u8,
 }
 
 #[derive(Clone, PartialEq)]
@@ -313,7 +314,9 @@ impl Machine {
 
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
         let operation = self.cpu.get_reg8(Reg8::Ah);
-        eprintln!("\x1b[1;91mKeyboard Service op {:X}h\x1b[0m", operation);
+        if self.verbosity > 0 {
+            eprintln!("\x1b[1;91mKeyboard Service op {:X}h\x1b[0m", operation);
+        }
         match operation {
             // 0x00 => {
             //     // Read key
@@ -417,6 +420,16 @@ impl Machine {
                     service => Err(MachineError::UnsupportedService(service)),
                 }
             }
+            0x28 => {
+                // DOS idle
+                // In boot mode, send to the guest
+                if self.load_mode == LoadMode::Boot {
+                    return self.handle_guest_interrupt(interrupt);
+                }
+                // In COM mode, noop for now
+                // TODO: support guest-installed handlers
+                Ok(InterruptResult::ResumeExecution)
+            }
             0x29 => {
                 // Fast console output
                 // In boot mode, send to the guest
@@ -436,7 +449,9 @@ impl Machine {
         match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
             CpuStepResult::Interrupt(interrupt) => {
-                eprintln!("\x1b[1;91mInterrupt {interrupt:X}h\x1b[0m");
+                if self.verbosity > 0 {
+                    eprintln!("\x1b[1;91mInterrupt {interrupt:X}h\x1b[0m");
+                }
                 let interrupt_result = self.handle_interrupt(interrupt)?;
                 self.cpu.trace();
                 match interrupt_result {
@@ -551,11 +566,12 @@ pub fn main_loop(
     file_path: &str,
     load_mode: LoadMode,
     image_type: Option<DiskType>,
+    verbosity: u8,
 ) -> anyhow::Result<u8> {
     let memory_size = 0x100_000; // Physical memory: 1 MiB
 
     let mut machine = Machine {
-        cpu: Cpu::new(),
+        cpu: Cpu::new(verbosity),
         memory: vec![0; memory_size],
         handles: vec![
             Some(Resource::Stdin),
@@ -565,6 +581,7 @@ pub fn main_loop(
         floppy_image: None,
         boot_time: Instant::now(),
         load_mode: load_mode.clone(),
+        verbosity,
     };
     machine.handles.resize(20, None);
 

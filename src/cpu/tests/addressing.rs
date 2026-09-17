@@ -1,7 +1,7 @@
 use super::{Cpu, CpuStepResult};
 
 fn address_test_cpu() -> Cpu {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ax = 0xA65B;
     cpu.cx = 0xC27D;
     cpu.dx = 0xD38E;

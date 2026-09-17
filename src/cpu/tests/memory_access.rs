@@ -9,7 +9,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn cpu_for_memory_access() -> Cpu {
-    let mut cpu = Cpu::new();
+    let mut cpu = Cpu::new(0);
     cpu.ax = 0xA55A;
     cpu.cx = 0x1234;
     cpu.dx = 0x5678;
