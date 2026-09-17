@@ -5,6 +5,7 @@ mod addressing;
 mod cmps;
 mod div;
 mod group1_byte;
+mod group1_word;
 mod interrupts;
 mod memory_access;
 mod mul;

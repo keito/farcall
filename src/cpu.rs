@@ -770,6 +770,23 @@ impl Cpu {
                     self.write_operand8(memory, &rm, value)?;
                 }
             }
+            0x83 => {
+                // Various things to do with r/m16, immed8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory) as i8 as i16 as u16;
+                let destination = self.read_operand16(memory, &rm)?;
+                let value = match reg_field {
+                    0b000 => {
+                        // ADD r/m16, immed8
+                        print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
+                        self.add16(destination, immediate, false)
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+                self.write_operand16(memory, &rm, value)?;
+            }
             0x86 => {
                 // XCHG REG8,REG8/MEM8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
