@@ -12,6 +12,7 @@ mod or;
 mod rep_lodsb;
 mod segment_override;
 mod shl;
+mod stos;
 mod xor;
 
 #[test]

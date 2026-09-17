@@ -980,6 +980,44 @@ impl Cpu {
                     }
                 }
             }
+            0xAA => {
+                // STOSB ("store string byte")
+                print_instruction(byte, &format_args!("stosb"));
+                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let seg_addr = self.get_segment_reg(SegmentReg::Es);
+                    write_byte(
+                        memory,
+                        PhysAddr::new(seg_addr, self.di),
+                        self.get_reg8(Reg8::Al),
+                    )?;
+                    if self.get_flag(Flag::Direction) {
+                        self.di = self.di.wrapping_sub(1);
+                    } else {
+                        self.di = self.di.wrapping_add(1);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        self.cx = self.cx.wrapping_sub(1);
+                    }
+                }
+            }
+            0xAB => {
+                // STOSW ("store string word")
+                print_instruction(byte, &format_args!("stosw"));
+                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                for _ in 0..reps {
+                    let seg_addr = self.get_segment_reg(SegmentReg::Es);
+                    write_word(memory, PhysAddr::new(seg_addr, self.di), self.ax)?;
+                    if self.get_flag(Flag::Direction) {
+                        self.di = self.di.wrapping_sub(2);
+                    } else {
+                        self.di = self.di.wrapping_add(2);
+                    }
+                    if rep_prefix == Some(0xF3) {
+                        self.cx = self.cx.wrapping_sub(1);
+                    }
+                }
+            }
             0xAC => {
                 // LODSB
                 print_instruction(byte, &format_args!("lodsb"));
