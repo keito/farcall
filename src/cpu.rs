@@ -1353,6 +1353,13 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
                     }
+                    0b100 => {
+                        // SAL/SHL R/M8, 1
+                        print_instruction(byte, &format_args!("shl {}, 1", rm));
+                        let operand = self.read_operand8(memory, &rm)?;
+                        let result = self.shl8(operand, 1);
+                        self.write_operand8(memory, &rm, result)?;
+                    }
                     0b101 => {
                         // SHR r/m8, 1
                         // Shift a 8-bit operand right by 1, and store result in rm
@@ -1411,22 +1418,8 @@ impl Cpu {
                         let cl = self.get_reg8(Reg8::Cl);
                         if cl != 0 {
                             let operand = self.read_operand8(memory, &rm)?;
-                            let mut result = operand;
-                            let mut last_bit_7 = false;
-                            for _ in 0..cl {
-                                last_bit_7 = (result & 0x80) != 0;
-                                result = result << 1;
-                            }
+                            let result = self.shl8(operand, cl);
                             self.write_operand8(memory, &rm, result)?;
-                            self.set_result_flags8(result);
-                            // Last bit shifted out of bit 7
-                            self.set_flag(Flag::Carry, last_bit_7);
-                            if cl == 1 {
-                                self.set_flag(
-                                    Flag::Overflow,
-                                    ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
-                                )
-                            }
                         }
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
@@ -1807,6 +1800,28 @@ impl Cpu {
         // Did decrementing borrowing into lower nibble (was it 0)
         self.set_flag(Flag::AuxiliaryCarry, old_value & 0x0F == 0);
         self.set_result_flags16(new_value);
+    }
+
+    fn shl8(&mut self, value: u8, count: u8) -> u8 {
+        if count == 0 {
+            return value;
+        }
+        let mut result = value;
+        let mut last_bit_7 = false;
+        for _ in 0..count {
+            last_bit_7 = (result & 0x80) != 0;
+            result = result << 1;
+        }
+        self.set_result_flags8(result);
+        // Last bit shifted out of bit 7
+        self.set_flag(Flag::Carry, last_bit_7);
+        if count == 1 {
+            self.set_flag(
+                Flag::Overflow,
+                ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
+            )
+        }
+        return result;
     }
 
     fn shl16(&mut self, value: u16, count: u8) -> u16 {
