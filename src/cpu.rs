@@ -1281,6 +1281,17 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("popf"));
                 self.flags = normalize_flags(self.pop_from_stack(memory)?);
             }
+            0x9E => {
+                // SAHF
+                self.print_instruction(byte, &format_args!("sahf"));
+                let ah = self.get_reg8(Reg8::Ah) as u16;
+                self.flags = (self.flags & !0x00D5) | (ah & 0xD5);
+            }
+            0x9F => {
+                // LAHF
+                self.print_instruction(byte, &format_args!("lahf"));
+                self.set_reg8(Reg8::Ah, (self.flags as u8 & 0xD5) | 0x02);
+            }
             0xA0 => {
                 // MOV AL, MEM8
                 let mem_addr = self.fetch_next_word_and_advance_ip(memory);
