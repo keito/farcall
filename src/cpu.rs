@@ -5,8 +5,10 @@ use crate::registers::{GeneralReg, Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
 use thiserror::Error;
+use value::CpuValue;
 
 mod mod_rm;
+mod value;
 
 #[cfg(test)]
 mod tests;
@@ -235,16 +237,10 @@ impl Cpu {
         Ok(())
     }
 
-    fn update_logic_flags8(&mut self, result: u8) {
+    fn update_logic_flags<V: CpuValue>(&mut self, result: V) {
         self.set_flag(Flag::Carry, false);
         self.set_flag(Flag::Overflow, false);
-        self.set_result_flags8(result);
-    }
-
-    fn update_logic_flags16(&mut self, result: u16) {
-        self.set_flag(Flag::Carry, false);
-        self.set_flag(Flag::Overflow, false);
-        self.set_result_flags16(result);
+        self.set_result_flags(result);
     }
 
     /// Fetch, decode, and execute one instruction
@@ -381,7 +377,7 @@ impl Cpu {
 
                 let value = reg_value | rm_value;
                 self.write_operand8(memory, &rm, value)?;
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x09 => {
                 // OR REG16/MEM16, REG16
@@ -396,7 +392,7 @@ impl Cpu {
 
                 let value = reg_value | rm_value;
                 self.write_operand16(memory, &rm, value)?;
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x0A => {
                 // OR REG8, REG8/MEM8
@@ -411,7 +407,7 @@ impl Cpu {
 
                 let value = reg_value | rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x0B => {
                 // OR REG16, REG16/MEM16
@@ -426,7 +422,7 @@ impl Cpu {
 
                 let value = reg_value | rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x0C => {
                 // OR AL, IMMED8
@@ -435,7 +431,7 @@ impl Cpu {
 
                 let value = operand | self.get_reg(Reg8::Al);
                 self.set_reg(Reg8::Al, value);
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x0D => {
                 // OR AX, IMMED16
@@ -444,7 +440,7 @@ impl Cpu {
 
                 let value = operand | self.get_reg(Reg16::Ax);
                 self.set_reg(Reg16::Ax, value);
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x0E => {
                 // PUSH CS
@@ -567,7 +563,7 @@ impl Cpu {
                 let rm_value = self.read_operand8(memory, &rm)?;
                 let result = self.get_reg(source_reg) & rm_value;
                 self.write_operand8(memory, &rm, result)?;
-                self.update_logic_flags8(result);
+                self.update_logic_flags(result);
             }
             0x21 => {
                 // AND r/m16, reg16
@@ -580,7 +576,7 @@ impl Cpu {
                 let rm_value = self.read_operand16(memory, &rm)?;
                 let result = self.get_reg(source_reg) & rm_value;
                 self.write_operand16(memory, &rm, result)?;
-                self.update_logic_flags16(result);
+                self.update_logic_flags(result);
             }
             0x22 => {
                 // AND reg8, r/m8
@@ -593,7 +589,7 @@ impl Cpu {
                 let rm_value = self.read_operand8(memory, &rm)?;
                 let value = self.get_reg(dest_reg) & rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x23 => {
                 // AND reg16, r/m16
@@ -606,7 +602,7 @@ impl Cpu {
                 let rm_value = self.read_operand16(memory, &rm)?;
                 let value = self.get_reg(dest_reg) & rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x24 => {
                 // AND AL, IMMED8
@@ -615,7 +611,7 @@ impl Cpu {
                 let reg_value = self.get_reg(Reg8::Al);
                 let value = reg_value & operand;
                 self.set_reg(Reg8::Al, value);
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x25 => {
                 // AND AX, IMMED16
@@ -624,7 +620,7 @@ impl Cpu {
                 let reg_value = self.get_reg(Reg16::Ax);
                 let value = reg_value & operand;
                 self.set_reg(Reg16::Ax, value);
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x27 => {
                 // Decimal Adjust AL After Addition
@@ -645,7 +641,7 @@ impl Cpu {
                     self.set_flag(Flag::Carry, false);
                 }
                 self.set_reg(Reg8::Al, result);
-                self.set_result_flags8(result);
+                self.set_result_flags(result);
             }
             0x28 => {
                 // SUB r/m8, r8
@@ -722,7 +718,7 @@ impl Cpu {
 
                 let value = reg_value ^ rm_value;
                 self.write_operand16(memory, &rm, value)?;
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x32 => {
                 // XOR REG8, REG8/MEM8
@@ -737,7 +733,7 @@ impl Cpu {
 
                 let value = reg_value ^ rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags8(value);
+                self.update_logic_flags(value);
             }
             0x33 => {
                 // XOR REG16, REG16/MEM16
@@ -752,7 +748,7 @@ impl Cpu {
 
                 let value = reg_value ^ rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags16(value);
+                self.update_logic_flags(value);
             }
             0x38 => {
                 // CMP r/m8, r8
@@ -1043,7 +1039,7 @@ impl Cpu {
                         // OR
                         self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
                         let result = destination | immediate;
-                        self.update_logic_flags8(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     2 => {
@@ -1060,7 +1056,7 @@ impl Cpu {
                         // AND
                         self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
                         let result = destination & immediate;
-                        self.update_logic_flags8(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     5 => {
@@ -1072,7 +1068,7 @@ impl Cpu {
                         // XOR
                         self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
                         let result = destination ^ immediate;
-                        self.update_logic_flags8(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     7 => {
@@ -1103,7 +1099,7 @@ impl Cpu {
                         // OR
                         self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
                         let result = destination | immediate;
-                        self.update_logic_flags16(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     2 => {
@@ -1120,7 +1116,7 @@ impl Cpu {
                         // AND
                         self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
                         let result = destination & immediate;
-                        self.update_logic_flags16(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     5 => {
@@ -1132,7 +1128,7 @@ impl Cpu {
                         // XOR
                         self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
                         let result = destination ^ immediate;
-                        self.update_logic_flags16(result);
+                        self.update_logic_flags(result);
                         result
                     }
                     7 => {
@@ -1193,7 +1189,7 @@ impl Cpu {
 
                 self.print_instruction(byte, &format_args!("test {}, {}", rm, reg));
                 let result = operand & reg_value;
-                self.update_logic_flags8(result);
+                self.update_logic_flags(result);
             }
             0x85 => {
                 // TEST R/M16, REG16
@@ -1206,7 +1202,7 @@ impl Cpu {
 
                 self.print_instruction(byte, &format_args!("test {}, {}", rm, reg));
                 let result = operand & reg_value;
-                self.update_logic_flags16(result);
+                self.update_logic_flags(result);
             }
             0x86 => {
                 // XCHG REG8,REG8/MEM8
@@ -1567,7 +1563,7 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("test al, {:X}h", immediate));
                 let reg_val = self.get_reg(Reg8::Al);
                 let result = reg_val & immediate;
-                self.update_logic_flags8(result);
+                self.update_logic_flags(result);
             }
             0xA9 => {
                 // TEST AX, IMMED16
@@ -1575,7 +1571,7 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("test ax, {:X}h", immediate));
                 let reg_val = self.get_reg(Reg16::Ax);
                 let result = reg_val & immediate;
-                self.update_logic_flags16(result);
+                self.update_logic_flags(result);
             }
             0xAA => {
                 // STOSB ("store string byte")
@@ -2012,7 +2008,7 @@ impl Cpu {
                 let remainder = al % base;
                 self.set_reg(Reg8::Ah, al / base);
                 self.set_reg(Reg8::Al, remainder);
-                self.set_result_flags8(remainder);
+                self.set_result_flags(remainder);
             }
             0xD5 => {
                 // AAD: ASCII Adjust AX before Division
@@ -2023,7 +2019,7 @@ impl Cpu {
                 let new_al = (al + ah * base) as u8;
                 self.set_reg(Reg8::Ah, 0);
                 self.set_reg(Reg8::Al, new_al);
-                self.set_result_flags8(new_al);
+                self.set_result_flags(new_al);
             }
             0xD7 => {
                 // XLAT SOURCE-TABLE
@@ -2140,7 +2136,7 @@ impl Cpu {
                             &format_args!("test {}, {:X}h", rm, immediate),
                         );
                         let result = operand & immediate;
-                        self.update_logic_flags8(result);
+                        self.update_logic_flags(result);
                     }
                     0b010 => {
                         // NOT r/m8
@@ -2193,7 +2189,7 @@ impl Cpu {
                             &format_args!("test {}, {:X}h", rm, immediate),
                         );
                         let result = operand & immediate;
-                        self.update_logic_flags16(result);
+                        self.update_logic_flags(result);
                     }
                     0b010 => {
                         // NOT r/m16
@@ -2298,7 +2294,7 @@ impl Cpu {
                 let new_value = (old_value as i8).wrapping_add(if is_inc { 1 } else { -1 }) as u8;
                 self.write_operand8(memory, &rm, new_value)?;
 
-                self.set_result_flags8(new_value);
+                self.set_result_flags(new_value);
                 if is_inc {
                     // Signed overflow: 0x7F became 0x80, meaning +127 became -128
                     self.set_flag(Flag::Overflow, old_value == 0x7F);
@@ -2411,18 +2407,10 @@ impl Cpu {
         Ok(())
     }
 
-    fn set_result_flags8(&mut self, result: u8) {
-        self.set_flag(Flag::Zero, result == 0);
-        self.set_flag(Flag::Sign, result & (1 << 7) != 0);
-        self.set_flag(Flag::Parity, result.count_ones() % 2 == 0);
-    }
-
-    fn set_result_flags16(&mut self, result: u16) {
-        self.set_flag(Flag::Zero, result == 0);
-        // Is bit 15 set (i.e., negative)
-        self.set_flag(Flag::Sign, result & (1 << 15) != 0);
-        // Parity (even number of 1s in the lower byte)
-        self.set_flag(Flag::Parity, (result as u8).count_ones() % 2 == 0);
+    fn set_result_flags<T: CpuValue>(&mut self, result: T) {
+        self.set_flag(Flag::Zero, result.is_zero());
+        self.set_flag(Flag::Sign, result.is_negative());
+        self.set_flag(Flag::Parity, result.low_byte().count_ones() % 2 == 0);
     }
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
@@ -2471,7 +2459,7 @@ impl Cpu {
             Flag::AuxiliaryCarry,
             (wide_lhs & 0x0F) < ((rhs & 0x0F) + borrow_in as u8) as u16,
         );
-        self.set_result_flags8(result);
+        self.set_result_flags(result);
 
         result
     }
@@ -2493,7 +2481,7 @@ impl Cpu {
             Flag::AuxiliaryCarry,
             (wide_lhs & 0x0F) < ((rhs & 0x0F) + borrow_in as u16) as u32,
         );
-        self.set_result_flags16(result);
+        self.set_result_flags(result);
 
         result
     }
@@ -2512,7 +2500,7 @@ impl Cpu {
             Flag::AuxiliaryCarry,
             (lhs & 0x0F) + (rhs & 0x0F) + carry_in as u8 > 0x0F,
         );
-        self.set_result_flags8(result);
+        self.set_result_flags(result);
 
         result
     }
@@ -2531,7 +2519,7 @@ impl Cpu {
             Flag::AuxiliaryCarry,
             (lhs & 0x0F) + (rhs & 0x0F) + carry_in as u16 > 0x0F,
         );
-        self.set_result_flags16(result);
+        self.set_result_flags(result);
 
         result
     }
@@ -2545,7 +2533,7 @@ impl Cpu {
         self.set_flag(Flag::Overflow, old_value == 0x7FFF);
         // Was original low nibble 0b1111
         self.set_flag(Flag::AuxiliaryCarry, old_value & 0xF == 0xF);
-        self.set_result_flags16(new_value);
+        self.set_result_flags(new_value);
     }
 
     fn dec16(&mut self, instruction: u8, reg: Reg16) {
@@ -2557,7 +2545,7 @@ impl Cpu {
         self.set_flag(Flag::Overflow, old_value == 0x8000);
         // Did decrementing borrowing into lower nibble (was it 0)
         self.set_flag(Flag::AuxiliaryCarry, old_value & 0x0F == 0);
-        self.set_result_flags16(new_value);
+        self.set_result_flags(new_value);
     }
 
     fn shl8(&mut self, value: u8, count: u8) -> u8 {
@@ -2570,7 +2558,7 @@ impl Cpu {
             last_bit_7 = (result & 0x80) != 0;
             result = result << 1;
         }
-        self.set_result_flags8(result);
+        self.set_result_flags(result);
         // Last bit shifted out of bit 7
         self.set_flag(Flag::Carry, last_bit_7);
         if count == 1 {
@@ -2592,7 +2580,7 @@ impl Cpu {
             last_bit_15 = (result & 0x8000) != 0;
             result = result << 1;
         }
-        self.set_result_flags16(result);
+        self.set_result_flags(result);
         // Last bit shifted out of bit 15
         self.set_flag(Flag::Carry, last_bit_15);
         if count == 1 {
@@ -2614,7 +2602,7 @@ impl Cpu {
             last_bit_0 = (result & 1) != 0;
             result >>= 1;
         }
-        self.set_result_flags8(result);
+        self.set_result_flags(result);
         // Last bit shifted out of bit 0
         self.set_flag(Flag::Carry, last_bit_0);
         if count == 1 {
@@ -2633,7 +2621,7 @@ impl Cpu {
             last_bit_0 = (result & 1) != 0;
             result >>= 1;
         }
-        self.set_result_flags16(result);
+        self.set_result_flags(result);
         // Last bit shifted out of bit 0
         self.set_flag(Flag::Carry, last_bit_0);
         if count == 1 {
