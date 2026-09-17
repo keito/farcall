@@ -428,6 +428,17 @@ impl Cpu {
                 print_instruction(byte, &format_args!("push cs"));
                 self.push_onto_stack(memory, self.cs)?;
             }
+            0x16 => {
+                // PUSH SS
+                print_instruction(byte, &format_args!("push ss"));
+                self.push_onto_stack(memory, self.ss)?;
+            }
+            0x17 => {
+                // POP SS
+                print_instruction(byte, &format_args!("pop ss"));
+                self.ss = self.pop_from_stack(memory)?;
+                // TODO: delay interrupt recognition until after next instruction
+            }
             0x1E => {
                 // PUSH DS
                 print_instruction(byte, &format_args!("push ds"));

@@ -5,6 +5,7 @@ mod addressing;
 mod cmps;
 mod div;
 mod far_call;
+mod flags;
 mod group1_byte;
 mod group1_word;
 mod indirect_jump;
