@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::fs;
 use std::io::{self, Read, Write};
+use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
@@ -24,6 +25,7 @@ struct Machine {
     // Handle table
     handles: Vec<Option<Resource>>,
     floppy_image: Option<FloppyDisk>,
+    boot_time: Instant,
 }
 
 #[derive(Clone, PartialEq)]
@@ -57,6 +59,8 @@ enum MachineError {
     CpuError(#[from] CpuError),
     #[error("Boot Sector error: {0}")]
     BootSectorError(String),
+    #[error("Time of Day Service error: {0}")]
+    TimeOfDayServiceError(String),
 }
 
 enum InterruptResult {
@@ -286,6 +290,24 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    fn time_of_day_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let operation = self.cpu.get_reg8(Reg8::Ah);
+        match operation {
+            0x00 => {
+                // Read the clock (divide by 55 for approximate tick rate)
+                let ticks = self.boot_time.elapsed().as_millis() as u32 / 55;
+                self.cpu.cx = (ticks >> 16) as u16;
+                self.cpu.dx = ticks as u16;
+                // TODO: Support day rollover
+                self.cpu.set_reg8(Reg8::Al, 0);
+                Ok(InterruptResult::ResumeExecution)
+            }
+            _ => Err(MachineError::TimeOfDayServiceError(
+                "Unsupported operation".to_string(),
+            )),
+        }
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -336,6 +358,7 @@ impl Machine {
             0x13 => self.disk_service(),
             0x14 => self.serial_port_service(),
             0x17 => self.printer_service(),
+            0x1A => self.time_of_day_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
             // DOS services
             0x21 => {
@@ -364,7 +387,7 @@ impl Machine {
         match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
             CpuStepResult::Interrupt(interrupt) => {
-                eprintln!("\x1b[1;91mInterrupt {interrupt:X}\x1b[0m");
+                eprintln!("\x1b[1;91mInterrupt {interrupt:X}h\x1b[0m");
                 let interrupt_result = self.handle_interrupt(interrupt)?;
                 self.cpu.trace();
                 match interrupt_result {
@@ -490,6 +513,7 @@ pub fn main_loop(
             Some(Resource::Console),
         ],
         floppy_image: None,
+        boot_time: Instant::now(),
     };
     machine.handles.resize(20, None);
 

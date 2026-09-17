@@ -2,6 +2,7 @@ use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::MachineError;
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
 use crate::memory::MemoryError;
+use std::time::Instant;
 
 fn registers(cpu: &Cpu) -> [u16; 13] {
     [
@@ -62,6 +63,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         memory: vec![0xCC; 0x40000],
         handles: vec![],
         floppy_image: image.map(floppy_360kib),
+        boot_time: Instant::now(),
     }
 }
 
