@@ -270,6 +270,19 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
+            0x00 => {
+                // ADD r/m8, r8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("add {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg8(source_reg);
+                let rm_value = self.read_operand8(memory, &rm)?;
+                let value = self.add8(reg_value, rm_value, false);
+                self.write_operand8(memory, &rm, value)?;
+            }
             0x01 => {
                 // ADD r/m16, r16
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
@@ -282,6 +295,19 @@ impl Cpu {
                 let rm_value = self.read_operand16(memory, &rm)?;
                 let value = self.add16(reg_value, rm_value, false);
                 self.write_operand16(memory, &rm, value)?;
+            }
+            0x02 => {
+                // ADD r8, r/m8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let dest_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                print_instruction(byte, &format_args!("add {}, {}", dest_reg, rm));
+
+                let reg_value = self.get_reg8(dest_reg);
+                let rm_value = self.read_operand8(memory, &rm)?;
+                let value = self.add8(reg_value, rm_value, false);
+                self.set_reg8(dest_reg, value);
             }
             0x03 => {
                 // ADD r16, r/m16
@@ -1095,6 +1121,31 @@ impl Cpu {
                 // Add the displacement to IP with 16-bit wrapping
                 self.ip = self.ip.wrapping_add(displacement)
             }
+            0xEA => {
+                // JMP FAR-LABEL
+                let offset = self.fetch_next_word_and_advance_ip(memory);
+                let segment = self.fetch_next_word_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("jmp {:04X}h:{:04X}h", segment, offset));
+                self.ip = offset;
+                self.cs = segment;
+            }
+            0xF6 => {
+                // Does many things with REG8/MEM8(, IMMED8)
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
+                match reg_field {
+                    0 => {
+                        // TEST R/M8, IMMED8
+                        let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                        print_instruction(byte, &format_args!("test {}, {:X}h", rm, immediate));
+                        let operand = self.read_operand8(memory, &rm)?;
+                        let result = operand & immediate;
+                        self.update_logic_flags8(result);
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+            }
             0xF7 => {
                 // Does a lot of things! on REG16/MEM16 (and on IMMED16 for TEST only)
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
@@ -1145,6 +1196,11 @@ impl Cpu {
                 }
             }
             // Flag operations
+            0xF8 => {
+                // CLC
+                print_instruction(byte, &format_args!("clc"));
+                self.set_flag(Flag::Carry, false);
+            }
             0xFA => {
                 // CLI
                 print_instruction(byte, &format_args!("cli"));
