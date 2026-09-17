@@ -4,6 +4,7 @@ use crate::memory::MemoryError;
 mod addressing;
 mod cmps;
 mod div;
+mod far_call;
 mod group1_byte;
 mod group1_word;
 mod interrupts;

@@ -1309,6 +1309,22 @@ impl Cpu {
                 print_instruction(byte, &format_args!("ret"));
                 self.ip = self.pop_from_stack(memory)?;
             }
+            0xC4 => {
+                // LES: Load a far pointer into ES and a reg16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm_field = parsed.rm_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
+                    return Err(CpuError::UnsupportedRmField(rm_field));
+                };
+                let seg_addr = self.get_segment_reg(seg_reg);
+                let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
+                let dest_reg = Reg16::try_from(reg_field)?;
+                print_instruction(byte, &format_args!("les {}, {}", dest_reg, rm));
+                self.set_reg16(dest_reg, u16::from_le_bytes([words[0], words[1]]));
+                self.es = u16::from_le_bytes([words[2], words[3]]);
+            }
             0xC5 => {
                 // LDS: Load a far pointer into DS and a reg16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
@@ -1664,6 +1680,7 @@ impl Cpu {
                 // Does a lot of things! on MEM16 and R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let reg_field = parsed.reg_field;
+                let rm_field = parsed.rm_field;
                 let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
                 let operand = self.read_operand16(memory, &rm)?;
                 match reg_field {
@@ -1675,6 +1692,22 @@ impl Cpu {
                         // Must preserve carry
                         self.set_flag(Flag::Carry, carry);
                         self.write_operand16(memory, &rm, new_value)?;
+                    }
+                    0b011 => {
+                        // CALL MEM16 (intersegment)
+                        print_instruction(byte, &format_args!("call {}", rm));
+                        let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
+                            return Err(CpuError::UnsupportedRmField(rm_field));
+                        };
+                        let seg_addr = self.get_segment_reg(seg_reg);
+                        let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
+                        let target_ip = u16::from_le_bytes([words[0], words[1]]);
+                        let target_cs = u16::from_le_bytes([words[2], words[3]]);
+
+                        self.push_onto_stack(memory, self.cs)?;
+                        self.push_onto_stack(memory, self.ip)?;
+                        self.cs = target_cs;
+                        self.ip = target_ip;
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, reg_field)),
                 };
