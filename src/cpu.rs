@@ -2063,7 +2063,7 @@ impl Cpu {
             0xE6 => {
                 // OUT imm8, AL
                 let port = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("out {:X}h, AL", port));
+                self.print_instruction(byte, &format_args!("out {:X}h, al", port));
                 // Specifically ignore the End Of Interrupt command to the PIC
                 if port == 0x20 && self.get_reg8(Reg8::Al) == 0x20 {
                     if self.verbosity > 0 {
@@ -2072,6 +2072,18 @@ impl Cpu {
                 } else {
                     panic!("0xE6 not supported properly");
                 }
+                // TODO: PortWrite { port: u16, value: u8 }
+                // TODO: Machine handles behavior
+            }
+            0xE7 => {
+                // OUT imm8, AX
+                let port = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("out {:X}h, ax", port));
+                panic!(
+                    "0xE7 not supported properly {:X}h, {:X}h",
+                    port,
+                    self.get_reg16(Reg16::Ax)
+                );
                 // TODO: PortWrite { port: u16, value: u8 }
                 // TODO: Machine handles behavior
             }
