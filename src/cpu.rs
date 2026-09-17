@@ -776,6 +776,22 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
                 self.subtract16(self.get_reg16(Reg16::Ax), operand, false);
             }
+            0x3F => {
+                // AAS: ASCII Adjust After Subtraction
+                self.print_instruction(byte, &format_args!("aas"));
+                let mut al = self.get_reg8(Reg8::Al);
+                if (al & 0xf) > 9 || self.get_flag(Flag::AuxiliaryCarry) {
+                    al = al.wrapping_sub(6);
+                    self.set_reg8(Reg8::Ah, self.get_reg8(Reg8::Ah).wrapping_sub(1));
+                    self.set_flag(Flag::AuxiliaryCarry, true);
+                    self.set_flag(Flag::Carry, true);
+                } else {
+                    self.set_flag(Flag::AuxiliaryCarry, false);
+                    self.set_flag(Flag::Carry, false);
+                }
+                // Clear the upper nibble
+                self.set_reg8(Reg8::Al, al & 0xf);
+            }
             0x40 => self.inc16(byte, Reg16::Ax),
             0x41 => self.inc16(byte, Reg16::Cx),
             0x42 => self.inc16(byte, Reg16::Dx),
