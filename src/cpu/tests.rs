@@ -1,6 +1,7 @@
 use super::{Cpu, CpuError, CpuStepResult};
 use crate::memory::MemoryError;
 
+mod adc;
 mod addressing;
 mod cmp;
 mod cmps;

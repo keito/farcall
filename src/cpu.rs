@@ -1904,6 +1904,12 @@ impl Cpu {
                         let result = operand & immediate;
                         self.update_logic_flags8(result);
                     }
+                    0b010 => {
+                        // NOT r/m8
+                        print_instruction(byte, &format_args!("not {}", rm));
+                        let result = !operand;
+                        self.write_operand8(memory, &rm, result)?;
+                    }
                     0b100 => {
                         // MUL R/M8 (AX := AL * r/m8).
                         print_instruction(byte, &format_args!("mul {}", rm));
@@ -1948,7 +1954,12 @@ impl Cpu {
                         let result = operand & immediate;
                         self.update_logic_flags16(result);
                     }
-                    // 0b010 => 0, // NOT r/m 16
+                    0b010 => {
+                        // NOT r/m16
+                        print_instruction(byte, &format_args!("not {}", rm));
+                        let result = !operand;
+                        self.write_operand16(memory, &rm, result)?;
+                    }
                     0b011 => {
                         // NEG r/m 16
                         print_instruction(byte, &format_args!("neg {}", rm));
