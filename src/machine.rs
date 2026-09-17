@@ -26,6 +26,7 @@ struct Machine {
     handles: Vec<Option<Resource>>,
     floppy_image: Option<FloppyDisk>,
     boot_time: Instant,
+    load_mode: LoadMode,
 }
 
 #[derive(Clone, PartialEq)]
@@ -359,9 +360,19 @@ impl Machine {
             0x14 => self.serial_port_service(),
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
-            0x20 => Ok(InterruptResult::Exit(0)),
+            0x20 => {
+                // In boot mode, send to the guest
+                if self.load_mode == LoadMode::Boot {
+                    return self.handle_guest_interrupt(interrupt);
+                }
+                Ok(InterruptResult::Exit(0))
+            }
             // DOS services
             0x21 => {
+                // In boot mode, send to the guest
+                if self.load_mode == LoadMode::Boot {
+                    return self.handle_guest_interrupt(interrupt);
+                }
                 // AH contains the service ID
                 match self.cpu.get_reg8(Reg8::Ah) {
                     0x01 => self.read_char_with_echo_service(),
@@ -492,6 +503,7 @@ impl Machine {
     }
 }
 
+#[derive(Clone, PartialEq)]
 pub(crate) enum LoadMode {
     Com,
     Boot,
@@ -514,6 +526,7 @@ pub fn main_loop(
         ],
         floppy_image: None,
         boot_time: Instant::now(),
+        load_mode: load_mode.clone(),
     };
     machine.handles.resize(20, None);
 

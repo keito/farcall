@@ -14,7 +14,7 @@ struct Cli {
     /// COM file or boot sector image to load
     file: String,
 
-    /// Treat FILE as a boot sector image
+    /// Treat FILE as a boot sector image, and turn off DOS emulation
     #[arg(long)]
     boot: bool,
 

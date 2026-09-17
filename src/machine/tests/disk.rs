@@ -1,6 +1,6 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
-use crate::machine::MachineError;
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
+use crate::machine::{LoadMode, MachineError};
 use crate::memory::MemoryError;
 use std::time::Instant;
 
@@ -64,6 +64,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         handles: vec![],
         floppy_image: image.map(floppy_360kib),
         boot_time: Instant::now(),
+        load_mode: LoadMode::Boot,
     }
 }
 
