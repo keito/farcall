@@ -548,6 +548,32 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("pop ds"));
                 self.ds = self.pop_from_stack(memory)?;
             }
+            0x20 => {
+                // AND r/m8, reg8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand8(memory, &rm)?;
+                let result = self.get_reg8(source_reg) & rm_value;
+                self.write_operand8(memory, &rm, result)?;
+                self.update_logic_flags8(result);
+            }
+            0x21 => {
+                // AND r/m16, reg16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand16(memory, &rm)?;
+                let result = self.get_reg16(source_reg) & rm_value;
+                self.write_operand16(memory, &rm, result)?;
+                self.update_logic_flags16(result);
+            }
             0x22 => {
                 // AND reg8, r/m8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
