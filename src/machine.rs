@@ -39,9 +39,9 @@ enum Resource {
 enum MachineError {
     #[error("Not enough memory; offset {0} exceeds {1} bytes")]
     NotEnoughMemory(usize, usize),
-    #[error("Unsupported interrupt: {0:X}")]
+    #[error("Unsupported interrupt: {0:X}h")]
     UnsupportedInterrupt(u8),
-    #[error("Unsupported service: {0:X}")]
+    #[error("Unsupported service: {0:X}h")]
     UnsupportedService(u8),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
