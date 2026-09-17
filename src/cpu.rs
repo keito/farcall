@@ -768,6 +768,22 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x78 => {
+                // JS (jump if sign)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("js {:X}h", operand));
+                if self.get_flag(Flag::Sign) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x79 => {
+                // JNS (jump if not sign)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                print_instruction(byte, &format_args!("jns {:X}h", operand));
+                if !self.get_flag(Flag::Sign) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x7C => {
                 // JL/JNGE (jump if signed less-than)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
@@ -1819,6 +1835,11 @@ impl Cpu {
                 }
             }
             // Flag operations
+            0xF5 => {
+                // CMC
+                print_instruction(byte, &format_args!("cmc"));
+                self.set_flag(Flag::Carry, !self.get_flag(Flag::Carry));
+            }
             0xF8 => {
                 // CLC
                 print_instruction(byte, &format_args!("clc"));
