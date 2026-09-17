@@ -576,6 +576,27 @@ impl Cpu {
                 self.set_reg16(Reg16::Ax, value);
                 self.update_logic_flags16(value);
             }
+            0x27 => {
+                // Decimal Adjust AL After Addition
+                self.print_instruction(byte, &format_args!("daa"));
+                let al = self.get_reg8(Reg8::Al);
+                let mut result = al;
+                // If low nibble is greater than 9 or incoming AF is set
+                if (al & 0x0f) > 0b1001 || self.get_flag(Flag::AuxiliaryCarry) {
+                    result = result.wrapping_add(0x06);
+                    self.set_flag(Flag::AuxiliaryCarry, true);
+                } else {
+                    self.set_flag(Flag::AuxiliaryCarry, false);
+                }
+                if al > 0x99 || self.get_flag(Flag::Carry) {
+                    result = result.wrapping_add(0x60);
+                    self.set_flag(Flag::Carry, true);
+                } else {
+                    self.set_flag(Flag::Carry, false);
+                }
+                self.set_reg8(Reg8::Al, result);
+                self.set_result_flags8(result);
+            }
             0x28 => {
                 // SUB r/m8, r8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);

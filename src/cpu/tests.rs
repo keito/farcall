@@ -5,6 +5,7 @@ mod adc;
 mod addressing;
 mod cmp;
 mod cmps;
+mod daa;
 mod div;
 mod far_call;
 mod flags;
