@@ -1890,6 +1890,24 @@ impl Cpu {
                 self.set_reg8(Reg8::Al, remainder);
                 self.set_result_flags8(remainder);
             }
+            0xE0 => {
+                // LOOPNE rel8
+                let displacement = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("loopne {:X}h", displacement));
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && !self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed((displacement as i8) as i16);
+                }
+            }
+            0xE1 => {
+                // LOOPE rel8
+                let displacement = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("loope {:X}h", displacement));
+                self.cx = self.cx.wrapping_sub(1);
+                if self.cx != 0 && self.get_flag(Flag::Zero) {
+                    self.ip = self.ip.wrapping_add_signed((displacement as i8) as i16);
+                }
+            }
             0xE2 => {
                 // LOOP rel8
                 let displacement = self.fetch_next_byte_and_advance_ip(memory);
