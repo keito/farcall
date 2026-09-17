@@ -1938,6 +1938,17 @@ impl Cpu {
                 self.set_reg8(Reg8::Al, remainder);
                 self.set_result_flags8(remainder);
             }
+            0xD5 => {
+                // AAD: ASCII Adjust AX before Division
+                let base = self.fetch_next_byte_and_advance_ip(memory) as u16;
+                self.print_instruction(byte, &format_args!("aad {:X}h", base));
+                let al = self.get_reg8(Reg8::Al) as u16;
+                let ah = self.get_reg8(Reg8::Ah) as u16;
+                let new_al = ((al + ah * base) % 256) as u8;
+                self.set_reg8(Reg8::Ah, 0);
+                self.set_reg8(Reg8::Al, new_al);
+                self.set_result_flags8(new_al);
+            }
             0xE0 => {
                 // LOOPNE rel8
                 let displacement = self.fetch_next_byte_and_advance_ip(memory);
