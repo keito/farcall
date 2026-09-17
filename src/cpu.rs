@@ -574,6 +574,28 @@ impl Cpu {
                 self.set_reg16(dest_reg, value);
                 self.update_logic_flags16(value);
             }
+            0x38 => {
+                // CMP r/m8, r8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg8::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                print_instruction(byte, &format_args!("cmp {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand8(memory, &rm)?;
+                self.subtract8(rm_value, self.get_reg8(source_reg), false);
+            }
+            0x39 => {
+                // CMP r/m16, r16
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                let parsed = parse_mod_rm(operand);
+                let source_reg = Reg16::try_from(parsed.reg_field)?;
+                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                print_instruction(byte, &format_args!("cmp {}, {}", rm, source_reg));
+
+                let rm_value = self.read_operand16(memory, &rm)?;
+                self.subtract16(rm_value, self.get_reg16(source_reg), false);
+            }
             0x3A => {
                 // CMP r8, r/m8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
