@@ -1154,6 +1154,18 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed((displacement as i8) as i16);
                 }
             }
+            0xE6 => {
+                // OUT imm8, AL
+                let port = self.fetch_next_byte_and_advance_ip(memory);
+                print_instruction(byte, &format_args!("out {:X}h, AL", port));
+                if port == 0x20 && self.get_reg8(Reg8::Al) == 0x20 {
+                    eprintln!("-- Ignored Port 0x20, byte 0x20 --");
+                } else {
+                    panic!("0xE6 not supported properly");
+                }
+                // TODO: PortWrite { port: u16, value: u8 }
+                // TODO: Machine handles behavior
+            }
             // CALL
             0xE8 => {
                 // Fetch 16-bit relative displacement
