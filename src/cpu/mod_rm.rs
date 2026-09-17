@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::registers::{Reg8, Reg16, SegmentReg};
+use crate::registers::{GeneralReg, SegmentReg};
 
 use super::{Cpu, CpuError};
 
@@ -99,12 +99,15 @@ impl Cpu {
         }
     }
 
-    pub(super) fn decode_rm8_operand(
+    pub(super) fn decode_rm_operand<R>(
         &mut self,
         memory: &[u8],
         fields: &ModRmFields,
         segment_override: Option<SegmentReg>,
-    ) -> Result<RegisterOrMemoryOperand<Reg8>, CpuError> {
+    ) -> Result<RegisterOrMemoryOperand<R>, CpuError>
+    where
+        R: GeneralReg + TryFrom<u8, Error = CpuError>,
+    {
         match fields.mod_field {
             0b00 | 0b01 | 0b10 => {
                 let (seg_reg, addr) =
@@ -112,29 +115,7 @@ impl Cpu {
                 Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
             }
             0b11 => {
-                // Register
-                let rm_reg = Reg8::try_from(fields.rm_field)?;
-                Ok(RegisterOrMemoryOperand::Register(rm_reg))
-            }
-            _ => Err(CpuError::UnsupportedModField(fields.mod_field)),
-        }
-    }
-
-    pub(super) fn decode_rm16_operand(
-        &mut self,
-        memory: &[u8],
-        fields: &ModRmFields,
-        segment_override: Option<SegmentReg>,
-    ) -> Result<RegisterOrMemoryOperand<Reg16>, CpuError> {
-        match fields.mod_field {
-            0b00 | 0b01 | 0b10 => {
-                let (seg_reg, addr) =
-                    self.decode_effective_address(memory, fields, segment_override)?;
-                Ok(RegisterOrMemoryOperand::Memory(seg_reg, addr))
-            }
-            0b11 => {
-                // Register
-                let rm_reg = Reg16::try_from(fields.rm_field)?;
+                let rm_reg = R::try_from(fields.rm_field)?;
                 Ok(RegisterOrMemoryOperand::Register(rm_reg))
             }
             _ => Err(CpuError::UnsupportedModField(fields.mod_field)),

@@ -258,7 +258,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("add {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
@@ -271,7 +271,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("add {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
@@ -284,7 +284,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("add {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -297,7 +297,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("add {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -338,7 +338,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("or {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
@@ -353,7 +353,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("or {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
@@ -368,7 +368,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("or {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -383,7 +383,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("or {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -419,7 +419,7 @@ impl Cpu {
             0x10 => {
                 // ADC R/M8,R8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
                 let source_reg_val = self.get_reg(source_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -430,7 +430,7 @@ impl Cpu {
             0x11 => {
                 // ADC R/M16,R16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
                 let source_reg_val = self.get_reg(source_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -441,7 +441,7 @@ impl Cpu {
             0x12 => {
                 // ADC R8,R/M8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
                 let dest_reg_val = self.get_reg(dest_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -452,7 +452,7 @@ impl Cpu {
             0x13 => {
                 // ADC R16,R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 let dest_reg_val = self.get_reg(dest_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -490,7 +490,7 @@ impl Cpu {
             0x1A => {
                 // SBB R8,R/M8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
                 let dest_reg_val = self.get_reg(dest_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -502,7 +502,7 @@ impl Cpu {
             0x1B => {
                 // SBB R16,R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 let dest_reg_val = self.get_reg(dest_reg);
                 let operand = self.read_operand(memory, &rm)?;
@@ -526,7 +526,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -539,7 +539,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -552,7 +552,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -565,7 +565,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -617,7 +617,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("sub {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -629,7 +629,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("sub {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -641,7 +641,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("sub {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -653,7 +653,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("sub {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -679,7 +679,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("xor {}, {}", rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
@@ -694,7 +694,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("xor {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -709,7 +709,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("xor {}, {}", dest_reg, rm));
 
                 let reg_value = self.get_reg(dest_reg);
@@ -724,7 +724,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("cmp {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -735,7 +735,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("cmp {}, {}", rm, source_reg));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -746,7 +746,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -757,7 +757,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("cmp {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -995,7 +995,7 @@ impl Cpu {
             0x80 => {
                 // Does a lot of things! on REG8/MEM8, IMMED8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
                 let destination = self.read_operand(memory, &rm)?;
                 let mut is_cmp = false;
@@ -1055,7 +1055,7 @@ impl Cpu {
             0x81 => {
                 // Does a lot of things on R/M16, IMMED16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
                 let destination = self.read_operand(memory, &rm)?;
                 let mut is_cmp = false;
@@ -1115,7 +1115,7 @@ impl Cpu {
             0x83 => {
                 // Various things to do with r/m16, immed8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory) as i8 as i16 as u16;
                 let destination = self.read_operand(memory, &rm)?;
                 let mut is_cmp = false;
@@ -1150,7 +1150,7 @@ impl Cpu {
             0x84 => {
                 // TEST R/M8, REG8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
 
                 let reg = Reg8::try_from(parsed.reg_field)?;
@@ -1163,7 +1163,7 @@ impl Cpu {
             0x85 => {
                 // TEST R/M16, REG16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
 
                 let reg = Reg16::try_from(parsed.reg_field)?;
@@ -1177,7 +1177,7 @@ impl Cpu {
                 // XCHG REG8,REG8/MEM8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let first_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("xchg {}, {}", first_reg, rm));
 
                 let first_value = self.get_reg(first_reg);
@@ -1189,7 +1189,7 @@ impl Cpu {
                 // XCHG REG16, R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let first_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("xchg {}, {}", first_reg, rm));
 
                 let first_value = self.get_reg(first_reg);
@@ -1203,7 +1203,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
 
                 self.print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
 
@@ -1215,7 +1215,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", rm, reg));
                 let value = self.get_reg(reg);
                 self.write_operand(memory, &rm, value)?;
@@ -1225,7 +1225,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = self.read_operand(memory, &rm)?;
                 self.set_reg(reg, value);
@@ -1235,7 +1235,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", reg, rm));
                 let value = self.read_operand(memory, &rm)?;
                 self.set_reg(reg, value);
@@ -1245,7 +1245,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let source_segment = SegmentReg::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", rm, source_segment));
 
                 let value = self.get_segment_reg(source_segment);
@@ -1256,7 +1256,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("lea {}, {}", dest_reg, rm));
                 match rm {
                     // We write the address, not the memory at address. We ignore the segment.
@@ -1272,7 +1272,7 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
                 let dest_segment = SegmentReg::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
 
                 let value = self.read_operand(memory, &rm)?;
@@ -1286,7 +1286,7 @@ impl Cpu {
                     // The register value is required to be 0
                     return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
                 }
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("pop {}", rm));
 
                 let value = self.pop_from_stack(memory)?;
@@ -1770,7 +1770,7 @@ impl Cpu {
             0xC4 => {
                 // LES: Load a far pointer into ES and a reg16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
                     return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                 };
@@ -1784,7 +1784,7 @@ impl Cpu {
             0xC5 => {
                 // LDS: Load a far pointer into DS and a reg16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
                     return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                 };
@@ -1802,7 +1802,7 @@ impl Cpu {
                     // The register value is required to be 0
                     return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
                 }
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
 
                 self.print_instruction(byte, &format_args!("mov {}, {}", rm, immediate));
@@ -1815,7 +1815,7 @@ impl Cpu {
                     // The register value is required to be 0
                     return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field));
                 }
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
 
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
@@ -1845,7 +1845,7 @@ impl Cpu {
             0xD0 => {
                 // Does many things with REG8/MEM8, 1
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0 => {
                         // ROL r/m8, 1
@@ -1878,7 +1878,7 @@ impl Cpu {
             0xD1 => {
                 // Does many things with R/M16, 1
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0b000 => {
                         // ROL r/m16, 1
@@ -1923,7 +1923,7 @@ impl Cpu {
             0xD2 => {
                 // Does many things with REG8/MEM8, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0b100 => {
                         // Shift an 8-bit operand left by CL, and store result in rm
@@ -1941,7 +1941,7 @@ impl Cpu {
             0xD3 => {
                 // Does many things with R/M16, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0b100 => {
                         // Shift a 16-bit operand left by CL, and store result in rm
@@ -2094,7 +2094,7 @@ impl Cpu {
             0xF6 => {
                 // Does many things with REG8/MEM8(, IMMED8)
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
                 match parsed.reg_field {
                     0b000 => {
@@ -2147,7 +2147,7 @@ impl Cpu {
             0xF7 => {
                 // Does a lot of things! on REG16/MEM16 (and on IMMED16 for TEST only)
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
                 match parsed.reg_field {
                     0b000 => {
@@ -2254,7 +2254,7 @@ impl Cpu {
                     1 => false,
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
-                let rm = self.decode_rm8_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 self.print_instruction(
                     byte,
                     &format_args!("{} {}", if is_inc { "inc" } else { "dec" }, rm),
@@ -2280,7 +2280,7 @@ impl Cpu {
             0xFF => {
                 // Does a lot of things! on MEM16 and R/M16
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm16_operand(memory, &parsed, segment_override)?;
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
                     0b000 => {
                         // INC r/m 16
