@@ -1870,6 +1870,24 @@ impl Cpu {
                         self.set_flag(Flag::Carry, upper_half_non_zero);
                         self.set_flag(Flag::Overflow, upper_half_non_zero);
                     }
+                    0b110 => {
+                        // DIV R/M8 (divide AX by r/m8, AL := quotient, AH := remainder)
+                        print_instruction(byte, &format_args!("div {}", rm));
+                        let ax = self.get_reg16(Reg16::Ax);
+                        let operand = operand as u16;
+                        if operand == 0 {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let quotient = ax / operand;
+                        let remainder = ax % operand;
+                        if quotient > 0xFF {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        self.set_reg8(Reg8::Al, quotient as u8);
+                        self.set_reg8(Reg8::Ah, remainder as u8);
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
