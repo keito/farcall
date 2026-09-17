@@ -523,12 +523,8 @@ impl Cpu {
             }
             0x20 => {
                 // AND r/m8, reg8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let parsed = parse_mod_rm(operand);
-                let source_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
+                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
-
                 let rm_value = self.read_operand(memory, &rm)?;
                 let result = self.get_reg(source_reg) & rm_value;
                 self.write_operand(memory, &rm, result)?;
@@ -536,12 +532,8 @@ impl Cpu {
             }
             0x21 => {
                 // AND r/m16, reg16
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let parsed = parse_mod_rm(operand);
-                let source_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
-
                 let rm_value = self.read_operand(memory, &rm)?;
                 let result = self.get_reg(source_reg) & rm_value;
                 self.write_operand(memory, &rm, result)?;
@@ -549,10 +541,7 @@ impl Cpu {
             }
             0x22 => {
                 // AND reg8, r/m8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let parsed = parse_mod_rm(operand);
-                let dest_reg = Reg8::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
+                let (dest_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", dest_reg, rm));
 
                 let rm_value = self.read_operand(memory, &rm)?;
@@ -562,12 +551,8 @@ impl Cpu {
             }
             0x23 => {
                 // AND reg16, r/m16
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                let parsed = parse_mod_rm(operand);
-                let dest_reg = Reg16::try_from(parsed.reg_field)?;
-                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                let (dest_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
                 self.print_instruction(byte, &format_args!("and {}, {}", dest_reg, rm));
-
                 let rm_value = self.read_operand(memory, &rm)?;
                 let value = self.get_reg(dest_reg) & rm_value;
                 self.set_reg(dest_reg, value);

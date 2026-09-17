@@ -121,4 +121,22 @@ impl Cpu {
             _ => Err(CpuError::UnsupportedModField(fields.mod_field)),
         }
     }
+
+    /// Helper to use for the many instructions that need both the register and
+    /// RM to be decoded and returned.
+    pub(super) fn fetch_reg_rm<R>(
+        &mut self,
+        memory: &[u8],
+        segment_override: Option<SegmentReg>,
+    ) -> Result<(R, RegisterOrMemoryOperand<R>), CpuError>
+    where
+        R: GeneralReg + TryFrom<u8, Error = CpuError>,
+    {
+        let fields = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+
+        let reg = R::try_from(fields.reg_field)?;
+        let rm = self.decode_rm_operand::<R>(memory, &fields, segment_override)?;
+
+        Ok((reg, rm))
+    }
 }
