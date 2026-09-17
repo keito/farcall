@@ -1,5 +1,5 @@
 use crate::memory::{
-    MemoryError, PhysAddr, read_buffer, read_byte, read_word, write_byte, write_word,
+    MemoryError, PhysAddr, read_byte, read_far_pointer, read_word, write_byte, write_word,
 };
 use crate::registers::{Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
@@ -1333,12 +1333,12 @@ impl Cpu {
                 let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
                     return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                 };
-                let seg_addr = self.get_segment_reg(seg_reg);
-                let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 print_instruction(byte, &format_args!("les {}, {}", dest_reg, rm));
-                self.set_reg16(dest_reg, u16::from_le_bytes([words[0], words[1]]));
-                self.es = u16::from_le_bytes([words[2], words[3]]);
+                let seg_addr = self.get_segment_reg(seg_reg);
+                let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                self.set_reg16(dest_reg, pointer.offset);
+                self.es = pointer.segment;
             }
             0xC5 => {
                 // LDS: Load a far pointer into DS and a reg16
@@ -1347,12 +1347,12 @@ impl Cpu {
                 let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
                     return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                 };
-                let seg_addr = self.get_segment_reg(seg_reg);
-                let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 print_instruction(byte, &format_args!("lds {}, {}", dest_reg, rm));
-                self.set_reg16(dest_reg, u16::from_le_bytes([words[0], words[1]]));
-                self.ds = u16::from_le_bytes([words[2], words[3]]);
+                let seg_addr = self.get_segment_reg(seg_reg);
+                let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                self.set_reg16(dest_reg, pointer.offset);
+                self.ds = pointer.segment;
             }
             // MOV r/m8, imm8
             0xC6 => {
@@ -1707,14 +1707,11 @@ impl Cpu {
                             return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                         };
                         let seg_addr = self.get_segment_reg(seg_reg);
-                        let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
-                        let target_ip = u16::from_le_bytes([words[0], words[1]]);
-                        let target_cs = u16::from_le_bytes([words[2], words[3]]);
-
+                        let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
                         self.push_onto_stack(memory, self.cs)?;
                         self.push_onto_stack(memory, self.ip)?;
-                        self.cs = target_cs;
-                        self.ip = target_ip;
+                        self.cs = pointer.segment;
+                        self.ip = pointer.offset;
                     }
                     0b100 => {
                         // JMP R/M16 (intra)
@@ -1727,9 +1724,9 @@ impl Cpu {
                             return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                         };
                         let seg_addr = self.get_segment_reg(seg_reg);
-                        let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
-                        let target_ip = u16::from_le_bytes([words[0], words[1]]);
-                        let target_cs = u16::from_le_bytes([words[2], words[3]]);
+                        let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                        let target_ip = pointer.offset;
+                        let target_cs = pointer.segment;
                         print_instruction(
                             byte,
                             &format_args!("jmp far {:04X}h:{:04X}h", target_cs, target_ip),

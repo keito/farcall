@@ -132,6 +132,23 @@ pub(crate) fn write_buffer(
     Ok(())
 }
 
+pub(crate) struct FarPointer {
+    pub(crate) segment: u16,
+    pub(crate) offset: u16,
+}
+
+pub(crate) fn read_far_pointer(
+    memory: &[u8],
+    seg_addr: u16,
+    mem_addr: u16,
+) -> Result<FarPointer, MemoryError> {
+    let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
+    Ok(FarPointer {
+        segment: u16::from_le_bytes([words[2], words[3]]),
+        offset: u16::from_le_bytes([words[0], words[1]]),
+    })
+}
+
 fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), MemoryError> {
     let byte1 = address.as_usize();
     // The second byte might wrap
