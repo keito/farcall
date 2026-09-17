@@ -1340,6 +1340,16 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("cbw"));
                 self.set_reg16(Reg16::Ax, value);
             }
+            0x99 => {
+                // CWD
+                let result = if (self.ax & 0x8000) != 0 {
+                    0xFFFF
+                } else {
+                    0x0000
+                };
+                self.print_instruction(byte, &format_args!("cwd"));
+                self.set_reg16(Reg16::Dx, result);
+            }
             0x9C => {
                 // PUSHF
                 self.print_instruction(byte, &format_args!("pushf"));
