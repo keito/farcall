@@ -256,6 +256,13 @@ impl Machine {
         }
     }
 
+    /// Emulates the Equipment List Service
+    fn equipment_list_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // One floppy drive, 64 KiB motherboard RAM, 80x25 color, and nothing else
+        self.cpu.ax = 0b0000_0000_0010_1101;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg16(Reg16::Bx);
@@ -301,6 +308,7 @@ impl Machine {
         match interrupt {
             // BIOS services
             0x10 => self.video_service(),
+            0x11 => self.equipment_list_service(),
             0x13 => self.disk_service(),
             0x20 => Ok(InterruptResult::Exit(0)),
             // DOS services
