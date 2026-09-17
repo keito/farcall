@@ -1,4 +1,6 @@
-use crate::memory::{MemoryError, PhysAddr, read_byte, read_word, write_byte, write_word};
+use crate::memory::{
+    MemoryError, PhysAddr, read_buffer, read_byte, read_word, write_byte, write_word,
+};
 use crate::registers::{Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
@@ -1302,10 +1304,26 @@ impl Cpu {
                 print_instruction(byte, &format_args!("mov di, {:X}h", operand));
                 self.di = operand;
             }
-            // RET
             0xC3 => {
+                // RET
                 print_instruction(byte, &format_args!("ret"));
                 self.ip = self.pop_from_stack(memory)?;
+            }
+            0xC5 => {
+                // LDS: Load a far pointer into DS and a reg16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm_field = parsed.rm_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                let RegisterOrMemoryOperand::Memory(seg_reg, mem_addr) = rm else {
+                    return Err(CpuError::UnsupportedRmField(rm_field));
+                };
+                let seg_addr = self.get_segment_reg(seg_reg);
+                let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
+                let dest_reg = Reg16::try_from(reg_field)?;
+                print_instruction(byte, &format_args!("lds {}, {}", dest_reg, rm));
+                self.set_reg16(dest_reg, u16::from_le_bytes([words[0], words[1]]));
+                self.ds = u16::from_le_bytes([words[2], words[3]]);
             }
             // MOV r/m8, imm8
             0xC6 => {
