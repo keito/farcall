@@ -1207,7 +1207,7 @@ impl Cpu {
                 let reg_field = parsed.reg_field;
                 let rm = self.decode_rm8_operand(memory, parsed, segment_override)?;
                 match reg_field {
-                    4 => {
+                    0b100 => {
                         // Shift an 8-bit operand left by CL, and store result in rm
                         print_instruction(byte, &format_args!("shl {}, cl", rm));
                         let cl = self.get_reg8(Reg8::Cl);
@@ -1227,6 +1227,39 @@ impl Cpu {
                                 self.set_flag(
                                     Flag::Overflow,
                                     ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
+                                )
+                            }
+                        }
+                    }
+                    _ => return Err(CpuError::InvalidRegisterValue(reg_field)),
+                };
+            }
+            0xD3 => {
+                // Does many things with R/M16, CL
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let reg_field = parsed.reg_field;
+                let rm = self.decode_rm16_operand(memory, parsed, segment_override)?;
+                match reg_field {
+                    0b100 => {
+                        // Shift a 16-bit operand left by CL, and store result in rm
+                        print_instruction(byte, &format_args!("shl {}, cl", rm));
+                        let cl = self.get_reg8(Reg8::Cl);
+                        if cl != 0 {
+                            let operand = self.read_operand16(memory, &rm)?;
+                            let mut result = operand;
+                            let mut last_bit_15 = false;
+                            for _ in 0..cl {
+                                last_bit_15 = (result & 0x8000) != 0;
+                                result = result << 1;
+                            }
+                            self.write_operand16(memory, &rm, result)?;
+                            self.set_result_flags16(result);
+                            // Last bit shifted out of bit 15
+                            self.set_flag(Flag::Carry, last_bit_15);
+                            if cl == 1 {
+                                self.set_flag(
+                                    Flag::Overflow,
+                                    ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
                                 )
                             }
                         }
