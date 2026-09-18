@@ -1,13 +1,13 @@
 use core::fmt::Debug;
 use std::collections::VecDeque;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::memory::{
-    MemoryError, PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer, write_byte,
+    MemoryError, PhysAddr, read_buffer, validate_buffer, write_buffer, write_byte,
 };
 use crate::registers::{Reg8, Reg16};
 use console::{TerminalGuard, translate_key};
@@ -140,29 +140,6 @@ impl Machine {
         self.input_queue.push_back(key);
     }
 
-    /// Emulates the read one character with echo service
-    fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let mut buf = [0u8; 1];
-        let Some(Some(resource)) = self.handles.get(0) else {
-            return Err(MachineError::ReadServiceError(
-                "Handle 0 is not set".to_string(),
-            ));
-        };
-        match *resource {
-            Resource::Stdin => io::stdin().read_exact(&mut buf)?,
-            Resource::Console => self.read_console_byte(&mut buf)?,
-            _ => {
-                return Err(MachineError::ReadServiceError(
-                    "Unsupported resource in handle 0".to_string(),
-                ));
-            }
-        };
-        io::stdout().write_all(&buf)?;
-        io::stdout().flush()?;
-        self.cpu.set_reg(Reg8::Al, buf[0]);
-        Ok(InterruptResult::ResumeExecution)
-    }
-
     /// Emulates the DOS write service
     fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         let num_bytes = self.cpu.cx as usize;
@@ -188,56 +165,6 @@ impl Machine {
         self.cpu.ax = num_bytes as u16;
         // Clear the carry flag
         self.cpu.set_flag(Flag::Carry, false);
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// Emulates the DOS print string service
-    fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let mut phys_addr = PhysAddr::new(self.cpu.ds, self.cpu.dx);
-        let mut buf = vec![];
-        let mut found_dollar = false;
-        for _ in 0..self.memory.len() {
-            let byte = read_byte(&self.memory, phys_addr)?;
-            if byte == b'$' {
-                found_dollar = true;
-                break;
-            }
-            buf.push(byte);
-            phys_addr = phys_addr.wrapping_add(1);
-        }
-        if !found_dollar {
-            return Err(MachineError::PrintStringServiceError(
-                "$ symbol not found in memory".to_string(),
-            ));
-        }
-
-        io::stdout().write_all(b"\x1b[92m")?;
-        io::stdout().write_all(&buf)?;
-        io::stdout().write_all(b"\x1b[0m")?;
-        io::stdout().flush()?;
-
-        // Observed in real DOS
-        self.cpu.set_reg(Reg8::Al, 0x24);
-
-        return Ok(InterruptResult::ResumeExecution);
-    }
-
-    /// Emulates the DOS output char service
-    fn output_char_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let c = self.cpu.get_reg(Reg8::Dl);
-        let Some(Some(resource)) = self.handles.get(1) else {
-            return Err(MachineError::WriteServiceError(
-                "Handle 1 is not set".to_string(),
-            ));
-        };
-        // TODO: Support other resources in the future
-        if *resource != Resource::Stdout {
-            return Err(MachineError::WriteServiceError(
-                "Handle 1 must be stdout".to_string(),
-            ));
-        }
-        io::stdout().write_all(&[c])?;
-        io::stdout().flush()?;
         Ok(InterruptResult::ResumeExecution)
     }
 
