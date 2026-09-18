@@ -2,12 +2,12 @@ use clap::ArgAction;
 use clap::Parser;
 use std::process;
 
+use crate::frontend::window;
 use crate::machine::DiskType;
 use crate::machine::LoadMode;
-use crate::machine::Machine;
-use crate::machine::MachineStepResult;
 
 mod cpu;
+mod frontend;
 mod machine;
 mod memory;
 mod registers;
@@ -38,14 +38,6 @@ fn main() -> anyhow::Result<process::ExitCode> {
         LoadMode::Com
     };
 
-    let mut machine = Machine::new(&cli.file, load_mode, cli.image_type, cli.verbose)?;
-
-    let exit_code = loop {
-        let result = machine.step()?;
-        if let MachineStepResult::Exit(code) = result {
-            break code;
-        }
-    };
-
-    Ok(process::ExitCode::from(exit_code))
+    let exit_code = window::run(&cli.file, load_mode, cli.image_type, cli.verbose)?;
+    Ok(exit_code.into())
 }

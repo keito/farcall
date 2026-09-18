@@ -124,6 +124,10 @@ impl Machine {
         Ok(machine)
     }
 
+    pub fn render_video(&self, frame: &mut [u8]) {
+        self.text_video.render(&self.memory, frame);
+    }
+
     /// Emulates the read one character with echo service
     fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
         let mut buf = [0u8; 1];
