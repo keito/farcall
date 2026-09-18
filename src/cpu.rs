@@ -460,6 +460,26 @@ impl Cpu {
                 self.ss = self.pop_from_stack(memory)?;
                 // TODO: delay interrupt recognition until after next instruction
             }
+            0x18 => {
+                // SBB r/m8, reg8
+                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
+                let source_reg_val = self.get_reg(source_reg);
+                let operand = self.read_operand(memory, &rm)?;
+
+                self.print_instruction(byte, &format_args!("sbb {}, {}", rm, source_reg));
+                let result = self.subtract8(source_reg_val, operand, self.get_flag(Flag::Carry));
+                self.write_operand(memory, &rm, result)?;
+            }
+            0x19 => {
+                // SBB r/m16, reg16
+                let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
+                let source_reg_val = self.get_reg(source_reg);
+                let operand = self.read_operand(memory, &rm)?;
+
+                self.print_instruction(byte, &format_args!("sbb {}, {}", rm, source_reg));
+                let result = self.subtract16(source_reg_val, operand, self.get_flag(Flag::Carry));
+                self.write_operand(memory, &rm, result)?;
+            }
             0x1A => {
                 // SBB R8,R/M8
                 let (dest_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
