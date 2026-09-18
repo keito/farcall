@@ -281,7 +281,7 @@ fn dos_termination_returns_al_as_exit_code() {
 fn machine_for_pending_read(max_bytes: u16) -> Machine {
     let mut machine = Machine {
         cpu: Cpu::new(0),
-        memory: vec![0xCC; 0x40000],
+        memory: vec![0xCC; 0x100000],
         handles: vec![Some(super::Resource::Stdin)],
         floppy_image: None,
         boot_time: Instant::now(),
@@ -304,7 +304,15 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     machine.cpu.flags = 0x0243;
     // INT 21h; MOV BX,BEEFh. The MOV must wait until the read finishes.
     machine.memory[0x10100..0x10105].copy_from_slice(&[0xCD, 0x21, 0xBB, 0xEF, 0xBE]);
+    machine.text_video.clear(&mut machine.memory).unwrap();
     machine
+}
+
+fn ascii_key(byte: u8) -> super::KeyPress {
+    super::KeyPress {
+        ascii: Some(byte),
+        scan_code: 0, // These tests exercise DOS character input, not BIOS scan codes.
+    }
 }
 
 #[test]
@@ -358,18 +366,20 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         let original_memory = machine.memory.clone();
         machine.step().unwrap(); // INT 21h starts the read.
 
-        // Input can arrive across frames; do not return or write before Enter.
-        machine.enqueue_input_character(b'h');
+        // Echo across frames, but do not write the guest read buffer before Enter.
+        machine.enqueue_input_character(ascii_key(b'h'));
         assert!(matches!(
             machine.step().unwrap(),
             MachineStepResult::WaitingForInput
         ));
-        assert!(machine.memory == original_memory);
+        let mut expected_memory = original_memory;
+        expected_memory[0xB8000] = b'h';
+        assert!(machine.memory == expected_memory);
         assert_eq!(machine.cpu.ax, 0x3F00);
         assert_eq!(machine.cpu.flags, 0x0243);
 
         for byte in b"i\r".iter().chain(suffix.iter()) {
-            machine.enqueue_input_character(*byte);
+            machine.enqueue_input_character(ascii_key(*byte));
         }
         assert!(matches!(
             machine.step().unwrap(),
@@ -381,14 +391,18 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
         assert_eq!(machine.cpu.bx, 0, "do not execute the following MOV yet");
 
-        let mut expected_memory = original_memory;
+        expected_memory[0xB8002] = b'i';
         expected_memory[0x21234..0x21238].copy_from_slice(b"hi\r\n");
         assert!(
             machine.memory == expected_memory,
-            "write only the returned bytes at DS:DX"
+            "only echo cells and the returned bytes at DS:DX should change"
         );
         assert_eq!(
-            machine.input_queue.iter().copied().collect::<Vec<_>>(),
+            machine
+                .input_queue
+                .iter()
+                .map(|key| key.ascii.unwrap())
+                .collect::<Vec<_>>(),
             suffix,
             "stop consuming keystrokes at the first Enter"
         );
@@ -402,7 +416,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
     for max_bytes in [1, 2, 3, 4, 5, 64] {
         let mut machine = machine_for_pending_read(max_bytes);
         for byte in b"abc\rnext\r" {
-            machine.enqueue_input_character(*byte);
+            machine.enqueue_input_character(ascii_key(*byte));
         }
         let line = b"abc\r\n";
         let mut consumed = 0;
@@ -439,7 +453,11 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
                 &line[consumed..]
             );
             assert_eq!(
-                machine.input_queue.iter().copied().collect::<Vec<_>>(),
+                machine
+                    .input_queue
+                    .iter()
+                    .map(|key| key.ascii.unwrap())
+                    .collect::<Vec<_>>(),
                 b"next\r",
                 "consume submitted leftovers before any new line"
             );
@@ -456,5 +474,90 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
         assert!(machine.input_queue.is_empty());
         assert!(machine.console_read_buffer.is_empty());
+    }
+}
+
+#[test]
+fn dos_backspace_on_empty_input_preserves_the_prompt() {
+    let mut machine = machine_for_pending_read(64);
+    for byte in b"> " {
+        machine
+            .text_video
+            .write_char(&mut machine.memory, *byte)
+            .unwrap();
+    }
+    let original_memory = machine.memory.clone();
+    machine.step().unwrap();
+    for _ in 0..3 {
+        machine.enqueue_input_character(ascii_key(0x08));
+    }
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::WaitingForInput
+    ));
+    assert!(machine.memory == original_memory, "do not erase the prompt");
+
+    // Also verify that empty Backspace did not move the cursor.
+    machine.enqueue_input_character(ascii_key(b'x'));
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::WaitingForInput
+    ));
+    assert_eq!(
+        &machine.memory[0xB8000..0xB8006],
+        &[b'>', 7, b' ', 7, b'x', 7]
+    );
+}
+
+#[test]
+fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
+    // Column 76 makes "helo" wrap, so Backspace must return to the previous row.
+    for start_column in [0, 76] {
+        let mut machine = machine_for_pending_read(64);
+        for _ in 0..start_column {
+            machine
+                .text_video
+                .write_char(&mut machine.memory, b'>')
+                .unwrap();
+        }
+        machine.step().unwrap();
+        for byte in b"helo\x08" {
+            machine.enqueue_input_character(ascii_key(*byte));
+        }
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::WaitingForInput
+        ));
+        assert_eq!(
+            machine.memory[0xB8000 + 2 * (start_column + 3)],
+            b' ',
+            "erase the deleted character"
+        );
+        assert_eq!(machine.memory[0x21234], 0xCC, "do not submit before Enter");
+
+        for byte in b"lo\r" {
+            machine.enqueue_input_character(ascii_key(*byte));
+        }
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::Continue
+        ));
+        assert_eq!(machine.cpu.ax, 7);
+        assert_eq!(machine.cpu.flags, 0x0242);
+        assert_eq!(&machine.memory[0x21234..0x2123B], b"hello\r\n");
+        assert_eq!(machine.memory[0x2123B], 0xCC);
+        assert!(machine.pending_input.is_none());
+        for (index, byte) in b"hello".iter().enumerate() {
+            let address = 0xB8000 + 2 * (start_column + index);
+            assert_eq!(&machine.memory[address..address + 2], &[*byte, 7]);
+        }
+
+        // Output after Enter must begin at column zero on the next row.
+        machine
+            .text_video
+            .write_char(&mut machine.memory, b'X')
+            .unwrap();
+        let next_row = (start_column + 5) / 80 + 1;
+        assert_eq!(machine.memory[0xB8000 + 160 * next_row], b'X');
     }
 }
