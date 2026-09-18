@@ -74,6 +74,24 @@ impl TextVideo {
         Ok(())
     }
 
+    pub(super) fn backspace(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
+        if self.cursor_column == 0 {
+            // Go back one row, to the end unless we're at the top
+            if self.cursor_row > 0 {
+                self.cursor_row -= 1;
+                self.cursor_column = NUM_COLUMNS - 1;
+            }
+        } else {
+            self.cursor_column -= 1;
+        }
+
+        // Delete the character that was there
+        let addr = VIDEO_ADDR_BASE + 2 * (self.cursor_row * NUM_COLUMNS + self.cursor_column);
+        memory[addr] = b' ';
+        memory[addr + 1] = 0x07;
+        Ok(())
+    }
+
     /// Renders video memory to the framebuffer
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
         for row in 0..NUM_ROWS {

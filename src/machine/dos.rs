@@ -63,17 +63,26 @@ impl Machine {
             PendingInput::DosRead(read) => {
                 if self.console_read_buffer.is_empty() {
                     // Consume keystrokes until Enter. Move completed line into buffer.
-                    while let Some(char) = self.input_queue.pop_front() {
-                        if char == b'\r' {
+                    while let Some(key) = self.input_queue.pop_front() {
+                        if key.ascii == Some(b'\r') {
                             // We finished the line
                             read.bytes.push(b'\r');
                             read.bytes.push(b'\n');
+                            self.text_video.write_char(&mut self.memory, b'\r')?;
+                            self.text_video.write_char(&mut self.memory, b'\n')?;
 
                             // Write those bytes to the console read buffer
                             self.console_read_buffer.extend(read.bytes.drain(..));
                             break;
-                        } else {
+                        } else if key.ascii == Some(0x08) {
+                            // Backspace
+                            if read.bytes.pop().is_some() {
+                                self.text_video.backspace(&mut self.memory)?;
+                            }
+                        } else if let Some(char) = key.ascii {
+                            // TODO: ignore non-ASCII characters for now
                             read.bytes.push(char);
+                            self.text_video.write_char(&mut self.memory, char)?;
                         }
                     }
                 }

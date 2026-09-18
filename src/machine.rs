@@ -31,7 +31,7 @@ pub struct Machine {
     cpu: Cpu,
     floppy_image: Option<FloppyDisk>,
     handles: Vec<Option<Resource>>,
-    input_queue: VecDeque<u8>,
+    input_queue: VecDeque<KeyPress>,
     load_mode: LoadMode,
     memory: Vec<u8>,
     pending_key: Option<(u8, u8)>,
@@ -87,6 +87,11 @@ pub enum MachineStepResult {
     Exit(u8),
 }
 
+pub struct KeyPress {
+    pub ascii: Option<u8>,
+    pub scan_code: u8,
+}
+
 impl Machine {
     pub fn new(
         file_path: &str,
@@ -131,8 +136,8 @@ impl Machine {
         self.text_video.render(&self.memory, frame);
     }
 
-    pub fn enqueue_input_character(&mut self, char: u8) {
-        self.input_queue.push_back(char);
+    pub fn enqueue_input_character(&mut self, key: KeyPress) {
+        self.input_queue.push_back(key);
     }
 
     /// Emulates the read one character with echo service

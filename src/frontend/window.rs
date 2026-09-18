@@ -9,10 +9,11 @@ use winit::{
     dpi::LogicalSize,
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{Key, NamedKey},
     window::{Window, WindowId},
 };
 
-use crate::machine::{DiskType, LoadMode, Machine, MachineStepResult};
+use crate::machine::{DiskType, KeyPress, LoadMode, Machine, MachineStepResult};
 
 pub struct App {
     machine: Machine,
@@ -125,11 +126,20 @@ impl ApplicationHandler for App {
                 if is_synthetic || event.state != ElementState::Pressed {
                     return;
                 }
-                if let Some(text) = event.text {
+                if event.logical_key == Key::Named(NamedKey::Backspace) {
+                    self.machine.enqueue_input_character(KeyPress {
+                        ascii: Some(0x08),
+                        scan_code: 0x0E,
+                    });
+                } else if let Some(text) = event.text {
                     // TODO: Handle other characters and non-characters
                     if text.is_ascii() {
                         for byte in text.bytes() {
-                            self.machine.enqueue_input_character(byte);
+                            // TODO: Properly register scan codes
+                            self.machine.enqueue_input_character(KeyPress {
+                                ascii: Some(byte),
+                                scan_code: 0x00,
+                            });
                         }
                     }
                 }
