@@ -2126,6 +2126,25 @@ impl Cpu {
                         self.set_reg(Reg8::Al, quotient as u8);
                         self.set_reg(Reg8::Ah, remainder as u8);
                     }
+                    0b111 => {
+                        // IDIV r/m8
+                        self.print_instruction(byte, &format_args!("idiv {}", rm));
+                        let dividend = self.ax as i16 as i32;
+                        let divisor = operand as i8 as i32;
+                        if divisor == 0 {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let quotient = dividend / divisor;
+                        let remainder = dividend % divisor;
+                        // 8086/8088 quirk
+                        if !(-127..=127).contains(&quotient) {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        self.set_reg(Reg8::Al, quotient as u8);
+                        self.set_reg(Reg8::Ah, remainder as u8);
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
