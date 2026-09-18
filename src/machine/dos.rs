@@ -1,5 +1,3 @@
-use std::io::{self, Read};
-
 use crate::{
     cpu::Flag,
     machine::{InterruptResult, Machine, MachineError, MachineStepResult},
@@ -16,6 +14,7 @@ pub(super) enum Resource {
 
 pub(super) enum PendingInput {
     DosRead(PendingRead),
+    DosReadCharWithEcho,
 }
 
 pub(super) struct PendingRead {
@@ -27,28 +26,20 @@ pub(super) struct PendingRead {
 impl Machine {
     /// Emulates the read one character with echo service (INT 21h, AH=01h)
     pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let mut buf = [0u8; 1];
         let Some(Some(resource)) = self.handles.get(0) else {
             return Err(MachineError::ReadServiceError(
                 "Handle 0 is not set".to_string(),
             ));
         };
         match *resource {
-            Resource::Stdin => io::stdin().read_exact(&mut buf)?,
-            Resource::Console => self.read_console_byte(&mut buf)?,
-            _ => {
-                return Err(MachineError::ReadServiceError(
-                    "Unsupported resource in handle 0".to_string(),
-                ));
+            Resource::Stdin | Resource::Console => {
+                self.pending_input = Some(PendingInput::DosReadCharWithEcho);
+                Ok(InterruptResult::WaitingForInput)
             }
-        };
-
-        for c in buf {
-            self.text_video.write_char(&mut self.memory, c)?;
+            _ => Err(MachineError::ReadServiceError(
+                "Unsupported resource in handle 0".to_string(),
+            )),
         }
-
-        self.cpu.set_reg(Reg8::Al, buf[0]);
-        Ok(InterruptResult::ResumeExecution)
     }
 
     /// Emulates the DOS output char service (INT 21h, AH=02h)
@@ -209,6 +200,17 @@ impl Machine {
 
                 self.pending_input = None;
                 return Ok(MachineStepResult::Continue);
+            }
+            PendingInput::DosReadCharWithEcho => {
+                if let Some(key) = self.input_queue.pop_front() {
+                    if let Some(char) = key.ascii {
+                        self.text_video.write_char(&mut self.memory, char)?;
+                        self.cpu.set_reg(Reg8::Al, char);
+                        self.pending_input = None;
+                        return Ok(MachineStepResult::Continue);
+                    }
+                }
+                return Ok(MachineStepResult::WaitingForInput);
             }
         }
     }
