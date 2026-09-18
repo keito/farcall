@@ -14,17 +14,16 @@ mod group1_word;
 mod indirect_jump;
 mod interrupts;
 mod lds;
+mod logic_modrm;
 mod memory_access;
 mod movs;
 mod mul;
 mod neg;
-mod or;
 mod rep_lodsb;
 mod scas;
 mod segment_override;
 mod shl;
 mod stos;
-mod xor;
 
 #[test]
 fn cbw_sign_extends_every_al_value_preserving_flags_and_other_registers() {
