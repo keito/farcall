@@ -29,7 +29,7 @@ pub struct Machine {
     cpu: Cpu,
     floppy_image: Option<FloppyDisk>,
     handles: Vec<Option<Resource>>,
-    input_queue: VecDeque<KeyPress>,
+    keyboard_buffer: VecDeque<KeyPress>,
     load_mode: LoadMode,
     memory: Vec<u8>,
     pending_key: Option<(u8, u8)>,
@@ -109,7 +109,7 @@ impl Machine {
                 Some(Resource::Console),
             ],
             floppy_image: None,
-            input_queue: VecDeque::new(),
+            keyboard_buffer: VecDeque::new(),
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
@@ -135,7 +135,7 @@ impl Machine {
     }
 
     pub fn enqueue_input_character(&mut self, key: KeyPress) {
-        self.input_queue.push_back(key);
+        self.keyboard_buffer.push_back(key);
     }
 
     /// Emulates the DOS termination service

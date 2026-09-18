@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::io::Read;
 
-use rustix::termios::{LocalModes, QueueSelector, SpecialCodeIndex, Termios, tcflush};
+use rustix::termios::{LocalModes, SpecialCodeIndex, Termios};
 use rustix::termios::{OptionalActions, tcgetattr, tcsetattr};
 
 use super::Machine;

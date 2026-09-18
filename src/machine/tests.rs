@@ -27,7 +27,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     load_mode: LoadMode::Com,
                     pending_key: None,
                     pending_input: None,
-                    input_queue: Default::default(),
+                    keyboard_buffer: Default::default(),
                     console_read_buffer: Default::default(),
                     terminal: None,
                     text_video: TextVideo::new(),
@@ -144,7 +144,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         load_mode: LoadMode::Com,
         pending_key: None,
         pending_input: None,
-        input_queue: Default::default(),
+        keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
         terminal: None,
         text_video: TextVideo::new(),
@@ -226,7 +226,7 @@ fn write_service_clears_only_carry() {
         load_mode: LoadMode::Com,
         pending_key: None,
         pending_input: None,
-        input_queue: Default::default(),
+        keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
         terminal: None,
         text_video: TextVideo::new(),
@@ -259,7 +259,7 @@ fn dos_termination_returns_al_as_exit_code() {
             load_mode: LoadMode::Com,
             pending_key: None,
             pending_input: None,
-            input_queue: Default::default(),
+            keyboard_buffer: Default::default(),
             console_read_buffer: Default::default(),
             terminal: None,
             text_video: TextVideo::new(),
@@ -289,7 +289,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         load_mode: LoadMode::Com,
         pending_key: None,
         pending_input: None,
-        input_queue: Default::default(),
+        keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
         terminal: None,
         text_video: TextVideo::new(),
@@ -399,7 +399,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         );
         assert_eq!(
             machine
-                .input_queue
+                .keyboard_buffer
                 .iter()
                 .map(|key| key.ascii.unwrap())
                 .collect::<Vec<_>>(),
@@ -454,7 +454,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
             );
             assert_eq!(
                 machine
-                    .input_queue
+                    .keyboard_buffer
                     .iter()
                     .map(|key| key.ascii.unwrap())
                     .collect::<Vec<_>>(),
@@ -472,7 +472,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         ));
         assert_eq!(machine.cpu.ax, 6);
         assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
-        assert!(machine.input_queue.is_empty());
+        assert!(machine.keyboard_buffer.is_empty());
         assert!(machine.console_read_buffer.is_empty());
     }
 }

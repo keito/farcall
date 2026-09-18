@@ -135,10 +135,9 @@ impl Machine {
         };
         match *resource {
             Resource::Stdin | Resource::Console => {
-                self.input_queue.clear();
+                self.keyboard_buffer.clear();
                 self.pending_key = None;
             }
-            // TODO: handle STDIN if console-backed
             _ => {}
         };
 
@@ -182,7 +181,7 @@ impl Machine {
             PendingInput::DosRead(read) => {
                 if self.console_read_buffer.is_empty() {
                     // Consume keystrokes until Enter. Move completed line into buffer.
-                    while let Some(key) = self.input_queue.pop_front() {
+                    while let Some(key) = self.keyboard_buffer.pop_front() {
                         if key.ascii == Some(b'\r') {
                             // We finished the line
                             read.bytes.push(b'\r');
@@ -228,7 +227,7 @@ impl Machine {
                 return Ok(MachineStepResult::Continue);
             }
             PendingInput::DosReadCharWithEcho => {
-                if let Some(key) = self.input_queue.pop_front() {
+                if let Some(key) = self.keyboard_buffer.pop_front() {
                     if let Some(char) = key.ascii {
                         self.text_video.write_char(&mut self.memory, char)?;
                         self.cpu.set_reg(Reg8::Al, char);
