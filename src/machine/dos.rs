@@ -125,6 +125,32 @@ impl Machine {
         return Ok(InterruptResult::ResumeExecution);
     }
 
+    /// Emulates the DOS flush and read service (INT 21h, AH=0Ch)
+    pub(super) fn flush_and_read_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // Flush input if handle 0 is a console
+        let Some(Some(resource)) = self.handles.get(0) else {
+            return Err(MachineError::ReadServiceError(
+                "Handle 0 is not set".to_string(),
+            ));
+        };
+        match *resource {
+            Resource::Stdin | Resource::Console => {
+                self.input_queue.clear();
+                self.pending_key = None;
+            }
+            // TODO: handle STDIN if console-backed
+            _ => {}
+        };
+
+        let al = self.cpu.get_reg(Reg8::Al);
+        return match al {
+            0x01 => self.read_char_with_echo_service(),
+            _ => Err(MachineError::ReadServiceError(
+                "Unsupported mode in 0Ch service".to_string(),
+            )),
+        };
+    }
+
     /// Emulates the DOS write service (INT 21h, AH=40h)
     pub(super) fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
         let num_bytes = self.cpu.cx as usize;

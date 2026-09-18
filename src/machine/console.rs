@@ -44,12 +44,6 @@ impl Machine {
             Ok(Some(buf[0]))
         }
     }
-
-    pub(super) fn flush_console_input(&self) -> Result<(), MachineError> {
-        let tty = std::fs::File::open("/dev/tty")?;
-        tcflush(&tty, QueueSelector::IFlush).map_err(std::io::Error::from)?;
-        Ok(())
-    }
 }
 
 pub(super) struct TerminalGuard {
