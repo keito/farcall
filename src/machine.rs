@@ -20,7 +20,7 @@ mod disk;
 mod tests;
 
 // Owns everything
-struct Machine {
+pub struct Machine {
     cpu: Cpu,
     memory: Vec<u8>,
     // Handle table
@@ -41,7 +41,7 @@ enum Resource {
 }
 
 #[derive(Error, Debug)]
-enum MachineError {
+pub enum MachineError {
     #[error("Not enough memory; offset {0} exceeds {1} bytes")]
     NotEnoughMemory(usize, usize),
     #[error("Unsupported interrupt: {0:X}h")]
@@ -79,12 +79,46 @@ enum InterruptResult {
     Exit(u8),
 }
 
-enum MachineStepResult {
+pub enum MachineStepResult {
     Continue,
     Exit(u8),
 }
 
 impl Machine {
+    pub fn new(
+        file_path: &str,
+        load_mode: LoadMode,
+        image_type: Option<DiskType>,
+        verbosity: u8,
+    ) -> anyhow::Result<Self> {
+        let memory_size = 0x100_000; // Physical memory: 1 MiB
+
+        let mut machine = Machine {
+            cpu: Cpu::new(verbosity),
+            memory: vec![0; memory_size],
+            handles: vec![
+                Some(Resource::Stdin),
+                Some(Resource::Stdout),
+                Some(Resource::Console),
+            ],
+            floppy_image: None,
+            boot_time: Instant::now(),
+            load_mode: load_mode.clone(),
+            verbosity,
+            pending_key: None,
+            terminal: Some(TerminalGuard::new()?),
+        };
+        machine.handles.resize(20, None);
+
+        let data: Vec<u8> = fs::read(file_path)?;
+        match load_mode {
+            LoadMode::Com => machine.load_com(&data)?,
+            LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
+        }
+
+        Ok(machine)
+    }
+
     /// Emulates the read one character with echo service
     fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
         let mut buf = [0u8; 1];
@@ -504,7 +538,7 @@ impl Machine {
         }
     }
 
-    fn step(&mut self) -> Result<MachineStepResult, MachineError> {
+    pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         let result = self.cpu.step(&mut self.memory)?;
         let outcome = match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
@@ -631,44 +665,4 @@ impl Machine {
 pub(crate) enum LoadMode {
     Com,
     Boot,
-}
-
-pub fn main_loop(
-    file_path: &str,
-    load_mode: LoadMode,
-    image_type: Option<DiskType>,
-    verbosity: u8,
-) -> anyhow::Result<u8> {
-    let memory_size = 0x100_000; // Physical memory: 1 MiB
-
-    let mut machine = Machine {
-        cpu: Cpu::new(verbosity),
-        memory: vec![0; memory_size],
-        handles: vec![
-            Some(Resource::Stdin),
-            Some(Resource::Stdout),
-            Some(Resource::Console),
-        ],
-        floppy_image: None,
-        boot_time: Instant::now(),
-        load_mode: load_mode.clone(),
-        verbosity,
-        pending_key: None,
-        terminal: Some(TerminalGuard::new()?),
-    };
-    machine.handles.resize(20, None);
-
-    let data: Vec<u8> = fs::read(file_path)?;
-    match load_mode {
-        LoadMode::Com => machine.load_com(&data)?,
-        LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
-    }
-
-    machine.cpu.trace();
-    loop {
-        let result = machine.step()?;
-        if let MachineStepResult::Exit(code) = result {
-            return Ok(code);
-        }
-    }
 }

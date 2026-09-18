@@ -4,6 +4,8 @@ use std::process;
 
 use crate::machine::DiskType;
 use crate::machine::LoadMode;
+use crate::machine::Machine;
+use crate::machine::MachineStepResult;
 
 mod cpu;
 mod machine;
@@ -28,21 +30,22 @@ struct Cli {
     verbose: u8,
 }
 
-fn main() {
+fn main() -> anyhow::Result<process::ExitCode> {
     let cli = Cli::parse();
     let load_mode = if cli.boot {
         LoadMode::Boot
     } else {
         LoadMode::Com
     };
-    match machine::main_loop(&cli.file, load_mode, cli.image_type, cli.verbose) {
-        Ok(code) => {
-            eprintln!("Exit code {}", code);
-            process::exit(code as i32);
+
+    let mut machine = Machine::new(&cli.file, load_mode, cli.image_type, cli.verbose)?;
+
+    let exit_code = loop {
+        let result = machine.step()?;
+        if let MachineStepResult::Exit(code) = result {
+            break code;
         }
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            process::exit(-1);
-        }
-    }
+    };
+
+    Ok(process::ExitCode::from(exit_code))
 }
