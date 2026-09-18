@@ -902,6 +902,22 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x7A => {
+                // JP (jump if parity)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                self.print_instruction(byte, &format_args!("jp {:X}h", operand));
+                if self.get_flag(Flag::Parity) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
+            0x7B => {
+                // JNP (jump if not parity)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                self.print_instruction(byte, &format_args!("jnp {:X}h", operand));
+                if !self.get_flag(Flag::Parity) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x7C => {
                 // JL/JNGE (jump if signed less-than)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
