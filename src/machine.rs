@@ -70,6 +70,8 @@ enum MachineError {
     KeyboardServiceError(String),
     #[error("Terminal error: {0}")]
     TerminalError(String),
+    #[error("BIOS System Service error: {0}")]
+    BiosSystemServiceError(String),
 }
 
 enum InterruptResult {
@@ -378,6 +380,25 @@ impl Machine {
         }
     }
 
+    fn bios_system_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let op = self.cpu.get_reg(Reg8::Ah);
+        match op {
+            0x88 => {
+                // Get extended memory size (RAM above 1 MiB)
+                // TODO: We don't support it. IBM PC/PCjr return 80h; PC/XT returns 86h
+                self.cpu.set_reg(Reg8::Ah, 0x80);
+                self.cpu.set_flag(Flag::Carry, true);
+            }
+            _ => {
+                return Err(MachineError::BiosSystemServiceError(format!(
+                    "Unsupported operation: {:#X}",
+                    op
+                )));
+            }
+        }
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// Emulates the Duplicate File Handle Service
     fn duplicate_file_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg(Reg16::Bx);
@@ -427,6 +448,7 @@ impl Machine {
             0x12 => self.amount_conventional_ram_service(),
             0x13 => self.disk_service(),
             0x14 => self.serial_port_service(),
+            0x15 => self.bios_system_service(),
             0x16 => self.keyboard_service(),
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
@@ -477,8 +499,8 @@ impl Machine {
                 // TODO: Emulate in COM mode
                 Err(MachineError::UnsupportedInterrupt(interrupt))
             }
-            0x00 | 0x60 => self.handle_guest_interrupt(interrupt),
-            _ => Err(MachineError::UnsupportedInterrupt(interrupt)),
+            // By default, send interrupts to the guest
+            _ => self.handle_guest_interrupt(interrupt),
         }
     }
 

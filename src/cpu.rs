@@ -1051,6 +1051,11 @@ impl Cpu {
                         self.print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
                         self.add16(destination, immediate, self.get_flag(Flag::Carry))
                     }
+                    0b011 => {
+                        // SBB r/m16, immed8
+                        self.print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
+                        self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
+                    }
                     0b101 => {
                         // SUB R/M16, IMMED8
                         self.print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
@@ -2323,6 +2328,11 @@ impl Cpu {
         let cs_vec_offset = (interrupt as u16) * 4 + 2;
         self.ip = read_word(memory, PhysAddr::new(0, ip_vec_offset))?;
         self.cs = read_word(memory, PhysAddr::new(0, cs_vec_offset))?;
+
+        if self.ip == 0 && self.cs == 0 && self.verbosity > 0 {
+            eprintln!("Warning: INT {interrupt:02X}h vector points to 0000:0000");
+        }
+
         Ok(())
     }
 
