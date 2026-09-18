@@ -484,20 +484,31 @@ impl Machine {
 
     fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         let result = self.cpu.step(&mut self.memory)?;
-        match result {
+        let outcome = match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
             CpuStepResult::Interrupt(interrupt) => {
                 if self.verbosity > 0 {
                     eprintln!("\x1b[1;91mInterrupt {interrupt:X}h\x1b[0m");
                 }
                 let interrupt_result = self.handle_interrupt(interrupt)?;
-                self.cpu.trace();
                 match interrupt_result {
                     InterruptResult::ResumeExecution => Ok(MachineStepResult::Continue),
                     InterruptResult::Exit(code) => Ok(MachineStepResult::Exit(code)),
                 }
             }
-        }
+            CpuStepResult::PortRead8 { .. } => {
+                self.cpu.set_reg(Reg8::Al, 0xFF);
+                Ok(MachineStepResult::Continue)
+            }
+            CpuStepResult::PortRead16 { .. } => {
+                self.cpu.ax = 0xFFFF;
+                Ok(MachineStepResult::Continue)
+            }
+            CpuStepResult::PortWrite8 { .. } => Ok(MachineStepResult::Continue),
+            CpuStepResult::PortWrite16 { .. } => Ok(MachineStepResult::Continue),
+        };
+        self.cpu.trace();
+        outcome
     }
 
     fn load_com(&mut self, bytes: &[u8]) -> Result<(), MachineError> {

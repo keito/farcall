@@ -47,9 +47,14 @@ pub(crate) enum CpuError {
     MemoryError(#[from] MemoryError),
 }
 
+#[allow(dead_code)]
 pub(crate) enum CpuStepResult {
     Continue,
     Interrupt(u8),
+    PortRead8 { port: u16 },
+    PortWrite8 { port: u16, value: u8 },
+    PortRead16 { port: u16 },
+    PortWrite16 { port: u16, value: u16 },
 }
 
 #[derive(Clone, Copy)]
@@ -1945,28 +1950,19 @@ impl Cpu {
                 // OUT imm8, AL
                 let port = self.fetch_next_byte_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("out {:X}h, al", port));
-                // Specifically ignore the End Of Interrupt command to the PIC
-                if port == 0x20 && self.get_reg(Reg8::Al) == 0x20 {
-                    if self.verbosity > 0 {
-                        eprintln!("-- Ignored Port 0x20, byte 0x20 --");
-                    }
-                } else {
-                    panic!("0xE6 not supported properly");
-                }
-                // TODO: PortWrite { port: u16, value: u8 }
-                // TODO: Machine handles behavior
+                return Ok(CpuStepResult::PortWrite8 {
+                    port: port as u16,
+                    value: self.get_reg(Reg8::Al),
+                });
             }
             0xE7 => {
                 // OUT imm8, AX
                 let port = self.fetch_next_byte_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("out {:X}h, ax", port));
-                panic!(
-                    "0xE7 not supported properly {:X}h, {:X}h",
-                    port,
-                    self.get_reg(Reg16::Ax)
-                );
-                // TODO: PortWrite { port: u16, value: u8 }
-                // TODO: Machine handles behavior
+                return Ok(CpuStepResult::PortWrite16 {
+                    port: port as u16,
+                    value: self.get_reg(Reg16::Ax),
+                });
             }
             // CALL
             0xE8 => {
@@ -1998,6 +1994,27 @@ impl Cpu {
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jmp {:X}h", operand));
                 self.ip = self.ip.wrapping_add_signed(operand as i16);
+            }
+            0xEC => {
+                // IN AL, DX
+                self.print_instruction(byte, &format_args!("in al, dx"));
+                let port = self.dx;
+                return Ok(CpuStepResult::PortRead8 { port: port });
+            }
+            0xED => {
+                // IN AX, DX
+                self.print_instruction(byte, &format_args!("in ax, dx"));
+                let port = self.dx;
+                return Ok(CpuStepResult::PortRead16 { port: port });
+            }
+            0xEE => {
+                // OUT DX, AL
+                self.print_instruction(byte, &format_args!("out dx, al"));
+                let port = self.dx;
+                return Ok(CpuStepResult::PortWrite8 {
+                    port: port,
+                    value: self.get_reg(Reg8::Al),
+                });
             }
             0xF6 => {
                 // Does many things with REG8/MEM8(, IMMED8)
@@ -2268,7 +2285,6 @@ impl Cpu {
             }
             _ => return Err(CpuError::UnsupportedInstruction(byte)),
         }
-        self.trace();
         Ok(result)
     }
 
