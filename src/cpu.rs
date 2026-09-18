@@ -911,6 +911,15 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
+            0x7D => {
+                // JNL/JGE (jump if not signed less-than)
+                let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
+                self.print_instruction(byte, &format_args!("jnl {:X}h", operand));
+                // If SF == OF, jump
+                if self.get_flag(Flag::Sign) == self.get_flag(Flag::Overflow) {
+                    self.ip = self.ip.wrapping_add_signed(operand as i16);
+                }
+            }
             0x7E => {
                 // JLE/JNG
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
