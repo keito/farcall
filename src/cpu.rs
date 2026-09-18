@@ -467,7 +467,7 @@ impl Cpu {
                 let operand = self.read_operand(memory, &rm)?;
 
                 self.print_instruction(byte, &format_args!("sbb {}, {}", rm, source_reg));
-                let result = self.subtract8(source_reg_val, operand, self.get_flag(Flag::Carry));
+                let result = self.subtract8(operand, source_reg_val, self.get_flag(Flag::Carry));
                 self.write_operand(memory, &rm, result)?;
             }
             0x19 => {
@@ -477,7 +477,7 @@ impl Cpu {
                 let operand = self.read_operand(memory, &rm)?;
 
                 self.print_instruction(byte, &format_args!("sbb {}, {}", rm, source_reg));
-                let result = self.subtract16(source_reg_val, operand, self.get_flag(Flag::Carry));
+                let result = self.subtract16(operand, source_reg_val, self.get_flag(Flag::Carry));
                 self.write_operand(memory, &rm, result)?;
             }
             0x1A => {
