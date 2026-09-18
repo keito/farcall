@@ -1843,6 +1843,25 @@ impl Cpu {
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 match parsed.reg_field {
+                    0b001 => {
+                        // ROR R/M8, CL
+                        self.print_instruction(byte, &format_args!("ror {}, cl", rm));
+                        let cl = self.get_reg(Reg8::Cl);
+                        if cl != 0 {
+                            let operand = self.read_operand(memory, &rm)?;
+                            let result = operand.rotate_right(cl as u32);
+                            self.write_operand(memory, &rm, result)?;
+                            if cl == 1 {
+                                // XOR of result's bits 7 and 6
+                                self.set_flag(
+                                    Flag::Overflow,
+                                    (result & 0x80 != 0) ^ (result & 0x40 != 0),
+                                );
+                            }
+                            // Last bit rotated out (i.e., the final result's bit 7)
+                            self.set_flag(Flag::Carry, result & 0x80 != 0);
+                        }
+                    }
                     0b100 => {
                         // Shift an 8-bit operand left by CL, and store result in rm
                         self.print_instruction(byte, &format_args!("shl {}, cl", rm));
