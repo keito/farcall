@@ -1848,6 +1848,16 @@ impl Cpu {
                             self.write_operand(memory, &rm, result)?;
                         }
                     }
+                    0b101 => {
+                        // SHR R/M8, CL
+                        self.print_instruction(byte, &format_args!("shr {}, cl", rm));
+                        let cl = self.get_reg(Reg8::Cl);
+                        if cl != 0 {
+                            let operand = self.read_operand(memory, &rm)?;
+                            let result = self.shr8(operand, cl);
+                            self.write_operand(memory, &rm, result)?;
+                        }
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
@@ -2036,6 +2046,12 @@ impl Cpu {
                         // NOT r/m8
                         self.print_instruction(byte, &format_args!("not {}", rm));
                         let result = !operand;
+                        self.write_operand(memory, &rm, result)?;
+                    }
+                    0b011 => {
+                        // NEG r/m8
+                        self.print_instruction(byte, &format_args!("neg {}", rm));
+                        let result = self.subtract8(0, operand, false);
                         self.write_operand(memory, &rm, result)?;
                     }
                     0b100 => {
