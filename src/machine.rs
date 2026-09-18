@@ -6,9 +6,7 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
-use crate::memory::{
-    MemoryError, PhysAddr, read_buffer, validate_buffer, write_buffer, write_byte,
-};
+use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte};
 use crate::registers::{Reg8, Reg16};
 use console::{TerminalGuard, translate_key};
 use disk::{DiskGeometry, FloppyDisk};
@@ -138,34 +136,6 @@ impl Machine {
 
     pub fn enqueue_input_character(&mut self, key: KeyPress) {
         self.input_queue.push_back(key);
-    }
-
-    /// Emulates the DOS write service
-    fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let num_bytes = self.cpu.cx as usize;
-        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx);
-        let dest = self.cpu.bx;
-        if dest != 1 {
-            return Err(MachineError::WriteServiceError(
-                "Unsupported destination in bx".to_string(),
-            ));
-        }
-
-        let buffer = read_buffer(&self.memory, start_pos, num_bytes)?;
-
-        for c in &buffer {
-            self.text_video.write_char(&mut self.memory, *c)?;
-        }
-
-        io::stdout().write_all(b"\x1b[92m")?;
-        io::stdout().write_all(&buffer)?;
-        io::stdout().write_all(b"\x1b[0m")?;
-        io::stdout().flush()?;
-        // Successfully written bytes
-        self.cpu.ax = num_bytes as u16;
-        // Clear the carry flag
-        self.cpu.set_flag(Flag::Carry, false);
-        Ok(InterruptResult::ResumeExecution)
     }
 
     /// Emulates the DOS flush and read service

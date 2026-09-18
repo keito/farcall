@@ -1,9 +1,9 @@
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 
 use crate::{
     cpu::Flag,
     machine::{InterruptResult, Machine, MachineError, MachineStepResult},
-    memory::{PhysAddr, read_byte, validate_buffer, write_buffer},
+    memory::{PhysAddr, read_buffer, read_byte, validate_buffer, write_buffer},
     registers::Reg8,
 };
 
@@ -42,8 +42,11 @@ impl Machine {
                 ));
             }
         };
-        io::stdout().write_all(&buf)?;
-        io::stdout().flush()?;
+
+        for c in buf {
+            self.text_video.write_char(&mut self.memory, c)?;
+        }
+
         self.cpu.set_reg(Reg8::Al, buf[0]);
         Ok(InterruptResult::ResumeExecution)
     }
@@ -62,8 +65,9 @@ impl Machine {
                 "Handle 1 must be stdout".to_string(),
             ));
         }
-        io::stdout().write_all(&[c])?;
-        io::stdout().flush()?;
+
+        self.text_video.write_char(&mut self.memory, c)?;
+
         Ok(InterruptResult::ResumeExecution)
     }
 
@@ -120,15 +124,37 @@ impl Machine {
             ));
         }
 
-        io::stdout().write_all(b"\x1b[92m")?;
-        io::stdout().write_all(&buf)?;
-        io::stdout().write_all(b"\x1b[0m")?;
-        io::stdout().flush()?;
+        for c in buf {
+            self.text_video.write_char(&mut self.memory, c)?;
+        }
 
         // Observed in real DOS
         self.cpu.set_reg(Reg8::Al, 0x24);
 
         return Ok(InterruptResult::ResumeExecution);
+    }
+
+    /// Emulates the DOS write service (INT 21h, AH=40h)
+    pub(super) fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let num_bytes = self.cpu.cx as usize;
+        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx);
+        let dest = self.cpu.bx;
+        if dest != 1 {
+            return Err(MachineError::WriteServiceError(
+                "Unsupported destination in bx".to_string(),
+            ));
+        }
+
+        let buffer = read_buffer(&self.memory, start_pos, num_bytes)?;
+        for c in &buffer {
+            self.text_video.write_char(&mut self.memory, *c)?;
+        }
+
+        // Successfully written bytes to AX and clear CF
+        self.cpu.ax = num_bytes as u16;
+        self.cpu.set_flag(Flag::Carry, false);
+
+        Ok(InterruptResult::ResumeExecution)
     }
 
     pub(super) fn handle_pending_input(&mut self) -> Result<MachineStepResult, MachineError> {
