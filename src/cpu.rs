@@ -2200,6 +2200,16 @@ impl Cpu {
                         self.set_flag(Flag::Carry, carry);
                         self.write_operand(memory, &rm, new_value)?;
                     }
+                    0b001 => {
+                        // DEC r/m 16
+                        self.print_instruction(byte, &format_args!("dec {}", rm));
+                        let carry = self.get_flag(Flag::Carry);
+                        let operand = self.read_operand(memory, &rm)?;
+                        let new_value = self.subtract16(operand, 1, false);
+                        // Must preserve carry
+                        self.set_flag(Flag::Carry, carry);
+                        self.write_operand(memory, &rm, new_value)?;
+                    }
                     0b010 => {
                         // CALL R/M16 (intrasegment)
                         self.print_instruction(byte, &format_args!("call {}", rm));

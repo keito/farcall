@@ -249,7 +249,8 @@ impl Machine {
 
     /// Emulates the Video Service
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
-        match self.cpu.get_reg(Reg8::Ah) {
+        let op = self.cpu.get_reg(Reg8::Ah);
+        match op {
             // BIOS character output
             0xe => {
                 let c = self.cpu.get_reg(Reg8::Al);
@@ -266,9 +267,10 @@ impl Machine {
                 self.cpu.set_reg(Reg8::Bh, 0); // active display page
                 Ok(InterruptResult::ResumeExecution)
             }
-            _ => Err(MachineError::VideoServiceError(
-                "Unsupported command".to_string(),
-            )),
+            _ => Err(MachineError::VideoServiceError(format!(
+                "Unsupported command: {:#X}h",
+                op
+            ))),
         }
     }
 
