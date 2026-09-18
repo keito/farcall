@@ -1,6 +1,6 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
-use crate::machine::{LoadMode, MachineError};
+use crate::machine::{LoadMode, MachineError, TextVideo};
 use crate::memory::MemoryError;
 use std::time::Instant;
 
@@ -68,6 +68,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         load_mode: LoadMode::Boot,
         pending_key: None,
         terminal: None,
+        text_video: TextVideo::new(),
     }
 }
 

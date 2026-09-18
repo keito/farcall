@@ -11,6 +11,7 @@ use crate::memory::{
 use crate::registers::{Reg8, Reg16};
 use console::{TerminalGuard, translate_key};
 use disk::{DiskGeometry, FloppyDisk};
+use video::TextVideo;
 
 pub use disk::DiskType;
 
@@ -18,6 +19,7 @@ mod console;
 mod disk;
 #[cfg(test)]
 mod tests;
+mod video;
 
 // Owns everything
 pub struct Machine {
@@ -31,6 +33,7 @@ pub struct Machine {
     verbosity: u8,
     pending_key: Option<(u8, u8)>,
     terminal: Option<TerminalGuard>,
+    text_video: TextVideo,
 }
 
 #[derive(Clone, PartialEq)]
@@ -107,8 +110,10 @@ impl Machine {
             verbosity,
             pending_key: None,
             terminal: Some(TerminalGuard::new()?),
+            text_video: TextVideo::new(),
         };
         machine.handles.resize(20, None);
+        machine.text_video.clear(&mut machine.memory)?;
 
         let data: Vec<u8> = fs::read(file_path)?;
         match load_mode {
@@ -154,6 +159,11 @@ impl Machine {
         }
 
         let buffer = read_buffer(&self.memory, start_pos, num_bytes)?;
+
+        for c in &buffer {
+            self.text_video.write_char(&mut self.memory, *c)?;
+        }
+
         io::stdout().write_all(b"\x1b[92m")?;
         io::stdout().write_all(&buffer)?;
         io::stdout().write_all(b"\x1b[0m")?;
