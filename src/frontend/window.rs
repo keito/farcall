@@ -9,11 +9,14 @@ use winit::{
     dpi::LogicalSize,
     event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    keyboard::{Key, NamedKey},
+    keyboard::PhysicalKey,
     window::{Window, WindowId},
 };
 
-use crate::machine::{DiskType, KeyPress, LoadMode, Machine, MachineStepResult};
+use crate::{
+    frontend::keyboard::{ModifierState, translate_winit_key},
+    machine::{DiskType, KeyPress, LoadMode, Machine, MachineStepResult},
+};
 
 pub struct App {
     machine: Machine,
@@ -22,6 +25,7 @@ pub struct App {
     error: Option<anyhow::Error>,
     next_frame: Instant,
     exit_code: Option<u8>,
+    modifier_state: ModifierState,
 }
 
 const WIDTH: u32 = 640;
@@ -123,24 +127,18 @@ impl ApplicationHandler for App {
                 event,
                 is_synthetic,
             } => {
+                // TODO: handle modifier key press/release
                 if is_synthetic || event.state != ElementState::Pressed {
                     return;
                 }
-                if event.logical_key == Key::Named(NamedKey::Backspace) {
-                    self.machine.enqueue_input_character(KeyPress {
-                        ascii: Some(0x08),
-                        scan_code: 0x0E,
-                    });
-                } else if let Some(text) = event.text {
-                    // TODO: Handle other characters and non-characters
-                    if text.is_ascii() {
-                        for byte in text.bytes() {
-                            // TODO: Properly register scan codes
-                            self.machine.enqueue_input_character(KeyPress {
-                                ascii: Some(byte),
-                                scan_code: 0x00,
-                            });
-                        }
+                if let PhysicalKey::Code(code) = event.physical_key {
+                    let key = translate_winit_key(
+                        code,
+                        self.modifier_state.shift,
+                        self.modifier_state.caps_lock,
+                    );
+                    if let Some(key) = key {
+                        self.machine.enqueue_input_character(key);
                     }
                 }
             }
@@ -176,6 +174,12 @@ pub(crate) fn run(
         error: None,
         next_frame: Instant::now(),
         exit_code: None,
+        modifier_state: ModifierState {
+            shift: false,
+            ctrl: false,
+            alt: false,
+            caps_lock: false,
+        },
     };
     event_loop.run_app(&mut app)?;
     match app.error {

@@ -1,16 +1,16 @@
 use core::fmt::Debug;
 use std::collections::VecDeque;
 use std::fs;
-use std::io::{self, Write};
 use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
+use crate::machine::console::PendingInput;
 use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte};
 use crate::registers::{Reg8, Reg16};
-use console::{TerminalGuard, translate_key};
+use console::TerminalGuard;
 use disk::{DiskGeometry, FloppyDisk};
-use dos::{PendingInput, Resource};
+use dos::Resource;
 use video::TextVideo;
 
 pub use disk::DiskType;
@@ -25,14 +25,17 @@ mod video;
 // Owns everything
 pub struct Machine {
     boot_time: Instant,
+    /// Read line buffer (DOS mode only)
     console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
     floppy_image: Option<FloppyDisk>,
+    /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
     keyboard_buffer: VecDeque<KeyPress>,
     load_mode: LoadMode,
     memory: Vec<u8>,
     pending_key: Option<(u8, u8)>,
+    /// What kind of input we're pending
     pending_input: Option<PendingInput>,
     terminal: Option<TerminalGuard>,
     text_video: TextVideo,
@@ -153,7 +156,7 @@ impl Machine {
         Ok(InterruptResult::ResumeExecution)
     }
 
-    /// Emulates the Video Service
+    /// Emulates the Video Service (INT 10h)
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
         let op = self.cpu.get_reg(Reg8::Ah);
         match op {
@@ -165,10 +168,7 @@ impl Machine {
             // BIOS character output
             0xe => {
                 let c = self.cpu.get_reg(Reg8::Al);
-                io::stdout().write_all(b"\x1b[92m")?;
-                io::stdout().write_all(&[c])?;
-                io::stdout().write_all(b"\x1b[0m")?;
-                io::stdout().flush()?;
+                self.text_video.write_char(&mut self.memory, c)?;
                 Ok(InterruptResult::ResumeExecution)
             }
             // Get current video mode
@@ -230,6 +230,7 @@ impl Machine {
         }
     }
 
+    // Keyboard Service (INT 16h)
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
         let operation = self.cpu.get_reg(Reg8::Ah);
         if self.verbosity > 0 {
@@ -238,36 +239,20 @@ impl Machine {
         match operation {
             0x00 => {
                 // Read key
-                let key: Option<(u8, u8)> = self.pending_key.take();
-                let (ascii_key, scan_code) = match key {
-                    Some(key) => key,
-                    None => loop {
-                        let mut buf = [0u8; 1];
-                        self.read_console_byte(&mut buf)?;
-                        if let Some(key) = translate_key(buf[0]) {
-                            break key;
-                        }
-                    },
-                };
-                self.cpu.set_reg(Reg8::Al, ascii_key);
-                self.cpu.set_reg(Reg8::Ah, scan_code);
-                Ok(InterruptResult::ResumeExecution)
+                if let Some(first_key) = self.keyboard_buffer.pop_front() {
+                    self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
+                    self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
+                    Ok(InterruptResult::ResumeExecution)
+                } else {
+                    self.pending_input = Some(PendingInput::KeyboardService);
+                    Ok(InterruptResult::WaitingForInput)
+                }
             }
             0x01 => {
                 // Check key
-                let mut key: Option<(u8, u8)> = self.pending_key;
-                if key.is_none() {
-                    // Try reading host input without waiting
-                    if let Some(byte) = self.try_read_console_byte()? {
-                        // Key arrived; translate and cache it
-                        key = translate_key(byte); // Might still return None
-                        self.pending_key = key;
-                    }
-                }
-                // If we have a key
-                if let Some((ascii_key, scan_code)) = key {
-                    self.cpu.set_reg(Reg8::Al, ascii_key);
-                    self.cpu.set_reg(Reg8::Ah, scan_code);
+                if let Some(first_key) = self.keyboard_buffer.front() {
+                    self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
+                    self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     self.cpu.set_flag(Flag::Zero, false);
                 } else {
                     self.cpu.set_flag(Flag::Zero, true);
