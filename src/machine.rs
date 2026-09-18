@@ -1,4 +1,5 @@
 use core::fmt::Debug;
+use std::collections::VecDeque;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::time::Instant;
@@ -11,36 +12,33 @@ use crate::memory::{
 use crate::registers::{Reg8, Reg16};
 use console::{TerminalGuard, translate_key};
 use disk::{DiskGeometry, FloppyDisk};
+use dos::{PendingInput, Resource};
 use video::TextVideo;
 
 pub use disk::DiskType;
 
 mod console;
 mod disk;
+mod dos;
 #[cfg(test)]
 mod tests;
 mod video;
 
 // Owns everything
 pub struct Machine {
-    cpu: Cpu,
-    memory: Vec<u8>,
-    // Handle table
-    handles: Vec<Option<Resource>>,
-    floppy_image: Option<FloppyDisk>,
     boot_time: Instant,
+    console_read_buffer: VecDeque<u8>,
+    cpu: Cpu,
+    floppy_image: Option<FloppyDisk>,
+    handles: Vec<Option<Resource>>,
+    input_queue: VecDeque<u8>,
     load_mode: LoadMode,
-    verbosity: u8,
+    memory: Vec<u8>,
     pending_key: Option<(u8, u8)>,
+    pending_input: Option<PendingInput>,
     terminal: Option<TerminalGuard>,
     text_video: TextVideo,
-}
-
-#[derive(Clone, PartialEq)]
-enum Resource {
-    Stdin,
-    Stdout,
-    Console,
+    verbosity: u8,
 }
 
 #[derive(Error, Debug)]
@@ -79,11 +77,13 @@ pub enum MachineError {
 
 enum InterruptResult {
     ResumeExecution,
+    WaitingForInput,
     Exit(u8),
 }
 
 pub enum MachineStepResult {
     Continue,
+    WaitingForInput,
     Exit(u8),
 }
 
@@ -97,20 +97,23 @@ impl Machine {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
         let mut machine = Machine {
+            boot_time: Instant::now(),
+            console_read_buffer: VecDeque::new(),
             cpu: Cpu::new(verbosity),
-            memory: vec![0; memory_size],
             handles: vec![
                 Some(Resource::Stdin),
                 Some(Resource::Stdout),
                 Some(Resource::Console),
             ],
             floppy_image: None,
-            boot_time: Instant::now(),
+            input_queue: VecDeque::new(),
             load_mode: load_mode.clone(),
-            verbosity,
+            memory: vec![0; memory_size],
+            pending_input: None,
             pending_key: None,
             terminal: Some(TerminalGuard::new()?),
             text_video: TextVideo::new(),
+            verbosity,
         };
         machine.handles.resize(20, None);
         machine.text_video.clear(&mut machine.memory)?;
@@ -126,6 +129,10 @@ impl Machine {
 
     pub fn render_video(&self, frame: &mut [u8]) {
         self.text_video.render(&self.memory, frame);
+    }
+
+    pub fn enqueue_input_character(&mut self, char: u8) {
+        self.input_queue.push_back(char);
     }
 
     /// Emulates the read one character with echo service
@@ -226,36 +233,6 @@ impl Machine {
         }
         io::stdout().write_all(&[c])?;
         io::stdout().flush()?;
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// Emulates the DOS read service
-    fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let dest = self.cpu.bx as usize;
-        let Some(Some(resource)) = self.handles.get(dest) else {
-            // Unknown handle
-            self.cpu.ax = 6;
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        };
-        if *resource != Resource::Stdin {
-            return Err(MachineError::ReadServiceError(
-                "Unsupported resource".to_string(),
-            ));
-        }
-        let max_bytes = self.cpu.cx as usize;
-        let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx);
-        let validated_buffer = validate_buffer(&mut self.memory, dest_buffer, max_bytes)?;
-
-        let mut temp_buf = vec![0u8; max_bytes];
-        let num_bytes = io::stdin().read(&mut temp_buf)?;
-        temp_buf.truncate(num_bytes);
-        write_buffer(validated_buffer, &temp_buf)?;
-
-        // Write actual bytes read to AX on success
-        self.cpu.ax = num_bytes as u16;
-        // Clear carry on success
-        self.cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
     }
 
@@ -553,6 +530,10 @@ impl Machine {
     }
 
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
+        if self.pending_input.is_some() {
+            return self.handle_pending_input();
+        }
+
         let result = self.cpu.step(&mut self.memory)?;
         let outcome = match result {
             CpuStepResult::Continue => Ok(MachineStepResult::Continue),
@@ -563,6 +544,7 @@ impl Machine {
                 let interrupt_result = self.handle_interrupt(interrupt)?;
                 match interrupt_result {
                     InterruptResult::ResumeExecution => Ok(MachineStepResult::Continue),
+                    InterruptResult::WaitingForInput => Ok(MachineStepResult::WaitingForInput),
                     InterruptResult::Exit(code) => Ok(MachineStepResult::Exit(code)),
                 }
             }

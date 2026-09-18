@@ -7,7 +7,7 @@ use pixels::{Pixels, SurfaceTexture};
 use winit::{
     application::ApplicationHandler,
     dpi::LogicalSize,
-    event::WindowEvent,
+    event::{ElementState, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     window::{Window, WindowId},
 };
@@ -99,6 +99,7 @@ impl ApplicationHandler for App {
                 while self.exit_code.is_none() && Instant::now() < deadline {
                     match self.machine.step() {
                         Ok(MachineStepResult::Continue) => {}
+                        Ok(MachineStepResult::WaitingForInput) => break,
                         Ok(MachineStepResult::Exit(exit_code)) => {
                             self.exit_code = Some(exit_code);
                             break;
@@ -114,6 +115,23 @@ impl ApplicationHandler for App {
                 self.machine.render_video(pixels.frame_mut());
                 if let Err(error) = pixels.render() {
                     self.fail(event_loop, error.into());
+                }
+            }
+            WindowEvent::KeyboardInput {
+                device_id: _,
+                event,
+                is_synthetic,
+            } => {
+                if is_synthetic || event.state != ElementState::Pressed {
+                    return;
+                }
+                if let Some(text) = event.text {
+                    // TODO: Handle other characters and non-characters
+                    if text.is_ascii() {
+                        for byte in text.bytes() {
+                            self.machine.enqueue_input_character(byte);
+                        }
+                    }
                 }
             }
             WindowEvent::CloseRequested => {

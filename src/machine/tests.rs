@@ -26,6 +26,9 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     verbosity: 0,
                     load_mode: LoadMode::Com,
                     pending_key: None,
+                    pending_input: None,
+                    input_queue: Default::default(),
+                    console_read_buffer: Default::default(),
                     terminal: None,
                     text_video: TextVideo::new(),
                 };
@@ -140,6 +143,9 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         verbosity: 0,
         load_mode: LoadMode::Com,
         pending_key: None,
+        pending_input: None,
+        input_queue: Default::default(),
+        console_read_buffer: Default::default(),
         terminal: None,
         text_video: TextVideo::new(),
     };
@@ -219,6 +225,9 @@ fn write_service_clears_only_carry() {
         verbosity: 0,
         load_mode: LoadMode::Com,
         pending_key: None,
+        pending_input: None,
+        input_queue: Default::default(),
+        console_read_buffer: Default::default(),
         terminal: None,
         text_video: TextVideo::new(),
     };
@@ -249,6 +258,9 @@ fn dos_termination_returns_al_as_exit_code() {
             verbosity: 0,
             load_mode: LoadMode::Com,
             pending_key: None,
+            pending_input: None,
+            input_queue: Default::default(),
+            console_read_buffer: Default::default(),
             terminal: None,
             text_video: TextVideo::new(),
         };
@@ -261,6 +273,188 @@ fn dos_termination_returns_al_as_exit_code() {
         match result {
             InterruptResult::Exit(code) => assert_eq!(code, expected_code),
             InterruptResult::ResumeExecution => panic!("termination must not resume execution"),
+            InterruptResult::WaitingForInput => panic!("termination must not wait for input"),
         }
+    }
+}
+
+fn machine_for_pending_read(max_bytes: u16) -> Machine {
+    let mut machine = Machine {
+        cpu: Cpu::new(0),
+        memory: vec![0xCC; 0x40000],
+        handles: vec![Some(super::Resource::Stdin)],
+        floppy_image: None,
+        boot_time: Instant::now(),
+        verbosity: 0,
+        load_mode: LoadMode::Com,
+        pending_key: None,
+        pending_input: None,
+        input_queue: Default::default(),
+        console_read_buffer: Default::default(),
+        terminal: None,
+        text_video: TextVideo::new(),
+    };
+    machine.cpu.cs = 0x1000;
+    machine.cpu.ip = 0x0100;
+    machine.cpu.ds = 0x2000;
+    machine.cpu.dx = 0x1234;
+    machine.cpu.cx = max_bytes;
+    machine.cpu.bx = 0;
+    machine.cpu.ax = 0x3F00;
+    machine.cpu.flags = 0x0243;
+    // INT 21h; MOV BX,BEEFh. The MOV must wait until the read finishes.
+    machine.memory[0x10100..0x10105].copy_from_slice(&[0xCD, 0x21, 0xBB, 0xEF, 0xBE]);
+    machine
+}
+
+#[test]
+fn dos_read_waits_without_advancing_the_cpu_or_modifying_memory() {
+    let mut machine = machine_for_pending_read(64);
+    let original_memory = machine.memory.clone();
+
+    // Repeated calls must leave IP just after the INT, without executing MOV.
+    for _ in 0..3 {
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::WaitingForInput
+        ));
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+        assert_eq!(machine.cpu.bx, 0);
+        assert_eq!(machine.cpu.ax, 0x3F00, "no result until the read completes");
+        assert_eq!(machine.cpu.flags, 0x0243);
+        assert!(machine.memory == original_memory);
+        assert!(matches!(
+            machine.pending_input,
+            Some(super::PendingInput::DosRead(_))
+        ));
+    }
+}
+
+#[test]
+fn zero_length_dos_read_completes_without_waiting() {
+    let mut machine = machine_for_pending_read(0);
+    let original_memory = machine.memory.clone();
+
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert!(machine.pending_input.is_none());
+    assert_eq!(machine.cpu.ax, 0);
+    assert_eq!(machine.cpu.flags, 0x0242, "only carry should be cleared");
+    assert!(machine.memory == original_memory);
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert_eq!(machine.cpu.bx, 0xBEEF, "execution resumes after the INT");
+    assert_eq!(machine.cpu.ip, 0x0105);
+}
+
+#[test]
+fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
+    for suffix in [b"".as_slice(), b"x", b"x\r"] {
+        let mut machine = machine_for_pending_read(64);
+        let original_memory = machine.memory.clone();
+        machine.step().unwrap(); // INT 21h starts the read.
+
+        // Input can arrive across frames; do not return or write before Enter.
+        machine.enqueue_input_character(b'h');
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::WaitingForInput
+        ));
+        assert!(machine.memory == original_memory);
+        assert_eq!(machine.cpu.ax, 0x3F00);
+        assert_eq!(machine.cpu.flags, 0x0243);
+
+        for byte in b"i\r".iter().chain(suffix.iter()) {
+            machine.enqueue_input_character(*byte);
+        }
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::Continue
+        ));
+        assert!(machine.pending_input.is_none());
+        assert_eq!(machine.cpu.ax, 4);
+        assert_eq!(machine.cpu.flags, 0x0242, "clear only carry on success");
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+        assert_eq!(machine.cpu.bx, 0, "do not execute the following MOV yet");
+
+        let mut expected_memory = original_memory;
+        expected_memory[0x21234..0x21238].copy_from_slice(b"hi\r\n");
+        assert!(
+            machine.memory == expected_memory,
+            "write only the returned bytes at DS:DX"
+        );
+        assert_eq!(
+            machine.input_queue.iter().copied().collect::<Vec<_>>(),
+            suffix,
+            "stop consuming keystrokes at the first Enter"
+        );
+        assert!(machine.console_read_buffer.is_empty());
+    }
+}
+
+#[test]
+fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
+    // Exercise splits before CR, between CR/LF, and no split at all.
+    for max_bytes in [1, 2, 3, 4, 5, 64] {
+        let mut machine = machine_for_pending_read(max_bytes);
+        for byte in b"abc\rnext\r" {
+            machine.enqueue_input_character(*byte);
+        }
+        let line = b"abc\r\n";
+        let mut consumed = 0;
+        while consumed < line.len() {
+            // Issue another hosted DOS read without adding any new keystrokes.
+            machine.cpu.ax = 0x3F00;
+            machine.cpu.flags = 0x0243;
+            machine.cpu.dx = 0x1234 + consumed as u16;
+            machine.read_service().unwrap();
+            assert!(matches!(
+                machine.step().unwrap(),
+                MachineStepResult::Continue
+            ));
+            let count = usize::from(max_bytes).min(line.len() - consumed);
+            assert_eq!(usize::from(machine.cpu.ax), count);
+            assert_eq!(machine.cpu.flags, 0x0242);
+            assert!(machine.pending_input.is_none());
+            consumed += count;
+            assert_eq!(
+                &machine.memory[0x21234..0x21234 + consumed],
+                &line[..consumed]
+            );
+            assert_eq!(
+                machine.memory[0x21234 + consumed],
+                0xCC,
+                "do not overwrite past this read"
+            );
+            assert_eq!(
+                machine
+                    .console_read_buffer
+                    .iter()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                &line[consumed..]
+            );
+            assert_eq!(
+                machine.input_queue.iter().copied().collect::<Vec<_>>(),
+                b"next\r",
+                "consume submitted leftovers before any new line"
+            );
+        }
+
+        machine.cpu.cx = 64;
+        machine.cpu.dx = 0x1240;
+        machine.read_service().unwrap();
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::Continue
+        ));
+        assert_eq!(machine.cpu.ax, 6);
+        assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
+        assert!(machine.input_queue.is_empty());
+        assert!(machine.console_read_buffer.is_empty());
     }
 }
