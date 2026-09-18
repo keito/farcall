@@ -29,7 +29,6 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     pending_input: None,
                     keyboard_buffer: Default::default(),
                     console_read_buffer: Default::default(),
-                    terminal: None,
                     text_video: TextVideo::new(),
                 };
                 machine.cpu.cs = 0x1000;
@@ -146,7 +145,6 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         pending_input: None,
         keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
-        terminal: None,
         text_video: TextVideo::new(),
     };
     machine.cpu.cs = 0x1000;
@@ -228,7 +226,6 @@ fn write_service_clears_only_carry() {
         pending_input: None,
         keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
-        terminal: None,
         text_video: TextVideo::new(),
     };
     machine.cpu.ax = 0x4000;
@@ -261,7 +258,6 @@ fn dos_termination_returns_al_as_exit_code() {
             pending_input: None,
             keyboard_buffer: Default::default(),
             console_read_buffer: Default::default(),
-            terminal: None,
             text_video: TextVideo::new(),
         };
         machine.cpu.ax = ax;
@@ -291,7 +287,6 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         pending_input: None,
         keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
-        terminal: None,
         text_video: TextVideo::new(),
     };
     machine.cpu.cs = 0x1000;

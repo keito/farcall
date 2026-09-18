@@ -15,7 +15,7 @@ use winit::{
 
 use crate::{
     frontend::keyboard::{ModifierState, translate_winit_key},
-    machine::{DiskType, KeyPress, LoadMode, Machine, MachineStepResult},
+    machine::{DiskType, LoadMode, Machine, MachineStepResult},
 };
 
 pub struct App {

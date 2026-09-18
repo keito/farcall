@@ -70,7 +70,6 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         pending_input: None,
         keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),
-        terminal: None,
         text_video: TextVideo::new(),
     }
 }

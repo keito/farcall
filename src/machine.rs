@@ -8,7 +8,6 @@ use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::machine::console::PendingInput;
 use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte};
 use crate::registers::{Reg8, Reg16};
-use console::TerminalGuard;
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
 use video::TextVideo;
@@ -37,7 +36,6 @@ pub struct Machine {
     pending_key: Option<(u8, u8)>,
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
-    terminal: Option<TerminalGuard>,
     text_video: TextVideo,
     verbosity: u8,
 }
@@ -70,8 +68,6 @@ pub enum MachineError {
     TimeOfDayServiceError(String),
     #[error("Keyboard Service error: {0}")]
     KeyboardServiceError(String),
-    #[error("Terminal error: {0}")]
-    TerminalError(String),
     #[error("BIOS System Service error: {0}")]
     BiosSystemServiceError(String),
 }
@@ -117,7 +113,6 @@ impl Machine {
             memory: vec![0; memory_size],
             pending_input: None,
             pending_key: None,
-            terminal: Some(TerminalGuard::new()?),
             text_video: TextVideo::new(),
             verbosity,
         };
