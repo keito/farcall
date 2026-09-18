@@ -251,6 +251,11 @@ impl Machine {
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
         let op = self.cpu.get_reg(Reg8::Ah);
         match op {
+            // Set text cursor shape
+            0x1 => {
+                // TODO: Noop for now
+                Ok(InterruptResult::ResumeExecution)
+            }
             // BIOS character output
             0xe => {
                 let c = self.cpu.get_reg(Reg8::Al);
