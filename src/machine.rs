@@ -458,8 +458,13 @@ impl Machine {
                     InterruptResult::Exit(code) => Ok(MachineStepResult::Exit(code)),
                 }
             }
-            CpuStepResult::PortRead8 { .. } => {
-                self.cpu.set_reg(Reg8::Al, 0xFF);
+            CpuStepResult::PortRead8 { port } => {
+                if port == 0x3DA {
+                    // Video Service
+                    self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
+                } else {
+                    self.cpu.set_reg(Reg8::Al, 0xFF);
+                }
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortRead16 { .. } => {

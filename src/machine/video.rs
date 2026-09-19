@@ -14,6 +14,7 @@ pub(super) struct TextVideo {
     cursor_row: usize,
     start_scan_line: usize,
     end_scan_line: usize,
+    status: u8,
 }
 
 impl TextVideo {
@@ -23,6 +24,7 @@ impl TextVideo {
             cursor_row: 0,
             start_scan_line: 6,
             end_scan_line: 7,
+            status: 0,
         }
     }
 
@@ -94,6 +96,7 @@ impl TextVideo {
         Ok(())
     }
 
+    /// Used by DOS emulation only
     pub(super) fn backspace(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
         if self.cursor_column == 0 {
             // Go back one row, to the end unless we're at the top
@@ -133,5 +136,11 @@ impl TextVideo {
                 }
             }
         }
+    }
+
+    pub(super) fn read_status(&mut self) -> u8 {
+        // TODO: Do proper status
+        self.status = !self.status;
+        self.status
     }
 }
