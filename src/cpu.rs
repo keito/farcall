@@ -1,4 +1,3 @@
-use crate::cpu::mod_rm::ModRmFields;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, read_byte, read_far_pointer, read_word, write_byte,
     write_word,
@@ -6,6 +5,7 @@ use crate::memory::{
 use crate::registers::{GeneralReg, Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
 use mod_rm::{RegisterOrMemoryOperand, parse_mod_rm};
+use std::fmt::Display;
 use thiserror::Error;
 pub(crate) use value::CpuValue;
 
@@ -47,6 +47,8 @@ pub(crate) enum CpuError {
     UnsupportedRegisterField(u8, u8),
     #[error("Memory Error: {0}")]
     MemoryError(#[from] MemoryError),
+    #[error("Unsupported ALU operation: {0}")]
+    UnsupportedAluOp(u8),
 }
 
 #[allow(dead_code)]
@@ -1003,19 +1005,23 @@ impl Cpu {
                     self.write_operand(memory, &rm, value)?;
                 }
             }
-            0x81 => {
-                // Does a lot of things on R/M16, IMMED16
+            0x81 | 0x83 => {
+                // 0x81: Does a lot of ALU ops on R/M16, IMMED16
+                // 0x83: Various ALU ops on r/m16, immed8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
-                let immediate = self.fetch_next_word_and_advance_ip(memory);
-                self.rm_16_immed_16_ops(memory, byte, parsed, rm, immediate)?;
-            }
-            0x83 => {
-                // Various things to do with r/m16, immed8
-                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
-                let immediate = self.fetch_next_byte_and_advance_ip(memory) as i8 as i16 as u16;
-                self.rm_16_immed_16_ops(memory, byte, parsed, rm, immediate)?;
+                let immediate = if byte == 0x81 {
+                    self.fetch_next_word_and_advance_ip(memory)
+                } else {
+                    self.fetch_next_byte_and_advance_ip(memory) as i8 as i16 as u16
+                };
+                let destination = self.read_operand(memory, &rm)?;
+                let op = AluOp::try_from(parsed.reg_field)?;
+                self.print_instruction(byte, &format_args!("{} {}, {:X}h", op, rm, immediate));
+                let value = self.alu16(op, destination, immediate);
+                if op != AluOp::Cmp {
+                    self.write_operand(memory, &rm, value)?;
+                }
             }
             0x84 => {
                 // TEST R/M8, REG8
@@ -2643,71 +2649,28 @@ impl Cpu {
         return result;
     }
 
-    /// Shared by 0x81 and 0x83, which only differ in the width of the immediate
-    fn rm_16_immed_16_ops(
-        &mut self,
-        memory: &mut [u8],
-        opcode: u8,
-        parsed: ModRmFields,
-        rm: RegisterOrMemoryOperand<Reg16>,
-        immediate: u16,
-    ) -> Result<(), CpuError> {
-        let destination = self.read_operand(memory, &rm)?;
-        let mut is_cmp = false;
-        let value = match parsed.reg_field {
-            0 => {
-                // ADD r/m16,imm16
-                self.print_instruction(opcode, &format_args!("add {}, {:X}h", rm, immediate));
-                self.add16(destination, immediate, false)
-            }
-            1 => {
-                // OR r/m16,imm16
-                self.print_instruction(opcode, &format_args!("or {}, {:X}h", rm, immediate));
-                let result = destination | immediate;
+    fn alu16(&mut self, op: AluOp, lhs: u16, rhs: u16) -> u16 {
+        match op {
+            AluOp::Add => self.add16(lhs, rhs, false),
+            AluOp::Or => {
+                let result = lhs | rhs;
                 self.update_logic_flags(result);
                 result
             }
-            2 => {
-                // ADC r/m16,imm16
-                self.print_instruction(opcode, &format_args!("adc {}, {:X}h", rm, immediate));
-                self.add16(destination, immediate, self.get_flag(Flag::Carry))
-            }
-            3 => {
-                // SBB r/m16,imm16
-                self.print_instruction(opcode, &format_args!("sbb {}, {:X}h", rm, immediate));
-                self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
-            }
-            4 => {
-                // AND r/m16,imm16
-                self.print_instruction(opcode, &format_args!("and {}, {:X}h", rm, immediate));
-                let result = destination & immediate;
+            AluOp::Adc => self.add16(lhs, rhs, self.get_flag(Flag::Carry)),
+            AluOp::Sbb => self.subtract16(lhs, rhs, self.get_flag(Flag::Carry)),
+            AluOp::And => {
+                let result = lhs & rhs;
                 self.update_logic_flags(result);
                 result
             }
-            5 => {
-                // SUB r/m16,imm16
-                self.print_instruction(opcode, &format_args!("sub {}, {:X}h", rm, immediate));
-                self.subtract16(destination, immediate, false)
-            }
-            6 => {
-                // XOR r/m16,imm16
-                self.print_instruction(opcode, &format_args!("xor {}, {:X}h", rm, immediate));
-                let result = destination ^ immediate;
+            AluOp::Sub | AluOp::Cmp => self.subtract16(lhs, rhs, false),
+            AluOp::Xor => {
+                let result = lhs ^ rhs;
                 self.update_logic_flags(result);
                 result
             }
-            7 => {
-                // CMP r/m16,imm16
-                self.print_instruction(opcode, &format_args!("cmp {}, {:X}h", rm, immediate));
-                is_cmp = true;
-                self.subtract16(destination, immediate, false)
-            }
-            _ => return Err(CpuError::UnsupportedRegisterField(opcode, parsed.reg_field)),
-        };
-        if !is_cmp {
-            self.write_operand(memory, &rm, value)?;
         }
-        Ok(())
     }
 
     pub(crate) fn trace(&self) {
@@ -2750,4 +2713,48 @@ impl Debug for Cpu {
 /// Normalize bits in flags to avoid writing reserved bits
 fn normalize_flags(flags: u16) -> u16 {
     (flags & 0x0FD5) | 0xF002
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum AluOp {
+    Add = 0,
+    Or = 1,
+    Adc = 2,
+    Sbb = 3,
+    And = 4,
+    Sub = 5,
+    Xor = 6,
+    Cmp = 7,
+}
+
+impl Display for AluOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AluOp::Add => write!(f, "add"),
+            AluOp::Or => write!(f, "or"),
+            AluOp::Adc => write!(f, "adc"),
+            AluOp::Sbb => write!(f, "sbb"),
+            AluOp::And => write!(f, "and"),
+            AluOp::Sub => write!(f, "sub"),
+            AluOp::Xor => write!(f, "xor"),
+            AluOp::Cmp => write!(f, "cmp"),
+        }
+    }
+}
+
+impl TryFrom<u8> for AluOp {
+    type Error = CpuError;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(AluOp::Add),
+            1 => Ok(AluOp::Or),
+            2 => Ok(AluOp::Adc),
+            3 => Ok(AluOp::Sbb),
+            4 => Ok(AluOp::And),
+            5 => Ok(AluOp::Sub),
+            6 => Ok(AluOp::Xor),
+            7 => Ok(AluOp::Cmp),
+            _ => return Err(CpuError::UnsupportedAluOp(value)),
+        }
+    }
 }
