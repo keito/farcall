@@ -1,3 +1,4 @@
+use crate::cpu::mod_rm::ModRmFields;
 use crate::memory::{
     MemoryError, PhysAddr, read_byte, read_far_pointer, read_word, write_byte, write_word,
 };
@@ -1068,122 +1069,14 @@ impl Cpu {
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
-                let destination = self.read_operand(memory, &rm)?;
-                let mut is_cmp = false;
-                let value = match parsed.reg_field {
-                    0 => {
-                        // ADD r/m16,imm16
-                        self.print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
-                        self.add16(destination, immediate, false)
-                    }
-                    1 => {
-                        // OR r/m16,imm16
-                        self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
-                        let result = destination | immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    2 => {
-                        // ADC r/m16,imm16
-                        self.print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
-                        self.add16(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    3 => {
-                        // SBB r/m16,imm16
-                        self.print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
-                        self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    4 => {
-                        // AND r/m16,imm16
-                        self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
-                        let result = destination & immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    5 => {
-                        // SUB r/m16,imm16
-                        self.print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
-                        self.subtract16(destination, immediate, false)
-                    }
-                    6 => {
-                        // XOR r/m16,imm16
-                        self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
-                        let result = destination ^ immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    7 => {
-                        // CMP r/m16,imm16
-                        self.print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
-                        is_cmp = true;
-                        self.subtract16(destination, immediate, false)
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
-                };
-                if !is_cmp {
-                    self.write_operand(memory, &rm, value)?;
-                }
+                self.rm_16_immed_16_ops(memory, byte, parsed, rm, immediate)?;
             }
             0x83 => {
                 // Various things to do with r/m16, immed8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory) as i8 as i16 as u16;
-                let destination = self.read_operand(memory, &rm)?;
-                let mut is_cmp = false;
-                let value = match parsed.reg_field {
-                    0b000 => {
-                        // ADD r/m16, immed8
-                        self.print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
-                        self.add16(destination, immediate, false)
-                    }
-                    0b001 => {
-                        // OR r/m16,imm8
-                        self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
-                        let result = destination | immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    0b010 => {
-                        // ADC r/m16, immed8
-                        self.print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
-                        self.add16(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    0b011 => {
-                        // SBB r/m16, immed8
-                        self.print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
-                        self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    0b100 => {
-                        // AND r/m16,imm8
-                        self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
-                        let result = destination & immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    0b101 => {
-                        // SUB R/M16, IMMED8
-                        self.print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
-                        self.subtract16(destination, immediate, false)
-                    }
-                    0b110 => {
-                        // XOR r/m16,imm8
-                        self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
-                        let result = destination ^ immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    0b111 => {
-                        // CMP R/M16, IMMED8
-                        self.print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
-                        is_cmp = true;
-                        self.subtract16(destination, immediate, false)
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
-                };
-                if !is_cmp {
-                    self.write_operand(memory, &rm, value)?;
-                }
+                self.rm_16_immed_16_ops(memory, byte, parsed, rm, immediate)?;
             }
             0x84 => {
                 // TEST R/M8, REG8
@@ -2899,6 +2792,73 @@ impl Cpu {
             self.set_flag(Flag::Overflow, (value & 0x8000) != 0);
         }
         return result;
+    }
+
+    /// Shared by 0x81 and 0x83, which only differ in the width of the immediate
+    fn rm_16_immed_16_ops(
+        &mut self,
+        memory: &mut [u8],
+        opcode: u8,
+        parsed: ModRmFields,
+        rm: RegisterOrMemoryOperand<Reg16>,
+        immediate: u16,
+    ) -> Result<(), CpuError> {
+        let destination = self.read_operand(memory, &rm)?;
+        let mut is_cmp = false;
+        let value = match parsed.reg_field {
+            0 => {
+                // ADD r/m16,imm16
+                self.print_instruction(opcode, &format_args!("add {}, {:X}h", rm, immediate));
+                self.add16(destination, immediate, false)
+            }
+            1 => {
+                // OR r/m16,imm16
+                self.print_instruction(opcode, &format_args!("or {}, {:X}h", rm, immediate));
+                let result = destination | immediate;
+                self.update_logic_flags(result);
+                result
+            }
+            2 => {
+                // ADC r/m16,imm16
+                self.print_instruction(opcode, &format_args!("adc {}, {:X}h", rm, immediate));
+                self.add16(destination, immediate, self.get_flag(Flag::Carry))
+            }
+            3 => {
+                // SBB r/m16,imm16
+                self.print_instruction(opcode, &format_args!("sbb {}, {:X}h", rm, immediate));
+                self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
+            }
+            4 => {
+                // AND r/m16,imm16
+                self.print_instruction(opcode, &format_args!("and {}, {:X}h", rm, immediate));
+                let result = destination & immediate;
+                self.update_logic_flags(result);
+                result
+            }
+            5 => {
+                // SUB r/m16,imm16
+                self.print_instruction(opcode, &format_args!("sub {}, {:X}h", rm, immediate));
+                self.subtract16(destination, immediate, false)
+            }
+            6 => {
+                // XOR r/m16,imm16
+                self.print_instruction(opcode, &format_args!("xor {}, {:X}h", rm, immediate));
+                let result = destination ^ immediate;
+                self.update_logic_flags(result);
+                result
+            }
+            7 => {
+                // CMP r/m16,imm16
+                self.print_instruction(opcode, &format_args!("cmp {}, {:X}h", rm, immediate));
+                is_cmp = true;
+                self.subtract16(destination, immediate, false)
+            }
+            _ => return Err(CpuError::UnsupportedRegisterField(opcode, parsed.reg_field)),
+        };
+        if !is_cmp {
+            self.write_operand(memory, &rm, value)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn trace(&self) {
