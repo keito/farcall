@@ -46,6 +46,9 @@ impl TextVideo {
             memory[addr] = byte;
             memory[addr + 1] = 0x07;
             self.cursor_column += 1;
+        } else if byte == 0x08 {
+            // Backspace
+            self.cursor_column = self.cursor_column.saturating_sub(1);
         }
 
         if self.cursor_column == NUM_COLUMNS {
