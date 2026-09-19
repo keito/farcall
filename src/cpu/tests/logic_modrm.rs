@@ -52,7 +52,7 @@ impl Operation {
 
 // This is an independent list of guest encodings, not the emulator's dispatch
 // table. In particular, width is explicit rather than inferred from opcode bits.
-// 30 and the logical 83 extensions are not implemented yet.
+// The logical 83 extensions are not implemented yet.
 type Encoding = (u8, Width, Form, Operation);
 const ENCODINGS: &[Encoding] = &[
     (0x08, Width::Byte, Form::RmReg, Operation::Or),
@@ -63,6 +63,7 @@ const ENCODINGS: &[Encoding] = &[
     (0x21, Width::Word, Form::RmReg, Operation::And),
     (0x22, Width::Byte, Form::RegRm, Operation::And),
     (0x23, Width::Word, Form::RegRm, Operation::And),
+    (0x30, Width::Byte, Form::RmReg, Operation::Xor),
     (0x31, Width::Word, Form::RmReg, Operation::Xor),
     (0x32, Width::Byte, Form::RegRm, Operation::Xor),
     (0x33, Width::Word, Form::RegRm, Operation::Xor),

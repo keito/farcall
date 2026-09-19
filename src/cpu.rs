@@ -500,6 +500,22 @@ impl Cpu {
                 let result = self.subtract16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg(dest_reg, result);
             }
+            0x1C => {
+                // SBB AL, IMMED8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("sbb al, {:X}h", operand));
+                let result =
+                    self.subtract8(self.get_reg(Reg8::Al), operand, self.get_flag(Flag::Carry));
+                self.set_reg(Reg8::Al, result);
+            }
+            0x1D => {
+                // SBB AX, IMMED16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("sbb ax, {:X}h", operand));
+                let result =
+                    self.subtract16(self.get_reg(Reg16::Ax), operand, self.get_flag(Flag::Carry));
+                self.set_reg(Reg16::Ax, result);
+            }
             0x1E => {
                 // PUSH DS
                 self.print_instruction(byte, &format_args!("push ds"));
@@ -636,6 +652,18 @@ impl Cpu {
                 let new_val = self.subtract16(self.get_reg(Reg16::Ax), operand, false);
                 self.set_reg(Reg16::Ax, new_val);
             }
+            0x30 => {
+                // XOR R/M8, REG8
+                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
+                self.print_instruction(byte, &format_args!("xor {}, {}", rm, source_reg));
+
+                let reg_value = self.get_reg(source_reg);
+                let rm_value = self.read_operand(memory, &rm)?;
+
+                let value = reg_value ^ rm_value;
+                self.write_operand(memory, &rm, value)?;
+                self.update_logic_flags(value);
+            }
             0x31 => {
                 // XOR REG16/MEM16, REG16
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
@@ -671,6 +699,22 @@ impl Cpu {
                 let value = reg_value ^ rm_value;
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
+            }
+            0x34 => {
+                // XOR AL, IMMED8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("xor al, {:X}h", operand));
+                let result = self.get_reg(Reg8::Al) ^ operand;
+                self.set_reg(Reg8::Al, result);
+                self.update_logic_flags(result);
+            }
+            0x35 => {
+                // XOR AX, IMMED16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("xor ax, {:X}h", operand));
+                let result = self.get_reg(Reg16::Ax) ^ operand;
+                self.set_reg(Reg16::Ax, result);
+                self.update_logic_flags(result);
             }
             0x38 => {
                 // CMP r/m8, r8
