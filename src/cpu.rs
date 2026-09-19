@@ -262,15 +262,18 @@ impl Cpu {
         // Table 4-13
         match byte {
             // Arithmetic
-            0x00 => {
-                // ADD r/m8, r8
+            0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {
+                // ALU ops on r/m8, r8
+                let op = AluOp::try_from((byte >> 3) & 7)?;
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("add {}, {}", rm, source_reg));
+                self.print_instruction(byte, &format_args!("{} {}, {}", op, rm, source_reg));
 
                 let reg_value = self.get_reg(source_reg);
                 let rm_value = self.read_operand(memory, &rm)?;
-                let value = self.add8(reg_value, rm_value, false);
-                self.write_operand(memory, &rm, value)?;
+                let result = self.alu8(op, rm_value, reg_value);
+                if op != AluOp::Cmp {
+                    self.write_operand(memory, &rm, result)?;
+                }
             }
             0x01 => {
                 // ADD r/m16, r16
@@ -334,18 +337,6 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("pop es"));
                 self.es = self.pop_from_stack(memory)?;
             }
-            0x08 => {
-                // OR REG8/MEM8, REG8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("or {}, {}", rm, source_reg));
-
-                let reg_value = self.get_reg(source_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-
-                let value = reg_value | rm_value;
-                self.write_operand(memory, &rm, value)?;
-                self.update_logic_flags(value);
-            }
             0x09 => {
                 // OR REG16/MEM16, REG16
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
@@ -387,15 +378,6 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("push cs"));
                 self.push_onto_stack(memory, self.cs)?;
             }
-            0x10 => {
-                // ADC R/M8,R8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                let source_reg_val = self.get_reg(source_reg);
-                let operand = self.read_operand(memory, &rm)?;
-                self.print_instruction(byte, &format_args!("adc {}, {}", rm, source_reg));
-                let result = self.add8(operand, source_reg_val, self.get_flag(Flag::Carry));
-                self.write_operand(memory, &rm, result)?;
-            }
             0x11 => {
                 // ADC R/M16,R16
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
@@ -433,16 +415,6 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("pop ss"));
                 self.ss = self.pop_from_stack(memory)?;
                 // TODO: delay interrupt recognition until after next instruction
-            }
-            0x18 => {
-                // SBB r/m8, reg8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                let source_reg_val = self.get_reg(source_reg);
-                let operand = self.read_operand(memory, &rm)?;
-
-                self.print_instruction(byte, &format_args!("sbb {}, {}", rm, source_reg));
-                let result = self.subtract8(operand, source_reg_val, self.get_flag(Flag::Carry));
-                self.write_operand(memory, &rm, result)?;
             }
             0x19 => {
                 // SBB r/m16, reg16
@@ -483,15 +455,6 @@ impl Cpu {
                 // POP DS
                 self.print_instruction(byte, &format_args!("pop ds"));
                 self.ds = self.pop_from_stack(memory)?;
-            }
-            0x20 => {
-                // AND r/m8, reg8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("and {}, {}", rm, source_reg));
-                let rm_value = self.read_operand(memory, &rm)?;
-                let result = self.get_reg(source_reg) & rm_value;
-                self.write_operand(memory, &rm, result)?;
-                self.update_logic_flags(result);
             }
             0x21 => {
                 // AND r/m16, reg16
@@ -542,15 +505,6 @@ impl Cpu {
                 self.set_reg(Reg8::Al, result);
                 self.set_result_flags(result);
             }
-            0x28 => {
-                // SUB r/m8, r8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("sub {}, {}", rm, source_reg));
-
-                let rm_value = self.read_operand(memory, &rm)?;
-                let value = self.subtract8(rm_value, self.get_reg(source_reg), false);
-                self.write_operand(memory, &rm, value)?;
-            }
             0x29 => {
                 // SUB r/m16, r16
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
@@ -577,18 +531,6 @@ impl Cpu {
                 let rm_value = self.read_operand(memory, &rm)?;
                 let value = self.subtract16(self.get_reg(dest_reg), rm_value, false);
                 self.set_reg(dest_reg, value);
-            }
-            0x30 => {
-                // XOR R/M8, REG8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("xor {}, {}", rm, source_reg));
-
-                let reg_value = self.get_reg(source_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-
-                let value = reg_value ^ rm_value;
-                self.write_operand(memory, &rm, value)?;
-                self.update_logic_flags(value);
             }
             0x31 => {
                 // XOR REG16/MEM16, REG16
@@ -625,14 +567,6 @@ impl Cpu {
                 let value = reg_value ^ rm_value;
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
-            }
-            0x38 => {
-                // CMP r/m8, r8
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("cmp {}, {}", rm, source_reg));
-
-                let rm_value = self.read_operand(memory, &rm)?;
-                self.subtract8(rm_value, self.get_reg(source_reg), false);
             }
             0x39 => {
                 // CMP r/m16, r16
