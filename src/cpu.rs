@@ -2064,6 +2064,25 @@ impl Cpu {
                             self.write_operand(memory, &rm, result)?;
                         }
                     }
+                    0b111 => {
+                        // SAR r/m16, CL
+                        // Shift right by CL while preserving sign bit and store result in rm
+                        self.print_instruction(byte, &format_args!("sar {}, cl", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let cl = self.get_reg(Reg8::Cl);
+                        if cl != 0 {
+                            let mut result = operand;
+                            let mut carry = false;
+                            for _ in 0..cl {
+                                carry = result & 1 != 0;
+                                result = ((result as i16) >> 1) as u16;
+                            }
+                            self.write_operand(memory, &rm, result)?;
+                            self.set_result_flags(result);
+                            self.set_flag(Flag::Carry, carry);
+                            self.set_flag(Flag::Overflow, false);
+                        }
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
