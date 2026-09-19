@@ -1209,158 +1209,49 @@ impl Cpu {
                 self.cs = self.pop_from_stack(memory)?;
                 self.flags = normalize_flags(self.pop_from_stack(memory)?);
             }
-            0xD0 => {
-                // Shift ops with REG8/MEM8, 1
+            0xD0 | 0xD2 => {
+                // 0xD0: Shift ops with R/M8, 1
+                // 0xD2: Shift ops with R/M8, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let op = ShiftOp::try_from(parsed.reg_field)?;
-                self.print_instruction(byte, &format_args!("{} {}, 1", op, rm));
+                self.print_instruction(
+                    byte,
+                    &format_args!("{} {}, {}", op, rm, if byte == 0xD2 { "cl" } else { "1" }),
+                );
 
                 let operand = self.read_operand(memory, &rm)?;
-                let result = self.shift_op8(op, operand, 1);
-                self.write_operand(memory, &rm, result)?;
-            }
-            0xD1 => {
-                // Does many things with R/M16, 1
-                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
-                match parsed.reg_field {
-                    0b000 => {
-                        // ROL r/m16, 1
-                        self.print_instruction(byte, &format_args!("rol {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let value = operand.rotate_left(1);
-                        self.write_operand(memory, &rm, value)?;
-                        let cf = (operand & 0x8000) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(Flag::Overflow, ((value & 0x8000) != 0) ^ cf);
-                    }
-                    0b001 => {
-                        // ROR r/m16, 1
-                        self.print_instruction(byte, &format_args!("ror {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = operand.rotate_right(1);
-                        self.write_operand(memory, &rm, result)?;
-                        self.set_flag(
-                            Flag::Overflow,
-                            (result & 0x8000 != 0) ^ (result & 0x4000 != 0),
-                        );
-                        self.set_flag(Flag::Carry, result & 0x8000 != 0);
-                    }
-                    0b010 => {
-                        // RCL r/m16, 1
-                        self.print_instruction(byte, &format_args!("rcl {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let wide_val = ((operand as u32) << 1) | self.get_flag(Flag::Carry) as u32;
-                        let result = wide_val as u16;
-                        self.write_operand(memory, &rm, result)?;
-                        let cf = (operand & 0x8000) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(Flag::Overflow, ((result & 0x8000) != 0) ^ cf);
-                    }
-                    0b011 => {
-                        // RCR r/m16, 1
-                        self.print_instruction(byte, &format_args!("rcr {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = (operand >> 1) | (self.get_flag(Flag::Carry) as u16) << 15;
-                        self.write_operand(memory, &rm, result)?;
-                        let cf = (operand & 1) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(
-                            Flag::Overflow,
-                            ((result & 0x8000) != 0) ^ ((result & 0x4000) != 0),
-                        );
-                    }
-                    0b100 => {
-                        // SAL/SHL r/m16, 1
-                        // Shift a 16-bit operand left by 1, and store result in rm
-                        self.print_instruction(byte, &format_args!("shl {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = self.shl16(operand, 1);
-                        self.write_operand(memory, &rm, result)?;
-                    }
-                    0b101 => {
-                        // SHR r/m16, 1
-                        // Shift a 16-bit operand right by 1, and store result in rm
-                        self.print_instruction(byte, &format_args!("shr {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = self.shr16(operand, 1);
-                        self.write_operand(memory, &rm, result)?;
-                    }
-                    0b111 => {
-                        // SAR r/m16, 1
-                        // Shift right by 1 while preserving sign bit and store result in rm
-                        self.print_instruction(byte, &format_args!("sar {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = ((operand as i16) >> 1) as u16;
-                        self.write_operand(memory, &rm, result)?;
-                        self.set_result_flags(result);
-                        self.set_flag(Flag::Carry, operand & 1 != 0);
-                        self.set_flag(Flag::Overflow, false);
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
+                let count = if byte == 0xD2 {
+                    self.get_reg(Reg8::Cl)
+                } else {
+                    1
                 };
-            }
-            0xD2 => {
-                // Shift ops with REG8/MEM8, CL
-                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
-                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
-                let op = ShiftOp::try_from(parsed.reg_field)?;
-                self.print_instruction(byte, &format_args!("{} {}, cl", op, rm));
-
-                let operand = self.read_operand(memory, &rm)?;
-                let cl = self.get_reg(Reg8::Cl);
-                if cl != 0 {
-                    let result = self.shift_op8(op, operand, cl);
+                if count != 0 {
+                    let result = self.shift_op8(op, operand, count);
                     self.write_operand(memory, &rm, result)?;
                 }
             }
-            0xD3 => {
-                // Does many things with R/M16, CL
+            0xD1 | 0xD3 => {
+                // 0xD1: Shift ops with R/M16, 1
+                // 0xD3: Shift ops with R/M16, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
-                match parsed.reg_field {
-                    0b100 => {
-                        // Shift a 16-bit operand left by CL, and store result in rm
-                        self.print_instruction(byte, &format_args!("shl {}, cl", rm));
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let operand = self.read_operand(memory, &rm)?;
-                            let result = self.shl16(operand, cl);
-                            self.write_operand(memory, &rm, result)?;
-                        }
-                    }
-                    0b101 => {
-                        // SHR R/M16, CL
-                        self.print_instruction(byte, &format_args!("shr {}, cl", rm));
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let operand = self.read_operand(memory, &rm)?;
-                            let result = self.shr16(operand, cl);
-                            self.write_operand(memory, &rm, result)?;
-                        }
-                    }
-                    0b111 => {
-                        // SAR r/m16, CL
-                        // Shift right by CL while preserving sign bit and store result in rm
-                        self.print_instruction(byte, &format_args!("sar {}, cl", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let mut result = operand;
-                            let mut carry = false;
-                            for _ in 0..cl {
-                                carry = result & 1 != 0;
-                                result = ((result as i16) >> 1) as u16;
-                            }
-                            self.write_operand(memory, &rm, result)?;
-                            self.set_result_flags(result);
-                            self.set_flag(Flag::Carry, carry);
-                            self.set_flag(Flag::Overflow, false);
-                        }
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
+                let op = ShiftOp::try_from(parsed.reg_field)?;
+                self.print_instruction(
+                    byte,
+                    &format_args!("{} {}, {}", op, rm, if byte == 0xD3 { "cl" } else { "1" }),
+                );
+
+                let operand = self.read_operand(memory, &rm)?;
+                let count = if byte == 0xD3 {
+                    self.get_reg(Reg8::Cl)
+                } else {
+                    1
                 };
+                if count != 0 {
+                    let result = self.shift_op16(op, operand, count);
+                    self.write_operand(memory, &rm, result)?;
+                }
             }
             0xD4 => {
                 // AAM: ASCII Adjust after Multiply
@@ -2165,19 +2056,15 @@ impl Cpu {
                 let result = value.rotate_left(count as u32);
                 let cf = (result & 1) != 0;
                 self.set_flag(Flag::Carry, cf);
-                if count == 1 {
-                    self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ cf);
-                }
+                self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ cf);
                 result
             }
             ShiftOp::Ror => {
                 let result = value.rotate_right(count as u32);
-                if count == 1 {
-                    // XOR of result's bits 7 and 6
-                    self.set_flag(Flag::Overflow, (result & 0x80 != 0) ^ (result & 0x40 != 0));
-                }
                 // Last bit rotated out (i.e., the final result's bit 7)
                 self.set_flag(Flag::Carry, result & 0x80 != 0);
+                // XOR of result's bits 7 and 6
+                self.set_flag(Flag::Overflow, (result & 0x80 != 0) ^ (result & 0x40 != 0));
                 result
             }
             ShiftOp::Rcl => {
@@ -2190,10 +2077,7 @@ impl Cpu {
                     carry = next_carry;
                 }
                 self.set_flag(Flag::Carry, carry);
-                if count == 1 {
-                    // Only defined for count = 1 case
-                    self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ carry);
-                }
+                self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ carry);
                 result
             }
             ShiftOp::Rcr => {
@@ -2206,13 +2090,10 @@ impl Cpu {
                     carry = next_carry;
                 }
                 self.set_flag(Flag::Carry, carry);
-                if count == 1 {
-                    // Only defined for count = 1 case
-                    self.set_flag(
-                        Flag::Overflow,
-                        ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
-                    );
-                }
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
+                );
                 result
             }
             ShiftOp::Shl => self.shl8(value, count), // Shift operand left by count
@@ -2224,6 +2105,69 @@ impl Cpu {
                 for _ in 0..count {
                     carry = result & 1 != 0;
                     result = ((result as i8) >> 1) as u8;
+                }
+                self.set_result_flags(result);
+                self.set_flag(Flag::Carry, carry);
+                self.set_flag(Flag::Overflow, false);
+                result
+            }
+        }
+    }
+
+    fn shift_op16(&mut self, op: ShiftOp, value: u16, count: u8) -> u16 {
+        match op {
+            ShiftOp::Rol => {
+                let result = value.rotate_left(count as u32);
+                let cf = (result & 1) != 0;
+                self.set_flag(Flag::Carry, cf);
+                self.set_flag(Flag::Overflow, ((result & 0x8000) != 0) ^ cf);
+                result
+            }
+            ShiftOp::Ror => {
+                let result = value.rotate_right(count as u32);
+                self.set_flag(Flag::Carry, result & 0x8000 != 0);
+                self.set_flag(
+                    Flag::Overflow,
+                    (result & 0x8000 != 0) ^ (result & 0x4000 != 0),
+                );
+                result
+            }
+            ShiftOp::Rcl => {
+                let mut result = value;
+                let mut carry = self.get_flag(Flag::Carry);
+                for _ in 0..count {
+                    let next_carry = result & 0x8000 != 0;
+                    result = (result << 1) | carry as u16;
+                    carry = next_carry;
+                }
+                self.set_flag(Flag::Carry, carry);
+                self.set_flag(Flag::Overflow, ((result & 0x8000) != 0) ^ carry);
+                result
+            }
+            ShiftOp::Rcr => {
+                let mut result = value;
+                let mut carry = self.get_flag(Flag::Carry);
+                for _ in 0..count {
+                    let next_carry = result & 1 != 0;
+                    result = (result >> 1) | ((carry as u16) << 15);
+                    carry = next_carry;
+                }
+                self.set_flag(Flag::Carry, carry);
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x8000) != 0) ^ ((result & 0x4000) != 0),
+                );
+                result
+            }
+            ShiftOp::Shl => self.shl16(value, count), // Shift value left by count
+            ShiftOp::Shr => self.shr16(value, count), // Shift value right by count
+            ShiftOp::Sar => {
+                // Shift right by count, preserving sign bit
+                let mut result = value;
+                let mut carry = false;
+                for _ in 0..count {
+                    carry = result & 1 != 0;
+                    result = ((result as i16) >> 1) as u16;
                 }
                 self.set_result_flags(result);
                 self.set_flag(Flag::Carry, carry);
