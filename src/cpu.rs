@@ -49,6 +49,8 @@ pub(crate) enum CpuError {
     MemoryError(#[from] MemoryError),
     #[error("Unsupported ALU operation: {0}")]
     UnsupportedAluOp(u8),
+    #[error("Unsupported shift operation: {0}")]
+    UnsupportedShiftOp(u8),
 }
 
 #[allow(dead_code)]
@@ -1208,83 +1210,15 @@ impl Cpu {
                 self.flags = normalize_flags(self.pop_from_stack(memory)?);
             }
             0xD0 => {
-                // Does many things with REG8/MEM8, 1
+                // Shift ops with REG8/MEM8, 1
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
-                match parsed.reg_field {
-                    0 => {
-                        // ROL r/m8, 1
-                        self.print_instruction(byte, &format_args!("rol {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let value = operand.rotate_left(1);
-                        self.write_operand(memory, &rm, value)?;
-                        let cf = (operand & 0x80) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
-                    }
-                    0b001 => {
-                        // ROR r/m8, 1
-                        self.print_instruction(byte, &format_args!("ror {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = operand.rotate_right(1);
-                        self.write_operand(memory, &rm, result)?;
-                        // XOR of result's bits 7 and 6
-                        self.set_flag(Flag::Overflow, (result & 0x80 != 0) ^ (result & 0x40 != 0));
-                        // Last bit rotated out (i.e., the final result's bit 7)
-                        self.set_flag(Flag::Carry, result & 0x80 != 0);
-                    }
-                    0b010 => {
-                        // RCL R/M8, 1
-                        self.print_instruction(byte, &format_args!("rcl {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let wide_val = ((operand as u16) << 1) | self.get_flag(Flag::Carry) as u16;
-                        let result = wide_val as u8;
-                        self.write_operand(memory, &rm, result)?;
-                        let cf = (operand & 0x80) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ cf);
-                    }
-                    0b011 => {
-                        // RCR R/M8, 1
-                        self.print_instruction(byte, &format_args!("rcr {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = (operand >> 1) | (self.get_flag(Flag::Carry) as u8) << 7;
-                        self.write_operand(memory, &rm, result)?;
-                        let cf = (operand & 1) != 0;
-                        self.set_flag(Flag::Carry, cf);
-                        self.set_flag(
-                            Flag::Overflow,
-                            ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
-                        );
-                    }
-                    0b100 => {
-                        // SAL/SHL R/M8, 1
-                        self.print_instruction(byte, &format_args!("shl {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = self.shl8(operand, 1);
-                        self.write_operand(memory, &rm, result)?;
-                    }
-                    0b101 => {
-                        // SHR r/m8, 1
-                        // Shift a 8-bit operand right by 1, and store result in rm
-                        self.print_instruction(byte, &format_args!("shr {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = self.shr8(operand, 1);
-                        self.write_operand(memory, &rm, result)?;
-                    }
-                    0b111 => {
-                        // SAR r/m8, 1
-                        // Shift right by 1 while preserving sign bit and store result in rm
-                        self.print_instruction(byte, &format_args!("sar {}, 1", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let result = ((operand as i8) >> 1) as u8;
-                        self.write_operand(memory, &rm, result)?;
-                        self.set_result_flags(result);
-                        self.set_flag(Flag::Carry, operand & 1 != 0);
-                        self.set_flag(Flag::Overflow, false);
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
-                };
+                let op = ShiftOp::try_from(parsed.reg_field)?;
+                self.print_instruction(byte, &format_args!("{} {}, 1", op, rm));
+
+                let operand = self.read_operand(memory, &rm)?;
+                let result = self.shift_op8(op, operand, 1);
+                self.write_operand(memory, &rm, result)?;
             }
             0xD1 => {
                 // Does many things with R/M16, 1
@@ -1368,71 +1302,18 @@ impl Cpu {
                 };
             }
             0xD2 => {
-                // Does many things with REG8/MEM8, CL
+                // Shift ops with REG8/MEM8, CL
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
-                match parsed.reg_field {
-                    0b001 => {
-                        // ROR R/M8, CL
-                        self.print_instruction(byte, &format_args!("ror {}, cl", rm));
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let operand = self.read_operand(memory, &rm)?;
-                            let result = operand.rotate_right(cl as u32);
-                            self.write_operand(memory, &rm, result)?;
-                            if cl == 1 {
-                                // XOR of result's bits 7 and 6
-                                self.set_flag(
-                                    Flag::Overflow,
-                                    (result & 0x80 != 0) ^ (result & 0x40 != 0),
-                                );
-                            }
-                            // Last bit rotated out (i.e., the final result's bit 7)
-                            self.set_flag(Flag::Carry, result & 0x80 != 0);
-                        }
-                    }
-                    0b100 => {
-                        // Shift an 8-bit operand left by CL, and store result in rm
-                        self.print_instruction(byte, &format_args!("shl {}, cl", rm));
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let operand = self.read_operand(memory, &rm)?;
-                            let result = self.shl8(operand, cl);
-                            self.write_operand(memory, &rm, result)?;
-                        }
-                    }
-                    0b101 => {
-                        // SHR R/M8, CL
-                        self.print_instruction(byte, &format_args!("shr {}, cl", rm));
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let operand = self.read_operand(memory, &rm)?;
-                            let result = self.shr8(operand, cl);
-                            self.write_operand(memory, &rm, result)?;
-                        }
-                    }
-                    0b111 => {
-                        // SAR r/m8, CL
-                        // Shift right by CL while preserving sign bit and store result in rm
-                        self.print_instruction(byte, &format_args!("sar {}, cl", rm));
-                        let operand = self.read_operand(memory, &rm)?;
-                        let cl = self.get_reg(Reg8::Cl);
-                        if cl != 0 {
-                            let mut result = operand;
-                            let mut carry = false;
-                            for _ in 0..cl {
-                                carry = result & 1 != 0;
-                                result = ((result as i8) >> 1) as u8;
-                            }
+                let op = ShiftOp::try_from(parsed.reg_field)?;
+                self.print_instruction(byte, &format_args!("{} {}, cl", op, rm));
 
-                            self.write_operand(memory, &rm, result)?;
-                            self.set_result_flags(result);
-                            self.set_flag(Flag::Carry, carry);
-                            self.set_flag(Flag::Overflow, false);
-                        }
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
-                };
+                let operand = self.read_operand(memory, &rm)?;
+                let cl = self.get_reg(Reg8::Cl);
+                if cl != 0 {
+                    let result = self.shift_op8(op, operand, cl);
+                    self.write_operand(memory, &rm, result)?;
+                }
             }
             0xD3 => {
                 // Does many things with R/M16, CL
@@ -2278,6 +2159,80 @@ impl Cpu {
         }
     }
 
+    fn shift_op8(&mut self, op: ShiftOp, value: u8, count: u8) -> u8 {
+        match op {
+            ShiftOp::Rol => {
+                let result = value.rotate_left(count as u32);
+                let cf = (result & 1) != 0;
+                self.set_flag(Flag::Carry, cf);
+                if count == 1 {
+                    self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ cf);
+                }
+                result
+            }
+            ShiftOp::Ror => {
+                let result = value.rotate_right(count as u32);
+                if count == 1 {
+                    // XOR of result's bits 7 and 6
+                    self.set_flag(Flag::Overflow, (result & 0x80 != 0) ^ (result & 0x40 != 0));
+                }
+                // Last bit rotated out (i.e., the final result's bit 7)
+                self.set_flag(Flag::Carry, result & 0x80 != 0);
+                result
+            }
+            ShiftOp::Rcl => {
+                // Rotate 9 bits (CF,r/m byte) left count times
+                let mut result = value;
+                let mut carry = self.get_flag(Flag::Carry);
+                for _ in 0..count {
+                    let next_carry = result & 0x80 != 0;
+                    result = (result << 1) | carry as u8;
+                    carry = next_carry;
+                }
+                self.set_flag(Flag::Carry, carry);
+                if count == 1 {
+                    // Only defined for count = 1 case
+                    self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ carry);
+                }
+                result
+            }
+            ShiftOp::Rcr => {
+                // Rotate 9 bits (CF,r/m byte) right count times
+                let mut result = value;
+                let mut carry = self.get_flag(Flag::Carry);
+                for _ in 0..count {
+                    let next_carry = result & 1 != 0;
+                    result = (result >> 1) | ((carry as u8) << 7);
+                    carry = next_carry;
+                }
+                self.set_flag(Flag::Carry, carry);
+                if count == 1 {
+                    // Only defined for count = 1 case
+                    self.set_flag(
+                        Flag::Overflow,
+                        ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
+                    );
+                }
+                result
+            }
+            ShiftOp::Shl => self.shl8(value, count), // Shift operand left by count
+            ShiftOp::Shr => self.shr8(value, count), // Shift operand right by count
+            ShiftOp::Sar => {
+                // Shift right by count, preserving sign bit
+                let mut result = value;
+                let mut carry = false;
+                for _ in 0..count {
+                    carry = result & 1 != 0;
+                    result = ((result as i8) >> 1) as u8;
+                }
+                self.set_result_flags(result);
+                self.set_flag(Flag::Carry, carry);
+                self.set_flag(Flag::Overflow, false);
+                result
+            }
+        }
+    }
+
     pub(crate) fn trace(&self) {
         if self.verbosity > 2 {
             eprintln!("\x1b[37m{:?}\x1b[0m", self);
@@ -2360,6 +2315,47 @@ impl TryFrom<u8> for AluOp {
             6 => Ok(AluOp::Xor),
             7 => Ok(AluOp::Cmp),
             _ => return Err(CpuError::UnsupportedAluOp(value)),
+        }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum ShiftOp {
+    Rol = 0,
+    Ror = 1,
+    Rcl = 2,
+    Rcr = 3,
+    Shl = 4,
+    Shr = 5,
+    Sar = 7,
+}
+
+impl Display for ShiftOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ShiftOp::Rol => write!(f, "rol"),
+            ShiftOp::Ror => write!(f, "ror"),
+            ShiftOp::Rcl => write!(f, "rcl"),
+            ShiftOp::Rcr => write!(f, "rcr"),
+            ShiftOp::Shl => write!(f, "shl"),
+            ShiftOp::Shr => write!(f, "shr"),
+            ShiftOp::Sar => write!(f, "sar"),
+        }
+    }
+}
+
+impl TryFrom<u8> for ShiftOp {
+    type Error = CpuError;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ShiftOp::Rol),
+            1 => Ok(ShiftOp::Ror),
+            2 => Ok(ShiftOp::Rcl),
+            3 => Ok(ShiftOp::Rcr),
+            4 => Ok(ShiftOp::Shl),
+            5 => Ok(ShiftOp::Shr),
+            7 => Ok(ShiftOp::Sar),
+            _ => Err(CpuError::UnsupportedShiftOp(value)),
         }
     }
 }
