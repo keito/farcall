@@ -6,7 +6,9 @@ use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::machine::console::PendingInput;
-use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte, write_word};
+use crate::memory::{
+    MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
+};
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
@@ -130,8 +132,12 @@ impl Machine {
         let iret_addr = PhysAddr::new(0xF000, 0x0100);
         write_byte(&mut machine.memory, iret_addr, 0xCF)?; // IRET
         // Put that memory address into IVT
-        write_word(&mut machine.memory, PhysAddr::new(0x0, 9 * 4), 0x0100)?; // Offset
-        write_word(&mut machine.memory, PhysAddr::new(0x0, 9 * 4 + 2), 0xF000)?; // Segment
+        write_word(&mut machine.memory, SegmentedAddr::new(0x0, 9 * 4), 0x0100)?; // Offset
+        write_word(
+            &mut machine.memory,
+            SegmentedAddr::new(0x0, 9 * 4 + 2),
+            0xF000,
+        )?; // Segment
 
         Ok(machine)
     }
@@ -539,7 +545,7 @@ impl Machine {
         }
         let validated_buffer = validate_buffer(
             &mut self.memory,
-            PhysAddr::new(segment, prog_offset as u16),
+            SegmentedAddr::new(segment, prog_offset as u16).to_physical(),
             bytes.len(),
         )?;
         write_buffer(validated_buffer, bytes)?;

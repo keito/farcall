@@ -1,11 +1,11 @@
-use crate::memory::{MemoryError, PhysAddr, read_byte, read_word, write_byte, write_word};
+use crate::memory::{MemoryError, SegmentedAddr, read_byte, read_word, write_byte, write_word};
 
 pub(crate) trait CpuValue: Copy {
     fn is_zero(self) -> bool;
     fn is_negative(self) -> bool;
     fn low_byte(self) -> u8;
-    fn read(memory: &[u8], address: PhysAddr) -> Result<Self, MemoryError>;
-    fn write(self, memory: &mut [u8], address: PhysAddr) -> Result<(), MemoryError>;
+    fn read(memory: &[u8], address: SegmentedAddr) -> Result<Self, MemoryError>;
+    fn write(self, memory: &mut [u8], address: SegmentedAddr) -> Result<(), MemoryError>;
 }
 
 impl CpuValue for u8 {
@@ -21,12 +21,12 @@ impl CpuValue for u8 {
         self
     }
 
-    fn read(memory: &[u8], address: PhysAddr) -> Result<Self, MemoryError> {
-        read_byte(memory, address)
+    fn read(memory: &[u8], address: SegmentedAddr) -> Result<Self, MemoryError> {
+        read_byte(memory, address.to_physical())
     }
 
-    fn write(self, memory: &mut [u8], address: PhysAddr) -> Result<(), MemoryError> {
-        write_byte(memory, address, self)
+    fn write(self, memory: &mut [u8], address: SegmentedAddr) -> Result<(), MemoryError> {
+        write_byte(memory, address.to_physical(), self)
     }
 }
 
@@ -43,11 +43,11 @@ impl CpuValue for u16 {
         self as u8
     }
 
-    fn read(memory: &[u8], address: PhysAddr) -> Result<Self, MemoryError> {
+    fn read(memory: &[u8], address: SegmentedAddr) -> Result<Self, MemoryError> {
         read_word(memory, address)
     }
 
-    fn write(self, memory: &mut [u8], address: PhysAddr) -> Result<(), MemoryError> {
+    fn write(self, memory: &mut [u8], address: SegmentedAddr) -> Result<(), MemoryError> {
         write_word(memory, address, self)
     }
 }

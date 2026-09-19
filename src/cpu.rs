@@ -1,6 +1,7 @@
 use crate::cpu::mod_rm::ModRmFields;
 use crate::memory::{
-    MemoryError, PhysAddr, read_byte, read_far_pointer, read_word, write_byte, write_word,
+    MemoryError, PhysAddr, SegmentedAddr, read_byte, read_far_pointer, read_word, write_byte,
+    write_word,
 };
 use crate::registers::{GeneralReg, Reg8, Reg16, SegmentReg};
 use core::fmt::{self, Debug};
@@ -189,7 +190,7 @@ impl Cpu {
         let value = match operand {
             RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
                 let seg_addr = self.get_segment_reg(*seg_reg);
-                R::Value::read(memory, PhysAddr::new(seg_addr, *addr))?
+                R::Value::read(memory, SegmentedAddr::new(seg_addr, *addr))?
             }
             RegisterOrMemoryOperand::Register(reg) => self.get_reg(*reg),
         };
@@ -205,7 +206,7 @@ impl Cpu {
         match operand {
             RegisterOrMemoryOperand::Memory(seg_reg, addr) => {
                 let seg_addr = self.get_segment_reg(*seg_reg);
-                value.write(memory, PhysAddr::new(seg_addr, *addr))?
+                value.write(memory, SegmentedAddr::new(seg_addr, *addr))?
             }
             RegisterOrMemoryOperand::Register(reg) => self.set_reg(*reg, value),
         };
@@ -1308,7 +1309,7 @@ impl Cpu {
                 let seg = segment_override.unwrap_or(SegmentReg::Ds);
                 self.print_instruction(byte, &format_args!("mov ax, [{}:{:04X}h]", seg, mem_addr));
                 let seg_addr = self.get_segment_reg(seg);
-                let mem_value = read_word(memory, PhysAddr::new(seg_addr, mem_addr))?;
+                let mem_value = read_word(memory, SegmentedAddr::new(seg_addr, mem_addr))?;
                 self.set_reg(Reg16::Ax, mem_value);
             }
             0xA2 => {
@@ -1327,7 +1328,7 @@ impl Cpu {
                 let seg = segment_override.unwrap_or(SegmentReg::Ds);
                 let seg_addr = self.get_segment_reg(seg);
                 self.print_instruction(byte, &format_args!("mov [{}:{:04X}h], ax", seg, mem_addr));
-                write_word(memory, PhysAddr::new(seg_addr, mem_addr), ax)?;
+                write_word(memory, SegmentedAddr::new(seg_addr, mem_addr), ax)?;
             }
             0xA4 => {
                 // MOVSB
@@ -1364,11 +1365,13 @@ impl Cpu {
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
-                    let value =
-                        read_word(memory, PhysAddr::new(self.get_segment_reg(seg), self.si))?;
+                    let value = read_word(
+                        memory,
+                        SegmentedAddr::new(self.get_segment_reg(seg), self.si),
+                    )?;
                     write_word(
                         memory,
-                        PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di),
+                        SegmentedAddr::new(self.get_segment_reg(SegmentReg::Es), self.di),
                         value,
                     )?;
                     if self.get_flag(Flag::Direction) {
@@ -1422,8 +1425,9 @@ impl Cpu {
                 let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let source_seg = segment_override.unwrap_or(SegmentReg::Ds);
-                    let source_addr = PhysAddr::new(self.get_segment_reg(source_seg), self.si);
-                    let dest_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let source_addr = SegmentedAddr::new(self.get_segment_reg(source_seg), self.si);
+                    let dest_addr =
+                        SegmentedAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
                     let source_word = read_word(memory, source_addr)?;
                     let dest_word = read_word(memory, dest_addr)?;
                     self.subtract16(source_word, dest_word, false);
@@ -1494,7 +1498,7 @@ impl Cpu {
                 let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let seg_addr = self.get_segment_reg(SegmentReg::Es);
-                    write_word(memory, PhysAddr::new(seg_addr, self.di), self.ax)?;
+                    write_word(memory, SegmentedAddr::new(seg_addr, self.di), self.ax)?;
                     if self.get_flag(Flag::Direction) {
                         self.di = self.di.wrapping_sub(2);
                     } else {
@@ -1535,7 +1539,7 @@ impl Cpu {
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
                     let seg_addr = self.get_segment_reg(seg);
-                    let word = read_word(memory, PhysAddr::new(seg_addr, self.si))?;
+                    let word = read_word(memory, SegmentedAddr::new(seg_addr, self.si))?;
                     self.set_reg(Reg16::Ax, word);
                     if self.get_flag(Flag::Direction) {
                         self.si = self.si.wrapping_sub(2);
@@ -1582,7 +1586,8 @@ impl Cpu {
                 let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let ax = self.get_reg(Reg16::Ax);
-                    let esdi_addr = PhysAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
+                    let esdi_addr =
+                        SegmentedAddr::new(self.get_segment_reg(SegmentReg::Es), self.di);
                     let esdi_word = read_word(memory, esdi_addr)?;
                     self.subtract16(ax, esdi_word, false);
                     if self.get_flag(Flag::Direction) {
@@ -1702,7 +1707,7 @@ impl Cpu {
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 self.print_instruction(byte, &format_args!("les {}, {}", dest_reg, rm));
                 let seg_addr = self.get_segment_reg(seg_reg);
-                let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                let pointer = read_far_pointer(memory, SegmentedAddr::new(seg_addr, mem_addr))?;
                 self.set_reg(dest_reg, pointer.offset);
                 self.es = pointer.segment;
             }
@@ -1716,7 +1721,7 @@ impl Cpu {
                 let dest_reg = Reg16::try_from(parsed.reg_field)?;
                 self.print_instruction(byte, &format_args!("lds {}, {}", dest_reg, rm));
                 let seg_addr = self.get_segment_reg(seg_reg);
-                let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                let pointer = read_far_pointer(memory, SegmentedAddr::new(seg_addr, mem_addr))?;
                 self.set_reg(dest_reg, pointer.offset);
                 self.ds = pointer.segment;
             }
@@ -2497,7 +2502,8 @@ impl Cpu {
                             return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                         };
                         let seg_addr = self.get_segment_reg(seg_reg);
-                        let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                        let pointer =
+                            read_far_pointer(memory, SegmentedAddr::new(seg_addr, mem_addr))?;
                         self.push_onto_stack(memory, self.cs)?;
                         self.push_onto_stack(memory, self.ip)?;
                         self.cs = pointer.segment;
@@ -2514,7 +2520,8 @@ impl Cpu {
                             return Err(CpuError::UnsupportedRmField(parsed.rm_field));
                         };
                         let seg_addr = self.get_segment_reg(seg_reg);
-                        let pointer = read_far_pointer(memory, seg_addr, mem_addr)?;
+                        let pointer =
+                            read_far_pointer(memory, SegmentedAddr::new(seg_addr, mem_addr))?;
                         let target_ip = pointer.offset;
                         let target_cs = pointer.segment;
                         self.print_instruction(
@@ -2561,8 +2568,8 @@ impl Cpu {
         // Load IP and CS from the interrupt vector table
         let ip_vec_offset = (interrupt as u16) * 4;
         let cs_vec_offset = (interrupt as u16) * 4 + 2;
-        self.ip = read_word(memory, PhysAddr::new(0, ip_vec_offset))?;
-        self.cs = read_word(memory, PhysAddr::new(0, cs_vec_offset))?;
+        self.ip = read_word(memory, SegmentedAddr::new(0, ip_vec_offset))?;
+        self.cs = read_word(memory, SegmentedAddr::new(0, cs_vec_offset))?;
 
         if self.ip == 0 && self.cs == 0 && self.verbosity > 0 {
             eprintln!("Warning: INT {interrupt:02X}h vector points to 0000:0000");
@@ -2579,17 +2586,21 @@ impl Cpu {
 
     fn push_onto_stack(&mut self, memory: &mut [u8], word: u16) -> Result<(), CpuError> {
         self.sp = self.sp.wrapping_sub(2);
-        Ok(write_word(memory, PhysAddr::new(self.ss, self.sp), word)?)
+        Ok(write_word(
+            memory,
+            SegmentedAddr::new(self.ss, self.sp),
+            word,
+        )?)
     }
 
     fn pop_from_stack(&mut self, memory: &[u8]) -> Result<u16, CpuError> {
-        let value = read_word(memory, PhysAddr::new(self.ss, self.sp))?;
+        let value = read_word(memory, SegmentedAddr::new(self.ss, self.sp))?;
         self.sp = self.sp.wrapping_add(2);
         Ok(value)
     }
 
     fn fetch_next_byte_and_advance_ip(&mut self, memory: &[u8]) -> u8 {
-        let phys_addr = PhysAddr::new(self.cs, self.ip);
+        let phys_addr = SegmentedAddr::new(self.cs, self.ip);
         let byte = memory[phys_addr.as_usize()];
         self.ip = self.ip.wrapping_add(1);
         byte

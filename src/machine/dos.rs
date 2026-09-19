@@ -4,7 +4,7 @@ use crate::{
         InterruptResult, Machine, MachineError,
         console::{PendingInput, PendingRead},
     },
-    memory::{PhysAddr, read_buffer, read_byte, validate_buffer},
+    memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer},
     registers::Reg8,
 };
 
@@ -68,9 +68,10 @@ impl Machine {
                 "Unsupported resource".to_string(),
             ));
         }
-        let max_bytes = self.cpu.cx as usize;
-        let dest_buffer = PhysAddr::new(self.cpu.ds, self.cpu.dx);
-        validate_buffer(&mut self.memory, dest_buffer, max_bytes)?;
+        let dest_buffer = normalize_addr(SegmentedAddr::new(self.cpu.ds, self.cpu.dx));
+        // Limit size of write to 0x10000 - offset
+        let max_bytes = (self.cpu.cx as usize).min(0x10000 - dest_buffer.offset as usize);
+        validate_buffer(&mut self.memory, dest_buffer.to_physical(), max_bytes)?;
 
         if max_bytes == 0 {
             // Nothing to read
@@ -89,17 +90,17 @@ impl Machine {
 
     /// Emulates the DOS print string service (INT 21h, AH=09h)
     pub(super) fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let mut phys_addr = PhysAddr::new(self.cpu.ds, self.cpu.dx);
+        let mut segmented_addr = SegmentedAddr::new(self.cpu.ds, self.cpu.dx);
         let mut buf = vec![];
         let mut found_dollar = false;
         for _ in 0..self.memory.len() {
-            let byte = read_byte(&self.memory, phys_addr)?;
+            let byte = read_byte(&self.memory, segmented_addr.to_physical())?;
             if byte == b'$' {
                 found_dollar = true;
                 break;
             }
             buf.push(byte);
-            phys_addr = phys_addr.wrapping_add(1);
+            segmented_addr = segmented_addr.wrapping_add(1);
         }
         if !found_dollar {
             return Err(MachineError::PrintStringServiceError(
@@ -143,8 +144,9 @@ impl Machine {
 
     /// Emulates the DOS write service (INT 21h, AH=40h)
     pub(super) fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let num_bytes = self.cpu.cx as usize;
-        let start_pos = PhysAddr::new(self.cpu.ds, self.cpu.dx);
+        let start_pos = normalize_addr(SegmentedAddr::new(self.cpu.ds, self.cpu.dx));
+        // Limit size of write to 0x10000 - offset
+        let num_bytes = (self.cpu.cx as usize).min(0x10000 - start_pos.offset as usize);
         let dest = self.cpu.bx;
         if dest != 1 {
             return Err(MachineError::WriteServiceError(
@@ -152,7 +154,7 @@ impl Machine {
             ));
         }
 
-        let buffer = read_buffer(&self.memory, start_pos, num_bytes)?;
+        let buffer = read_buffer(&self.memory, start_pos.to_physical(), num_bytes)?;
         for c in &buffer {
             self.text_video.write_char(&mut self.memory, *c)?;
         }
@@ -162,5 +164,15 @@ impl Machine {
         self.cpu.set_flag(Flag::Carry, false);
 
         Ok(InterruptResult::ResumeExecution)
+    }
+}
+
+/// Normalize a segmented address, similar to what DOS 2.0 does, by moving
+/// multiples of 16 from the offset to the segment. This allows more room
+/// for higher offsets in segmented instructions.
+fn normalize_addr(addr: SegmentedAddr) -> SegmentedAddr {
+    SegmentedAddr {
+        segment: addr.segment.wrapping_add(addr.offset >> 4),
+        offset: addr.offset & 0x000F,
     }
 }

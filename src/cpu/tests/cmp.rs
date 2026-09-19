@@ -192,10 +192,10 @@ fn cmp_38_and_39_fetch_prefix_modrm_and_displacement_across_ip_wrap() {
 #[test]
 fn cmp_38_and_39_read_operands_at_segment_and_physical_address_boundaries() {
     for opcode in [0x38, 0x39] {
-        for (segment, offset, address) in [
-            (0x2000, 0xFFFFu16, 0x2FFFF),
-            (0xFFFF, 0x000F, 0xFFFFF),
-            (0xFFFF, 0x0020, 0x00010),
+        for (segment, offset, address, high_address) in [
+            (0x2000, 0xFFFFu16, 0x2FFFF, 0x20000),
+            (0xFFFF, 0x000F, 0xFFFFF, 0x00000),
+            (0xFFFF, 0x0020, 0x00010, 0x00011),
         ] {
             let mut cpu = Cpu::new(0);
             cpu.cs = 0x1000;
@@ -206,7 +206,7 @@ fn cmp_38_and_39_read_operands_at_segment_and_physical_address_boundaries() {
             memory[0x10000..0x10004].copy_from_slice(&[opcode, 0x06, low, high]);
             memory[address] = if opcode == 0x38 { 0x80 } else { 0x00 };
             if opcode == 0x39 {
-                memory[(address + 1) & 0xFFFFF] = 0x80;
+                memory[high_address] = 0x80;
             }
             let original_memory = memory.clone();
             let original_registers = registers(&cpu);

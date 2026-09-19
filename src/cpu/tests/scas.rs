@@ -124,9 +124,11 @@ fn scas_wraps_di_in_both_directions_and_reads_unaligned_words() {
         cpu.di = di;
         cpu.flags = if backwards { 0xFFD7 } else { 0xFBD7 };
         let initial_flags = cpu.flags;
-        // A word beginning at offset FFFF reads its high byte at the next
-        // physical address, while the subsequent DI update wraps at 16 bits.
-        put_operand(&mut memory, opcode, 0x40000 + usize::from(di), 1);
+        // The high byte wraps to ES:0000 when the word starts at ES:FFFF.
+        memory[0x40000 + usize::from(di)] = 1;
+        if opcode == 0xAF {
+            memory[0x40000 + usize::from(di.wrapping_add(1))] = 0;
+        }
         let original_memory = memory.clone();
         let mut expected = registers(&cpu);
         expected[7] = next_di;

@@ -12,6 +12,12 @@ pub(crate) enum MemoryError {
 #[derive(Copy, Clone)]
 pub(crate) struct PhysAddr(u32);
 
+#[derive(Copy, Clone)]
+pub(crate) struct SegmentedAddr {
+    pub(crate) segment: u16,
+    pub(crate) offset: u16,
+}
+
 impl PhysAddr {
     pub(crate) fn new(segment: u16, offset: u16) -> Self {
         Self((((segment as u32) << 4) + (offset as u32)) & 0xFFFFF)
@@ -21,14 +27,41 @@ impl PhysAddr {
         self.0 as usize
     }
 
-    pub(crate) fn wrapping_add(&self, rhs: u16) -> PhysAddr {
+    pub(crate) fn wrapping_add(&self, rhs: u16) -> Self {
         Self((self.0 + (rhs as u32)) & 0xFFFFF)
     }
 }
 
 impl std::fmt::UpperHex for PhysAddr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::UpperHex::fmt(&self.0, f)
+        std::fmt::UpperHex::fmt(&self.as_usize(), f)
+    }
+}
+
+impl SegmentedAddr {
+    pub(crate) fn new(segment: u16, offset: u16) -> Self {
+        Self { segment, offset }
+    }
+
+    pub(crate) fn as_usize(&self) -> usize {
+        ((usize::from(self.segment) << 4) + usize::from(self.offset)) & 0xFFFFF
+    }
+
+    pub(crate) fn wrapping_add(&self, rhs: u16) -> Self {
+        Self {
+            segment: self.segment,
+            offset: self.offset.wrapping_add(rhs),
+        }
+    }
+
+    pub(crate) fn to_physical(&self) -> PhysAddr {
+        PhysAddr::new(self.segment, self.offset)
+    }
+}
+
+impl std::fmt::UpperHex for SegmentedAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::UpperHex::fmt(&self.as_usize(), f)
     }
 }
 
@@ -53,7 +86,7 @@ pub(crate) fn read_byte(memory: &[u8], address: PhysAddr) -> Result<u8, MemoryEr
 
 pub(crate) fn write_word(
     memory: &mut [u8],
-    address: PhysAddr,
+    address: SegmentedAddr,
     value: u16,
 ) -> Result<(), MemoryError> {
     let (byte1, byte2) = calc_word_addr(memory, address)?;
@@ -63,9 +96,19 @@ pub(crate) fn write_word(
     Ok(())
 }
 
-pub(crate) fn read_word(memory: &[u8], address: PhysAddr) -> Result<u16, MemoryError> {
+pub(crate) fn read_word(memory: &[u8], address: SegmentedAddr) -> Result<u16, MemoryError> {
     let (byte1, byte2) = calc_word_addr(memory, address)?;
     Ok(u16::from_le_bytes([memory[byte1], memory[byte2]]))
+}
+
+fn calc_word_addr(memory: &[u8], address: SegmentedAddr) -> Result<(usize, usize), MemoryError> {
+    let byte1 = address.as_usize();
+    // The second byte might wrap inside the segment, and the physical addr at 20-bits
+    let byte2 = address.wrapping_add(1).as_usize();
+    if memory.get(byte1).is_none() || memory.get(byte2).is_none() {
+        return Err(MemoryError::OutOfBoundsAccess(format!("{:#X}", address)));
+    };
+    Ok((byte1, byte2))
 }
 
 pub(crate) fn read_buffer(
@@ -139,22 +182,9 @@ pub(crate) struct FarPointer {
 
 pub(crate) fn read_far_pointer(
     memory: &[u8],
-    seg_addr: u16,
-    mem_addr: u16,
+    segmented_addr: SegmentedAddr,
 ) -> Result<FarPointer, MemoryError> {
-    let words = read_buffer(memory, PhysAddr::new(seg_addr, mem_addr), 4)?;
-    Ok(FarPointer {
-        segment: u16::from_le_bytes([words[2], words[3]]),
-        offset: u16::from_le_bytes([words[0], words[1]]),
-    })
-}
-
-fn calc_word_addr(memory: &[u8], address: PhysAddr) -> Result<(usize, usize), MemoryError> {
-    let byte1 = address.as_usize();
-    // The second byte might wrap
-    let byte2 = address.wrapping_add(1).as_usize();
-    if memory.get(byte1).is_none() || memory.get(byte2).is_none() {
-        return Err(MemoryError::OutOfBoundsAccess(format!("{:#X}", address)));
-    };
-    Ok((byte1, byte2))
+    let offset = read_word(memory, segmented_addr)?;
+    let segment = read_word(memory, segmented_addr.wrapping_add(2))?;
+    Ok(FarPointer { segment, offset })
 }

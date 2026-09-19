@@ -128,7 +128,7 @@ fn adc_13_writes_word_reg_and_sets_flags_for_all_register_pairs() {
 }
 
 // AX/AH = 2, memory = 1, CF = 1: only the selected destination becomes 4.
-fn check_memory(opcode: u8, mut cpu: Cpu, instruction: &[u8], address: usize) {
+fn check_memory(opcode: u8, mut cpu: Cpu, instruction: &[u8], address: usize, high_address: usize) {
     let word = opcode & 1 != 0;
     cpu.ax = if word { 2 } else { 0x025A };
     cpu.flags = 0xFFD7;
@@ -139,7 +139,7 @@ fn check_memory(opcode: u8, mut cpu: Cpu, instruction: &[u8], address: usize) {
     }
     memory[address] = 1;
     if word {
-        memory[(address + 1) & 0xFFFFF] = 0;
+        memory[high_address] = 0;
     }
     let mut expected_memory = memory.clone();
     let mut expected_registers = registers(&cpu);
@@ -194,20 +194,20 @@ fn adc_memory_direction_addressing_and_segment_overrides() {
                     addressing | if opcode & 1 == 0 { 0x20 } else { 0 },
                 ]);
                 instruction.extend_from_slice(displacement);
-                check_memory(opcode, cpu, &instruction, base + offset);
+                check_memory(opcode, cpu, &instruction, base + offset, base + offset + 1);
             }
         }
     }
 }
 
 #[test]
-fn adc_wraps_instruction_fetch_and_operand_physical_addresses() {
+fn adc_wraps_instruction_fetch_operand_offsets_and_physical_addresses() {
     for opcode in 0x10..=0x13 {
         for ip in [0xFFFBu16, 0xFFFC, 0xFFFD, 0xFFFE, 0xFFFF] {
-            for (segment, offset, address) in [
-                (0x2000, 0xFFFFu16, 0x2FFFF),
-                (0xFFFF, 0x000F, 0xFFFFF), // Word's second byte wraps the bus.
-                (0xFFFF, 0x0020, 0x00010),
+            for (segment, offset, address, high_address) in [
+                (0x2000, 0xFFFFu16, 0x2FFFF, 0x20000), // Offset wraps within ES.
+                (0xFFFF, 0x000F, 0xFFFFF, 0x00000),    // Word's second byte wraps the bus.
+                (0xFFFF, 0x0020, 0x00010, 0x00011),
             ] {
                 let mut cpu = Cpu::new(0);
                 cpu.cs = 0x1000;
@@ -215,7 +215,13 @@ fn adc_wraps_instruction_fetch_and_operand_physical_addresses() {
                 cpu.ip = ip;
                 let [low, high] = offset.to_le_bytes();
                 let modrm = if opcode & 1 == 0 { 0x26 } else { 0x06 };
-                check_memory(opcode, cpu, &[0x26, opcode, modrm, low, high], address);
+                check_memory(
+                    opcode,
+                    cpu,
+                    &[0x26, opcode, modrm, low, high],
+                    address,
+                    high_address,
+                );
             }
         }
     }

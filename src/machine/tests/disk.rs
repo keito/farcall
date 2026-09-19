@@ -74,6 +74,44 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
     }
 }
 
+#[test]
+fn int13_read_uses_physical_contiguity_when_the_buffer_offset_crosses_ffff() {
+    // These spellings all name physical 20000h. A 512-byte transfer stays
+    // inside one DMA page, even when the supplied BX crosses FFFFh.
+    // IBM PC BIOS DMA_SETUP translates ES:BX before programming the DMA:
+    // https://github.com/philspil66/IBM-PC-BIOS/blob/main/PCBIOS.ASM#L2631-L2673
+    let image = disk_image(1024);
+    for (es, bx) in [(0x2000, 0x0000), (0x1001, 0xFFF0), (0x1010, 0xFF00)] {
+        let mut machine = machine_with_image(Some(image.clone()));
+        machine.cpu.es = es;
+        machine.cpu.bx = bx;
+        let mut expected_registers = registers(&machine.cpu);
+        expected_registers[0] = 0x0001;
+        let mut expected_memory = machine.memory.clone();
+        expected_memory[0x20000..0x20200].copy_from_slice(&image[512..1024]);
+
+        assert!(matches!(
+            machine.handle_interrupt(0x13).unwrap(),
+            InterruptResult::ResumeExecution
+        ));
+
+        assert_eq!(registers(&machine.cpu), expected_registers);
+        assert_eq!(machine.cpu.flags, 0xFFD6);
+        if let Some(address) = machine
+            .memory
+            .iter()
+            .zip(&expected_memory)
+            .position(|(a, b)| a != b)
+        {
+            panic!(
+                "ES:BX={es:04X}:{bx:04X}: memory at {address:05X} is {:02X}, expected {:02X}; disk data must stay physically contiguous",
+                machine.memory[address], expected_memory[address]
+            );
+        }
+        assert_eq!(machine.floppy_image.as_ref().unwrap().bytes, image);
+    }
+}
+
 fn assert_guest_error(machine: &mut Machine, status: u8, context: &str) {
     let mut expected_registers = registers(&machine.cpu);
     expected_registers[0] = (expected_registers[0] & 0x00FF) | (u16::from(status) << 8);

@@ -1,4 +1,39 @@
-use super::{MemoryError, PhysAddr, read_buffer};
+use crate::memory::read_buffer;
+
+use super::{MemoryError, PhysAddr, SegmentedAddr};
+
+#[test]
+fn physical_address_addition_crosses_64k_and_wraps_only_at_20_bits() {
+    for (segment, offset, increment, expected) in [
+        (0x1234, 0x0005, 0, 0x12345),
+        (0x1234, 0x0005, 3, 0x12348),
+        (0x0000, 0xFFFF, 1, 0x10000), // No 16-bit wrap.
+        (0x2000, 0xFFFF, 1, 0x30000), // Do not wrap back to segment base.
+        (0x2FFF, 0x000F, 1, 0x30000), // Same physical start, different spelling.
+        (0xFFFF, 0x000E, 1, 0xFFFFF),
+        (0xFFFF, 0x000F, 0, 0xFFFFF),
+        (0xFFFF, 0x000F, 1, 0x00000), // Actual bus boundary.
+        (0xFFFF, 0x000E, 4, 0x00002),
+        (0xFFFF, 0x000F, 0xFFFF, 0x0FFFE), // Largest accepted increment.
+        (0xFFFF, 0xFFFF, 1, 0x0FFF0),      // Constructor already wrapped the start.
+    ] {
+        let address = PhysAddr::new(segment, offset);
+        let original = address.as_usize();
+        assert_eq!(
+            address.wrapping_add(increment).as_usize(),
+            expected,
+            "{segment:04X}:{offset:04X} + {increment:04X}"
+        );
+        assert_eq!(
+            address.as_usize(),
+            original,
+            "addition leaves its input intact"
+        );
+    }
+
+    let last = PhysAddr::new(0xFFFF, 0x000F);
+    assert_eq!(last.wrapping_add(1).wrapping_add(1).as_usize(), 1);
+}
 
 #[test]
 fn read_buffer_returns_exactly_the_requested_bytes() {
@@ -15,20 +50,13 @@ fn read_buffer_returns_exactly_the_requested_bytes() {
 }
 
 #[test]
-fn read_buffer_uses_the_translated_address_and_crosses_64k_without_wrapping() {
+fn read_segmented_buffer_uses_the_translated_address() {
     let mut memory = vec![0xCC; 0x12350];
     memory[0x12345..0x12349].copy_from_slice(b"test");
-    memory[0xFFFE..0x10002].copy_from_slice(&[1, 2, 3, 4]);
-    memory[0..2].copy_from_slice(&[0xEE, 0xFF]);
 
     assert_eq!(
         read_buffer(&memory, PhysAddr::new(0x1234, 5), 4).unwrap(),
         b"test"
-    );
-    // Physical addresses continue through 10000h; only the 1 MiB boundary wraps.
-    assert_eq!(
-        read_buffer(&memory, PhysAddr::new(0, 0xFFFE), 4).unwrap(),
-        [1, 2, 3, 4]
     );
 }
 
@@ -54,8 +82,12 @@ fn read_buffer_wraps_at_the_20_bit_boundary() {
 #[test]
 fn read_buffer_with_zero_length_does_not_access_memory() {
     for memory in [&[][..], &[0xAA][..]] {
-        for address in [PhysAddr::new(0, 0), PhysAddr::new(0xFFFF, 0x000F)] {
-            assert!(read_buffer(memory, address, 0).unwrap().is_empty());
+        for address in [SegmentedAddr::new(0, 0), SegmentedAddr::new(0xFFFF, 0x000F)] {
+            assert!(
+                read_buffer(memory, address.to_physical(), 0)
+                    .unwrap()
+                    .is_empty()
+            );
         }
     }
 }

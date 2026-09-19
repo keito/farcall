@@ -1,5 +1,5 @@
 use super::{Cpu, CpuError, CpuStepResult};
-use crate::memory::{MemoryError, PhysAddr};
+use crate::memory::{MemoryError, SegmentedAddr};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -702,6 +702,6 @@ fn physical_address_translation_widens_wraps_and_allows_aliases() {
         (0xFFFF, 0x0010, 0x00000),
         (0xFFFF, 0xFFFF, 0x0FFEF),
     ] {
-        assert_eq!(PhysAddr::new(segment, offset).as_usize(), expected);
+        assert_eq!(SegmentedAddr::new(segment, offset).as_usize(), expected);
     }
 }

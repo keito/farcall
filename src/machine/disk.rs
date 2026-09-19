@@ -1,6 +1,6 @@
 use crate::{
     cpu::Flag,
-    memory::{PhysAddr, validate_buffer, write_buffer},
+    memory::{SegmentedAddr, validate_buffer, write_buffer},
     registers::{Reg8, Reg16, SegmentReg},
 };
 
@@ -76,10 +76,11 @@ impl Machine {
         let cylinder = self.cpu.get_reg(Reg8::Ch) as usize;
         let sector_num = self.cpu.get_reg(Reg8::Cl) as usize;
         let head = self.cpu.get_reg(Reg8::Dh) as usize;
-        let dest = PhysAddr::new(
+        let dest = SegmentedAddr::new(
             self.cpu.get_segment_reg(SegmentReg::Es),
             self.cpu.get_reg(Reg16::Bx),
-        );
+        )
+        .to_physical();
 
         let Some(disk) = &self.floppy_image else {
             self.cpu.set_reg(Reg8::Ah, 0x80);

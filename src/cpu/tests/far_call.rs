@@ -42,7 +42,9 @@ fn check_round_trip(mut cpu: Cpu, mut memory: Vec<u8>, instruction_len: u16) {
         let address = (usize::from(cpu.ss) * 16 + usize::from(offset)) & 0xFFFFF;
         let [low, high] = word.to_le_bytes();
         expected_memory[address] = low;
-        expected_memory[(address + 1) & 0xFFFFF] = high;
+        let high_address =
+            (usize::from(cpu.ss) * 16 + usize::from(offset.wrapping_add(1))) & 0xFFFFF;
+        expected_memory[high_address] = high;
     }
     let mut expected = original;
     expected[4] = next_sp;

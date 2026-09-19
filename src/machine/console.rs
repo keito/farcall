@@ -1,6 +1,6 @@
 use crate::cpu::Flag;
 use crate::machine::MachineStepResult;
-use crate::memory::{PhysAddr, validate_buffer, write_buffer};
+use crate::memory::{SegmentedAddr, validate_buffer, write_buffer};
 use crate::registers::Reg8;
 
 use super::Machine;
@@ -13,7 +13,7 @@ pub(super) enum PendingInput {
 }
 
 pub(super) struct PendingRead {
-    pub(super) destination: PhysAddr,
+    pub(super) destination: SegmentedAddr,
     pub(super) max_bytes: usize,
     pub(super) bytes: Vec<u8>,
 }
@@ -58,7 +58,8 @@ impl Machine {
 
                 // Dequeue at most max_bytes bytes from the read buffer to guest mem
                 let num_bytes = self.console_read_buffer.len().min(read.max_bytes);
-                let buffer = validate_buffer(&mut self.memory, read.destination, num_bytes)?;
+                let buffer =
+                    validate_buffer(&mut self.memory, read.destination.to_physical(), num_bytes)?;
                 write_buffer(
                     buffer,
                     &self.console_read_buffer.make_contiguous()[..num_bytes],

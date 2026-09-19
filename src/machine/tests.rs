@@ -311,6 +311,196 @@ fn ascii_key(byte: u8) -> super::KeyPress {
 }
 
 #[test]
+fn dos_handle_read_normalizes_the_buffer_before_crossing_the_original_offset_boundary() {
+    // DOS 2.0 $Read calls PushDMA/ptr_normalize before transferring data.
+    // https://github.com/microsoft/MS-DOS/blob/main/v2.0/source/XENIX2.ASM#L206-L312
+    // Both pointers normalize to 2000:000F, so three bytes fit without wrapping.
+    for (ds, dx) in [(0x2000, 0x000F), (0x1001, 0xFFFF)] {
+        let mut machine = machine_for_pending_read(3);
+        machine.cpu.ds = ds;
+        machine.cpu.dx = dx;
+        machine.console_read_buffer.extend(b"A\r\n");
+        let mut expected = machine.memory.clone();
+        expected[0x2000F..0x20012].copy_from_slice(b"A\r\n");
+
+        assert!(matches!(
+            machine.read_service().unwrap(),
+            InterruptResult::WaitingForInput
+        ));
+        assert!(matches!(
+            machine.handle_pending_input().unwrap(),
+            MachineStepResult::Continue
+        ));
+
+        assert_eq!(machine.cpu.ax, 3);
+        assert_eq!(machine.cpu.flags, 0x0242);
+        assert_eq!((machine.cpu.ds, machine.cpu.dx), (ds, dx));
+        assert!(machine.pending_input.is_none());
+        assert!(machine.console_read_buffer.is_empty());
+        assert!(
+            machine.memory == expected,
+            "DS:DX={ds:04X}:{dx:04X}: input belongs at 2000Fh–20011h, not at the original segment base"
+        );
+    }
+}
+
+#[test]
+fn dos_handle_write_normalizes_the_buffer_before_crossing_the_original_offset_boundary() {
+    // $Write uses the same normalized pointer as $Read, unlike AH=09h.
+    // https://github.com/microsoft/MS-DOS/blob/main/v2.0/source/XENIX2.ASM#L206-L339
+    for (ds, dx) in [(0x2000, 0x000F), (0x1001, 0xFFFF)] {
+        let mut machine = machine_for_pending_read(2);
+        machine.cpu.ax = 0x4000;
+        machine.cpu.bx = 1;
+        machine.cpu.ds = ds;
+        machine.cpu.dx = dx;
+        machine.memory[0x2000F..0x20011].copy_from_slice(b"AB");
+        machine.memory[0x10010] = b'Z'; // Wrong byte if the original DX wraps.
+        let mut expected = machine.memory.clone();
+        expected[0xB8000] = b'A';
+        expected[0xB8002] = b'B';
+
+        assert!(matches!(
+            machine.write_service().unwrap(),
+            InterruptResult::ResumeExecution
+        ));
+
+        assert_eq!(machine.cpu.ax, 2);
+        assert_eq!(machine.cpu.flags, 0x0242);
+        assert_eq!((machine.cpu.ds, machine.cpu.dx), (ds, dx));
+        assert!(
+            machine.memory == expected,
+            "DS:DX={ds:04X}:{dx:04X}: stdout must receive AB, not AZ"
+        );
+    }
+}
+
+#[test]
+fn dos_dollar_string_keeps_the_original_segment_when_its_offset_wraps() {
+    // AH=09h is different: MOV SI,DX followed by LODSB, with no normalization.
+    // https://github.com/microsoft/MS-DOS/blob/main/v4.0/src/DOS/CPMIO.ASM#L209-L229
+    let mut machine = machine_for_pending_read(0);
+    machine.cpu.ax = 0x0900;
+    machine.cpu.ds = 0x1001;
+    machine.cpu.dx = 0xFFFF;
+    machine.memory[0x2000F] = b'A';
+    machine.memory[0x10010..0x10012].copy_from_slice(b"Z$");
+    machine.memory[0x20010..0x20012].copy_from_slice(b"B$");
+    let mut expected = machine.memory.clone();
+    expected[0xB8000] = b'A';
+    expected[0xB8002] = b'Z';
+
+    assert!(matches!(
+        machine.print_string_service().unwrap(),
+        InterruptResult::ResumeExecution
+    ));
+
+    assert_eq!(machine.cpu.ax, 0x0924);
+    assert_eq!(machine.cpu.flags, 0x0243);
+    assert_eq!((machine.cpu.ds, machine.cpu.dx), (0x1001, 0xFFFF));
+    assert!(
+        machine.memory == expected,
+        "AH=09h should print AZ from the original segment"
+    );
+}
+
+#[test]
+fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment() {
+    // Original DS=1001h; these normalize to 2000:0000, 2000:0001, 2000:000F.
+    // Literal counts cover offset zero, just short of the end, exact end, and excess.
+    for (dx, requested, expected_count, start) in [
+        (0xFFF0, 0xFFFF, 0xFFFF, 0x20000),
+        (0xFFF1, 0xFFFF, 0xFFFF, 0x20001),
+        (0xFFFF, 0xFFF0, 0xFFF0, 0x2000F),
+        (0xFFFF, 0xFFF1, 0xFFF1, 0x2000F),
+        (0xFFFF, 0xFFF2, 0xFFF1, 0x2000F),
+        (0xFFFF, 0xFFFF, 0xFFF1, 0x2000F),
+    ] {
+        let mut machine = machine_for_pending_read(requested);
+        machine.cpu.ds = 0x1001;
+        machine.cpu.dx = dx;
+        // Preloaded input avoids keyboard echo and guest loops.
+        machine
+            .console_read_buffer
+            .extend(vec![b'R'; requested as usize]);
+        let mut expected_memory = machine.memory.clone();
+        expected_memory[start..start + expected_count as usize].fill(b'R');
+
+        assert!(matches!(
+            machine.read_service().unwrap(),
+            InterruptResult::WaitingForInput
+        ));
+        assert!(matches!(
+            machine.handle_pending_input().unwrap(),
+            MachineStepResult::Continue
+        ));
+
+        assert_eq!(
+            machine.cpu.ax, expected_count,
+            "DX={dx:04X}, CX={requested:04X}"
+        );
+        assert_eq!(machine.cpu.cx, requested);
+        assert_eq!((machine.cpu.ds, machine.cpu.dx), (0x1001, dx));
+        assert_eq!(machine.cpu.flags, 0x0242);
+        assert_eq!(
+            machine.console_read_buffer.len(),
+            (requested - expected_count) as usize
+        );
+        assert!(machine.pending_input.is_none());
+        assert!(
+            machine.memory == expected_memory,
+            "write the final allowed byte without wrapping"
+        );
+    }
+}
+
+#[test]
+fn dos_handle_write_length_limit_includes_the_last_byte_of_the_normalized_segment() {
+    for (dx, requested, expected_count, start, prints_last_byte) in [
+        (0xFFF0, 0xFFFF, 0xFFFF, 0x20000, false),
+        (0xFFF1, 0xFFFF, 0xFFFF, 0x20001, true),
+        (0xFFFF, 0xFFF0, 0xFFF0, 0x2000F, false),
+        (0xFFFF, 0xFFF1, 0xFFF1, 0x2000F, true),
+        (0xFFFF, 0xFFF2, 0xFFF1, 0x2000F, true),
+        (0xFFFF, 0xFFFF, 0xFFF1, 0x2000F, true),
+    ] {
+        let mut machine = machine_for_pending_read(requested);
+        machine.cpu.ax = 0x4000;
+        machine.cpu.bx = 1;
+        machine.cpu.ds = 0x1001;
+        machine.cpu.dx = dx;
+        // NUL has no display effect; L identifies the segment's final byte.
+        machine.memory[start..0x30000].fill(0);
+        machine.memory[0x2FFFF] = b'L';
+        machine.memory[0x20000] = b'X'; // Detect wrapping for pointers starting later.
+        if start == 0x20000 {
+            machine.memory[start] = 0;
+        }
+        let mut expected_memory = machine.memory.clone();
+        if prints_last_byte {
+            expected_memory[0xB8000] = b'L';
+        }
+
+        assert!(matches!(
+            machine.write_service().unwrap(),
+            InterruptResult::ResumeExecution
+        ));
+
+        assert_eq!(
+            machine.cpu.ax, expected_count,
+            "DX={dx:04X}, CX={requested:04X}"
+        );
+        assert_eq!(machine.cpu.cx, requested);
+        assert_eq!((machine.cpu.ds, machine.cpu.dx), (0x1001, dx));
+        assert_eq!(machine.cpu.flags, 0x0242);
+        assert!(
+            machine.memory == expected_memory,
+            "consume the final allowed byte, but never wrap"
+        );
+    }
+}
+
+#[test]
 fn dos_read_waits_without_advancing_the_cpu_or_modifying_memory() {
     let mut machine = machine_for_pending_read(64);
     let original_memory = machine.memory.clone();
