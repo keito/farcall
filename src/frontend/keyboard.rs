@@ -1,4 +1,4 @@
-use winit::keyboard::KeyCode;
+use winit::keyboard::{KeyCode, SmolStr};
 
 use crate::machine::KeyPress;
 
@@ -6,65 +6,105 @@ pub(crate) struct ModifierState {
     pub(crate) shift: bool,
     pub(crate) ctrl: bool,
     pub(crate) alt: bool,
-    pub(crate) caps_lock: bool,
 }
 
-pub(crate) fn translate_winit_key(key: KeyCode, shift: bool, caps_lock: bool) -> Option<KeyPress> {
-    let (scan_code, normal, shifted) = match key {
-        KeyCode::KeyA => (0x1E, b'a', b'A'),
-        KeyCode::KeyB => (0x30, b'b', b'B'),
-        KeyCode::KeyC => (0x2E, b'c', b'C'),
-        KeyCode::KeyD => (0x20, b'd', b'D'),
-        KeyCode::KeyE => (0x12, b'e', b'E'),
-        KeyCode::KeyF => (0x21, b'f', b'F'),
-        KeyCode::KeyG => (0x22, b'g', b'G'),
-        KeyCode::KeyH => (0x23, b'h', b'H'),
-        KeyCode::KeyI => (0x17, b'i', b'I'),
-        KeyCode::KeyJ => (0x24, b'j', b'J'),
-        KeyCode::KeyK => (0x25, b'k', b'K'),
-        KeyCode::KeyL => (0x26, b'l', b'L'),
-        KeyCode::KeyM => (0x32, b'm', b'M'),
-        KeyCode::KeyN => (0x31, b'n', b'N'),
-        KeyCode::KeyO => (0x18, b'o', b'O'),
-        KeyCode::KeyP => (0x19, b'p', b'P'),
-        KeyCode::KeyQ => (0x10, b'q', b'Q'),
-        KeyCode::KeyR => (0x13, b'r', b'R'),
-        KeyCode::KeyS => (0x1F, b's', b'S'),
-        KeyCode::KeyT => (0x14, b't', b'T'),
-        KeyCode::KeyU => (0x16, b'u', b'U'),
-        KeyCode::KeyV => (0x2F, b'v', b'V'),
-        KeyCode::KeyW => (0x11, b'w', b'W'),
-        KeyCode::KeyX => (0x2D, b'x', b'X'),
-        KeyCode::KeyY => (0x15, b'y', b'Y'),
-        KeyCode::KeyZ => (0x2C, b'z', b'Z'),
-        KeyCode::Digit1 => (0x02, b'1', b'!'),
-        KeyCode::Digit2 => (0x03, b'2', b'@'),
-        KeyCode::Digit3 => (0x04, b'3', b'#'),
-        KeyCode::Digit4 => (0x05, b'4', b'$'),
-        KeyCode::Digit5 => (0x06, b'5', b'%'),
-        KeyCode::Digit6 => (0x07, b'6', b'^'),
-        KeyCode::Digit7 => (0x08, b'7', b'&'),
-        KeyCode::Digit8 => (0x09, b'8', b'*'),
-        KeyCode::Digit9 => (0x0A, b'9', b'('),
-        KeyCode::Digit0 => (0x0B, b'0', b')'),
-        KeyCode::Minus => (0x0C, b'-', b'_'),
-        KeyCode::Equal => (0x0D, b'=', b'+'),
-        KeyCode::Enter => (0x1C, b'\r', b'\r'),
-        KeyCode::Backspace => (0x0E, 0x08, 0x08),
-        KeyCode::Space => (0x39, b' ', b' '),
-        KeyCode::Escape => (0x01, 0x1B, 0x1B),
-        KeyCode::Tab => (0x0F, 0x09, 0x09),
+pub(crate) fn translate_winit_key(
+    key: KeyCode,
+    text: Option<SmolStr>,
+    shift: bool,
+) -> Option<KeyPress> {
+    // Shift-Tab has no ASCII text
+    if key == KeyCode::Tab && shift {
+        return Some(KeyPress {
+            ascii: None,
+            scan_code: 0x0F,
+        });
+    }
+
+    let (scan_code, scan_code_with_shift) = match key {
+        KeyCode::KeyA => (0x1E, 0x1E),
+        KeyCode::KeyB => (0x30, 0x30),
+        KeyCode::KeyC => (0x2E, 0x2E),
+        KeyCode::KeyD => (0x20, 0x20),
+        KeyCode::KeyE => (0x12, 0x12),
+        KeyCode::KeyF => (0x21, 0x21),
+        KeyCode::KeyG => (0x22, 0x22),
+        KeyCode::KeyH => (0x23, 0x23),
+        KeyCode::KeyI => (0x17, 0x17),
+        KeyCode::KeyJ => (0x24, 0x24),
+        KeyCode::KeyK => (0x25, 0x25),
+        KeyCode::KeyL => (0x26, 0x26),
+        KeyCode::KeyM => (0x32, 0x32),
+        KeyCode::KeyN => (0x31, 0x31),
+        KeyCode::KeyO => (0x18, 0x18),
+        KeyCode::KeyP => (0x19, 0x19),
+        KeyCode::KeyQ => (0x10, 0x10),
+        KeyCode::KeyR => (0x13, 0x13),
+        KeyCode::KeyS => (0x1F, 0x1F),
+        KeyCode::KeyT => (0x14, 0x14),
+        KeyCode::KeyU => (0x16, 0x16),
+        KeyCode::KeyV => (0x2F, 0x2F),
+        KeyCode::KeyW => (0x11, 0x11),
+        KeyCode::KeyX => (0x2D, 0x2D),
+        KeyCode::KeyY => (0x15, 0x15),
+        KeyCode::KeyZ => (0x2C, 0x2C),
+        KeyCode::Digit1 => (0x02, 0x02),
+        KeyCode::Digit2 => (0x03, 0x03),
+        KeyCode::Digit3 => (0x04, 0x04),
+        KeyCode::Digit4 => (0x05, 0x05),
+        KeyCode::Digit5 => (0x06, 0x06),
+        KeyCode::Digit6 => (0x07, 0x07),
+        KeyCode::Digit7 => (0x08, 0x08),
+        KeyCode::Digit8 => (0x09, 0x09),
+        KeyCode::Digit9 => (0x0A, 0x0A),
+        KeyCode::Digit0 => (0x0B, 0x0B),
+        KeyCode::Minus => (0x0C, 0x0C),
+        KeyCode::Equal => (0x0D, 0x0D),
+        KeyCode::Enter => (0x1C, 0x1C),
+        KeyCode::Backspace => (0x0E, 0x0E),
+        KeyCode::Space => (0x39, 0x39),
+        KeyCode::Escape => (0x01, 0x01),
+        KeyCode::Tab => (0x0F, 0x0F),
+        KeyCode::F1 => (0x3B, 0x54),
+        KeyCode::F2 => (0x3C, 0x55),
+        KeyCode::F3 => (0x3D, 0x56),
+        KeyCode::F4 => (0x3E, 0x57),
+        KeyCode::F5 => (0x3F, 0x58),
+        KeyCode::F6 => (0x40, 0x59),
+        KeyCode::F7 => (0x41, 0x5A),
+        KeyCode::F8 => (0x42, 0x5B),
+        KeyCode::F9 => (0x43, 0x5C),
+        KeyCode::F10 => (0x44, 0x5D),
         _ => return None,
     };
 
-    let use_shifted = if normal.is_ascii_alphabetic() {
-        shift ^ caps_lock
-    } else {
-        shift
+    // Make sure dead keys don't register
+    let ascii = match text {
+        Some(t) if t.is_ascii() && t.len() == 1 => Some(t.as_bytes()[0]),
+        None if matches!(
+            key,
+            KeyCode::F1
+                | KeyCode::F2
+                | KeyCode::F3
+                | KeyCode::F4
+                | KeyCode::F5
+                | KeyCode::F6
+                | KeyCode::F7
+                | KeyCode::F8
+                | KeyCode::F9
+                | KeyCode::F10
+        ) =>
+        {
+            None
+        }
+        _ => return None,
     };
 
-    Some(KeyPress {
-        ascii: Some(if use_shifted { shifted } else { normal }),
-        scan_code,
-    })
+    let scan_code = if shift {
+        scan_code_with_shift
+    } else {
+        scan_code
+    };
+
+    Some(KeyPress { ascii, scan_code })
 }

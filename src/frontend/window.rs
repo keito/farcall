@@ -127,20 +127,21 @@ impl ApplicationHandler for App {
                 event,
                 is_synthetic,
             } => {
-                // TODO: handle modifier key press/release
                 if is_synthetic || event.state != ElementState::Pressed {
                     return;
                 }
                 if let PhysicalKey::Code(code) = event.physical_key {
-                    let key = translate_winit_key(
-                        code,
-                        self.modifier_state.shift,
-                        self.modifier_state.caps_lock,
-                    );
+                    let key = translate_winit_key(code, event.text, self.modifier_state.shift);
                     if let Some(key) = key {
                         self.machine.enqueue_input_character(key);
                     }
                 }
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                let state = modifiers.state();
+                self.modifier_state.shift = state.shift_key();
+                self.modifier_state.ctrl = state.control_key();
+                self.modifier_state.alt = state.alt_key();
             }
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -178,7 +179,6 @@ pub(crate) fn run(
             shift: false,
             ctrl: false,
             alt: false,
-            caps_lock: false,
         },
     };
     event_loop.run_app(&mut app)?;
