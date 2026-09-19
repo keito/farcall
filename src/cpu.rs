@@ -1955,6 +1955,18 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x8000) != 0) ^ cf);
                     }
+                    0b001 => {
+                        // ROR r/m16, 1
+                        self.print_instruction(byte, &format_args!("ror {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = operand.rotate_right(1);
+                        self.write_operand(memory, &rm, result)?;
+                        self.set_flag(
+                            Flag::Overflow,
+                            (result & 0x8000 != 0) ^ (result & 0x4000 != 0),
+                        );
+                        self.set_flag(Flag::Carry, result & 0x8000 != 0);
+                    }
                     0b010 => {
                         // RCL r/m16, 1
                         self.print_instruction(byte, &format_args!("rcl {}, 1", rm));
