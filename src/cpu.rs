@@ -1784,6 +1784,16 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
                 self.write_operand(memory, &rm, immediate)?;
             }
+            0xCA => {
+                // Far return (pops IP *and* CS) + immed16
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("retf {:X}h", immediate));
+                let ip = self.pop_from_stack(memory)?;
+                let cs = self.pop_from_stack(memory)?;
+                self.ip = ip;
+                self.cs = cs;
+                self.sp = self.sp.wrapping_add(immediate);
+            }
             0xCB => {
                 // Far return (pops IP *and* CS)
                 self.print_instruction(byte, &format_args!("retf"));
