@@ -2221,6 +2221,16 @@ impl Cpu {
                         self.set_flag(Flag::Carry, upper_half_non_zero);
                         self.set_flag(Flag::Overflow, upper_half_non_zero);
                     }
+                    0b101 => {
+                        // IMUL r/m 8
+                        self.print_instruction(byte, &format_args!("imul {}", rm));
+                        let result = (self.ax as i8 as i16) * (operand as i8 as i16);
+                        self.set_reg(Reg8::Al, result as u8);
+                        self.set_reg(Reg8::Ah, (result >> 8) as u8);
+                        let upper_half_non_zero = !(-128..=127).contains(&result);
+                        self.set_flag(Flag::Carry, upper_half_non_zero);
+                        self.set_flag(Flag::Overflow, upper_half_non_zero);
+                    }
                     0b110 => {
                         // DIV R/M8 (divide AX by r/m8, AL := quotient, AH := remainder)
                         self.print_instruction(byte, &format_args!("div {}", rm));
@@ -2300,7 +2310,16 @@ impl Cpu {
                         self.set_flag(Flag::Carry, upper_half_non_zero);
                         self.set_flag(Flag::Overflow, upper_half_non_zero);
                     }
-                    // 0b101 => 0, // IMUL r/m 16
+                    0b101 => {
+                        // IMUL r/m 16
+                        self.print_instruction(byte, &format_args!("imul {}", rm));
+                        let result = (self.ax as i16 as i32) * (operand as i16 as i32);
+                        self.ax = result as u16;
+                        self.dx = (result >> 16) as u16;
+                        let overflow = !(-32768..=32767).contains(&result);
+                        self.set_flag(Flag::Carry, overflow);
+                        self.set_flag(Flag::Overflow, overflow);
+                    }
                     0b110 => {
                         // DIV r/m 16
                         self.print_instruction(byte, &format_args!("div {}", rm));
@@ -2320,7 +2339,26 @@ impl Cpu {
                         self.ax = quotient as u16;
                         self.dx = remainder as u16;
                     }
-                    // 0b111 => 0, // IDIV r/m 16
+                    0b111 => {
+                        // IDIV r/m 16
+                        self.print_instruction(byte, &format_args!("idiv {}", rm));
+                        let dx = self.get_reg(Reg16::Dx);
+                        let ax = self.get_reg(Reg16::Ax);
+                        let dividend = (((dx as u32) << 16) | ax as u32) as i32 as i64;
+                        let divisor = operand as i16 as i64;
+                        if divisor == 0 {
+                            // Trigger interrupt 0
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let quotient = dividend / divisor;
+                        // 8086 quirk
+                        if !(-32767..=32767).contains(&quotient) {
+                            return Ok(CpuStepResult::Interrupt(0));
+                        }
+                        let remainder = dividend % divisor;
+                        self.ax = quotient as u16;
+                        self.dx = remainder as u16;
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 }
             }

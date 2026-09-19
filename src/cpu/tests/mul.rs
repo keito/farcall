@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn assert_mul_flags(actual: u16, initial: u16, expected_cf_of: u16) {
-    // MUL defines CF/OF; SF/ZF/AF/PF are undefined, so do not constrain them.
+    // MUL/IMUL define CF/OF; SF/ZF/AF/PF are undefined, so do not constrain them.
     assert_eq!(actual & 0x0801, expected_cf_of);
     assert_eq!(
         actual & !0x08D5,
@@ -340,5 +340,150 @@ fn mul_word_memory_errors_preserve_registers_flags_and_memory() {
         assert_eq!(registers(&cpu), original_registers);
         assert_eq!(cpu.flags, 0x0FD7);
         assert_eq!(memory, original_memory);
+    }
+}
+
+#[test]
+fn imul_byte_computes_every_signed_product_and_sets_or_clears_cf_of() {
+    for lhs in -128i16..=127 {
+        for rhs in -128i16..=127 {
+            for flags in [0x0000, 0x0FD7] {
+                let mut cpu = Cpu::new(0);
+                cpu.ax = 0xAB00 | u16::from(lhs as u8); // Ignore old AH.
+                cpu.bx = 0xCD00 | u16::from(rhs as u8);
+                cpu.dx = 0xDEAD;
+                cpu.flags = flags;
+                let product = lhs * rhs;
+                let mut expected = registers(&cpu);
+                expected[0] = product as u16;
+                let mut memory = [0xF6, 0xEB]; // IMUL BL.
+
+                assert!(matches!(
+                    cpu.step(&mut memory).unwrap(),
+                    CpuStepResult::Continue
+                ));
+
+                assert_eq!(registers(&cpu), expected, "{lhs} * {rhs}");
+                // CF/OF say whether retaining only AL would lose the signed value.
+                let fits = i8::try_from(product).is_ok();
+                assert_mul_flags(cpu.flags, flags, if fits { 0 } else { 0x0801 });
+                assert_eq!(cpu.ip, 2);
+                assert_eq!(memory, [0xF6, 0xEB]);
+            }
+        }
+    }
+}
+
+#[test]
+fn imul_word_signed_products_and_overflow_boundaries() {
+    for (ax, bx, dx, low, cf_of) in [
+        (0x0000, 0x8000, 0x0000, 0x0000, 0),
+        (0xFFFF, 0x0001, 0xFFFF, 0xFFFF, 0), // -1 * 1 fits, despite DX=FFFF.
+        (0xFFFF, 0xFFFF, 0x0000, 0x0001, 0),
+        (0x0007, 0xFFFD, 0xFFFF, 0xFFEB, 0), // 7 * -3 = -21.
+        (0x7FFF, 0x0001, 0x0000, 0x7FFF, 0),
+        (0x8000, 0x0001, 0xFFFF, 0x8000, 0), // -32768 fits for IMUL.
+        (0x4000, 0x0002, 0x0000, 0x8000, 0x0801), // +32768 does not.
+        (0x8000, 0xFFFF, 0x0000, 0x8000, 0x0801),
+        (0xD555, 0x0003, 0xFFFF, 0x7FFF, 0x0801), // -10923 * 3 = -32769.
+        (0x7FFF, 0x0002, 0x0000, 0xFFFE, 0x0801),
+        (0x8000, 0x8000, 0x4000, 0x0000, 0x0801),
+        (0x8000, 0x7FFF, 0xC000, 0x8000, 0x0801),
+    ] {
+        for flags in [0x0000, 0x0FD7] {
+            let mut cpu = Cpu::new(0);
+            cpu.ax = ax;
+            cpu.bx = bx;
+            cpu.dx = 0xDEAD; // The old DX does not contribute to the product.
+            cpu.flags = flags;
+            let mut expected = registers(&cpu);
+            expected[0] = low;
+            expected[2] = dx;
+            let mut memory = [0xF7, 0xEB]; // IMUL BX.
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(registers(&cpu), expected, "AX={ax:04X}, BX={bx:04X}");
+            assert_mul_flags(cpu.flags, flags, cf_of);
+            assert_eq!(cpu.ip, 2);
+            assert_eq!(memory, [0xF7, 0xEB]);
+        }
+    }
+}
+
+#[test]
+fn imul_reads_overlapping_source_registers_before_writing_the_product() {
+    for (opcode, mod_rm, ax, dx, expected_ax, expected_dx, cf_of) in [
+        (0xF6, 0xE8, 0x12FD, 0xBEEF, 0x0009, 0xBEEF, 0), // IMUL AL: -3 * -3.
+        (0xF6, 0xEC, 0xFEFD, 0xBEEF, 0x0006, 0xBEEF, 0), // IMUL AH: -3 * -2.
+        (0xF7, 0xE8, 0xFFFD, 0xBEEF, 0x0009, 0x0000, 0), // IMUL AX.
+        (0xF7, 0xEA, 0xFFFD, 0xFFFE, 0x0006, 0x0000, 0), // IMUL DX.
+        (0xF7, 0xEA, 0x8000, 0x0002, 0x0000, 0xFFFF, 0x0801),
+    ] {
+        let mut cpu = Cpu::new(0);
+        cpu.ax = ax;
+        cpu.dx = dx;
+        cpu.flags = 0x0FD7;
+        let mut expected = registers(&cpu);
+        expected[0] = expected_ax;
+        expected[2] = expected_dx;
+        let mut memory = [opcode, mod_rm];
+
+        assert!(matches!(
+            cpu.step(&mut memory).unwrap(),
+            CpuStepResult::Continue
+        ));
+
+        assert_eq!(registers(&cpu), expected);
+        assert_mul_flags(cpu.flags, 0x0FD7, cf_of);
+        assert_eq!(cpu.ip, 2);
+        assert_eq!(memory, [opcode, mod_rm]);
+    }
+}
+
+#[test]
+fn imul_memory_operands_use_the_right_width_segment_and_wrapping() {
+    for opcode in [0xF6, 0xF7] {
+        for (instruction, ds, address) in [
+            (vec![opcode, 0x2C], 0x1000, 0x10800),             // [SI], DS.
+            (vec![opcode, 0x6E, 0xFE], 0x1000, 0x207FE),       // [BP-2], SS.
+            (vec![0x26, opcode, 0x6E, 0xFE], 0x1000, 0x307FE), // ES overrides SS.
+            (vec![opcode, 0xAC, 0x00, 0xF8], 0x1000, 0x10000), // SI+F800 wraps.
+            (vec![opcode, 0x2E, 0x0F, 0x00], 0xFFFF, 0xFFFFF), // Bus boundary.
+        ] {
+            let mut cpu = Cpu::new(0);
+            cpu.ax = if opcode == 0xF6 { 0xABFD } else { 0xFFFD }; // -3.
+            cpu.dx = 0xBEEF;
+            cpu.ds = ds;
+            cpu.ss = 0x2000;
+            cpu.es = 0x3000;
+            cpu.si = 0x0800;
+            cpu.bp = 0x0800;
+            cpu.ip = 0x0100;
+            cpu.flags = 0x0FD7;
+            let mut expected = registers(&cpu);
+            expected[0] = if opcode == 0xF6 { 6 } else { 0xFD06 };
+            if opcode == 0xF7 {
+                expected[2] = 0xFFFF; // -3 * 00FEh = -762.
+            }
+            let mut memory = vec![0xCC; 0x100000];
+            memory[0x100..0x100 + instruction.len()].copy_from_slice(&instruction);
+            memory[address] = 0xFE; // Byte -2, but word +254: catches wrong width.
+            memory[(address + 1) & 0xFFFFF] = 0;
+            let original = memory.clone();
+
+            assert!(matches!(
+                cpu.step(&mut memory).unwrap(),
+                CpuStepResult::Continue
+            ));
+
+            assert_eq!(registers(&cpu), expected, "{instruction:02X?}");
+            assert_mul_flags(cpu.flags, 0x0FD7, 0);
+            assert_eq!(cpu.ip, 0x100 + instruction.len() as u16);
+            assert!(memory == original);
+        }
     }
 }
