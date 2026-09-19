@@ -12,6 +12,8 @@ const BYTES_PER_PIXEL: usize = 4;
 pub(super) struct TextVideo {
     cursor_column: usize,
     cursor_row: usize,
+    start_scan_line: usize,
+    end_scan_line: usize,
 }
 
 impl TextVideo {
@@ -19,7 +21,22 @@ impl TextVideo {
         Self {
             cursor_column: 0,
             cursor_row: 0,
+            start_scan_line: 6,
+            end_scan_line: 7,
         }
+    }
+
+    pub(super) fn set_scan_lines(&mut self, start_scan_line: usize, end_scan_line: usize) {
+        self.start_scan_line = start_scan_line;
+        self.end_scan_line = end_scan_line;
+    }
+
+    pub(super) fn get_scan_lines(&self) -> (usize, usize) {
+        (self.start_scan_line, self.end_scan_line)
+    }
+
+    pub(super) fn get_cursor(&self) -> (usize, usize) {
+        (self.cursor_column, self.cursor_row)
     }
 
     pub(super) fn clear(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {

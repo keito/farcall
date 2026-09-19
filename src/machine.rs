@@ -157,7 +157,30 @@ impl Machine {
         match op {
             // Set text cursor shape
             0x1 => {
-                // TODO: Noop for now
+                self.text_video.set_scan_lines(
+                    self.cpu.get_reg(Reg8::Ch) as usize,
+                    self.cpu.get_reg(Reg8::Cl) as usize,
+                );
+                Ok(InterruptResult::ResumeExecution)
+            }
+            // Read Cursor Position, Size, and Shape
+            0x3 => {
+                let display_page = self.cpu.get_reg(Reg8::Bh);
+                if display_page != 0 {
+                    return Err(MachineError::VideoServiceError(format!(
+                        "Unsupported display page: {:#X}h",
+                        display_page
+                    )));
+                }
+
+                let scan_lines = self.text_video.get_scan_lines();
+                self.cpu.set_reg(Reg8::Ch, scan_lines.0 as u8);
+                self.cpu.set_reg(Reg8::Cl, scan_lines.1 as u8);
+
+                let (column, row) = self.text_video.get_cursor();
+                self.cpu.set_reg(Reg8::Dh, row as u8);
+                self.cpu.set_reg(Reg8::Dl, column as u8);
+
                 Ok(InterruptResult::ResumeExecution)
             }
             // BIOS character output
