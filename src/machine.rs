@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::machine::console::PendingInput;
-use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte};
+use crate::memory::{MemoryError, PhysAddr, validate_buffer, write_buffer, write_byte, write_word};
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
@@ -31,6 +31,7 @@ pub struct Machine {
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
     keyboard_buffer: VecDeque<KeyPress>,
+    keyboard_irq_pending: bool,
     load_mode: LoadMode,
     memory: Vec<u8>,
     /// What kind of input we're pending
@@ -108,6 +109,7 @@ impl Machine {
             ],
             floppy_image: None,
             keyboard_buffer: VecDeque::new(),
+            keyboard_irq_pending: false,
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
@@ -123,6 +125,14 @@ impl Machine {
             LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
         }
 
+        // Create a stub entry in the Interrupt Vector Table for INT 09h
+        // TODO: Do this properly
+        let iret_addr = PhysAddr::new(0xF000, 0x0100);
+        write_byte(&mut machine.memory, iret_addr, 0xCF)?; // IRET
+        // Put that memory address into IVT
+        write_word(&mut machine.memory, PhysAddr::new(0x0, 9 * 4), 0x0100)?; // Offset
+        write_word(&mut machine.memory, PhysAddr::new(0x0, 9 * 4 + 2), 0xF000)?; // Segment
+
         Ok(machine)
     }
 
@@ -132,6 +142,7 @@ impl Machine {
 
     pub fn enqueue_input_character(&mut self, key: KeyPress) {
         self.keyboard_buffer.push_back(key);
+        self.keyboard_irq_pending = true;
     }
 
     /// Emulates the DOS termination service
@@ -440,6 +451,12 @@ impl Machine {
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         if self.pending_input.is_some() {
             return self.handle_pending_input();
+        }
+
+        // Deliver keyboard IRQ
+        if self.keyboard_irq_pending && self.cpu.get_flag(Flag::InterruptEnable) {
+            self.keyboard_irq_pending = false;
+            self.cpu.enter_interrupt(&mut self.memory, 0x09)?;
         }
 
         let result = self.cpu.step(&mut self.memory)?;

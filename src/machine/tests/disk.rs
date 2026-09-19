@@ -68,6 +68,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         load_mode: LoadMode::Boot,
         pending_input: None,
         keyboard_buffer: Default::default(),
+        keyboard_irq_pending: false,
         console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
     }
