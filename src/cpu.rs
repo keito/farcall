@@ -860,7 +860,7 @@ impl Cpu {
                 self.di = self.pop_from_stack(memory)?;
             }
             // Jumps
-            0x70 => {
+            0x60 | 0x70 => {
                 // Jump if Overflow
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jo {:X}h", operand));
@@ -868,7 +868,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x71 => {
+            0x61 | 0x71 => {
                 // Jump if No Overflow
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jno {:X}h", operand));
@@ -876,7 +876,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x72 => {
+            0x62 | 0x72 => {
                 // Jump if Below
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jb {:X}h", operand));
@@ -885,7 +885,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x73 => {
+            0x63 | 0x73 => {
                 // JAE/JNC/JNB
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jae {:X}h", operand));
@@ -894,7 +894,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x74 => {
+            0x64 | 0x74 => {
                 // JE/JZ
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("je short {:X}h", operand));
@@ -903,7 +903,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x75 => {
+            0x65 | 0x75 => {
                 // JNE/JNZ
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jnz short {:X}h", operand));
@@ -912,7 +912,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x76 => {
+            0x66 | 0x76 => {
                 // JBE/JNA (jump if below or equal)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jbe short {:X}h", operand));
@@ -921,7 +921,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x77 => {
+            0x67 | 0x77 => {
                 // Jump if Above
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("ja {:X}h", operand));
@@ -930,7 +930,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x78 => {
+            0x68 | 0x78 => {
                 // JS (jump if sign)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("js {:X}h", operand));
@@ -938,7 +938,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x79 => {
+            0x69 | 0x79 => {
                 // JNS (jump if not sign)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jns {:X}h", operand));
@@ -946,7 +946,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7A => {
+            0x6A | 0x7A => {
                 // JP (jump if parity)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jp {:X}h", operand));
@@ -954,7 +954,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7B => {
+            0x6B | 0x7B => {
                 // JNP (jump if not parity)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jnp {:X}h", operand));
@@ -962,7 +962,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7C => {
+            0x6C | 0x7C => {
                 // JL/JNGE (jump if signed less-than)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jl {:X}h", operand));
@@ -971,7 +971,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7D => {
+            0x6D | 0x7D => {
                 // JNL/JGE (jump if not signed less-than)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jnl {:X}h", operand));
@@ -980,7 +980,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7E => {
+            0x6E | 0x7E => {
                 // JLE/JNG
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jle {:X}h", operand));
@@ -991,7 +991,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x7F => {
+            0x6F | 0x7F => {
                 // JNLE/JG (jump if not less than or equal)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jg {:X}h", operand));
@@ -1137,6 +1137,13 @@ impl Cpu {
                         self.print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
                         self.add16(destination, immediate, false)
                     }
+                    0b001 => {
+                        // OR r/m16,imm8
+                        self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
+                        let result = destination | immediate;
+                        self.update_logic_flags(result);
+                        result
+                    }
                     0b010 => {
                         // ADC r/m16, immed8
                         self.print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
@@ -1147,10 +1154,24 @@ impl Cpu {
                         self.print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
                         self.subtract16(destination, immediate, self.get_flag(Flag::Carry))
                     }
+                    0b100 => {
+                        // AND r/m16,imm8
+                        self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
+                        let result = destination & immediate;
+                        self.update_logic_flags(result);
+                        result
+                    }
                     0b101 => {
                         // SUB R/M16, IMMED8
                         self.print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
                         self.subtract16(destination, immediate, false)
+                    }
+                    0b110 => {
+                        // XOR r/m16,imm8
+                        self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
+                        let result = destination ^ immediate;
+                        self.update_logic_flags(result);
+                        result
                     }
                     0b111 => {
                         // CMP R/M16, IMMED8
