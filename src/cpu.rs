@@ -1418,8 +1418,8 @@ impl Cpu {
             0xA4 => {
                 // MOVSB
                 self.print_instruction(byte, &format_args!("movsb"));
-                // Repeat if REP prefix was set
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // Repeat if REP prefix was set (actual hardware treats F2/F3 interchangeably)
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
@@ -1437,7 +1437,7 @@ impl Cpu {
                         self.di = self.di.wrapping_add(1);
                         self.si = self.si.wrapping_add(1);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
@@ -1445,8 +1445,8 @@ impl Cpu {
             0xA5 => {
                 // MOVSW
                 self.print_instruction(byte, &format_args!("movsw"));
-                // Repeat if REP prefix was set
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // Repeat if REP prefix was set (actual hardware treats F2/F3 interchangeably)
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
@@ -1464,7 +1464,7 @@ impl Cpu {
                         self.di = self.di.wrapping_add(2);
                         self.si = self.si.wrapping_add(2);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
@@ -1554,7 +1554,8 @@ impl Cpu {
             0xAA => {
                 // STOSB ("store string byte")
                 self.print_instruction(byte, &format_args!("stosb"));
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // Documentation says only F3 works, but actual hardware allows F2
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let seg_addr = self.get_segment_reg(SegmentReg::Es);
                     write_byte(
@@ -1567,7 +1568,7 @@ impl Cpu {
                     } else {
                         self.di = self.di.wrapping_add(1);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
@@ -1575,7 +1576,8 @@ impl Cpu {
             0xAB => {
                 // STOSW ("store string word")
                 self.print_instruction(byte, &format_args!("stosw"));
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // Documentation says only F3 works, but actual hardware allows F2
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 for _ in 0..reps {
                     let seg_addr = self.get_segment_reg(SegmentReg::Es);
                     write_word(memory, PhysAddr::new(seg_addr, self.di), self.ax)?;
@@ -1584,7 +1586,7 @@ impl Cpu {
                     } else {
                         self.di = self.di.wrapping_add(2);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
@@ -1592,8 +1594,8 @@ impl Cpu {
             0xAC => {
                 // LODSB
                 self.print_instruction(byte, &format_args!("lodsb"));
-                // Repeat if REP prefix was set
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                // Repeat if REP prefix was set (actual hardware supports F3/F2)
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
@@ -1605,7 +1607,7 @@ impl Cpu {
                     } else {
                         self.si = self.si.wrapping_add(1);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
@@ -1614,7 +1616,7 @@ impl Cpu {
                 // LODSW
                 self.print_instruction(byte, &format_args!("lodsw"));
                 // Repeat if REP prefix was set
-                let reps = if rep_prefix == Some(0xF3) { self.cx } else { 1 };
+                let reps = if rep_prefix.is_some() { self.cx } else { 1 };
                 // TODO: Support interrupt/resume between repetitions
                 for _ in 0..reps {
                     let seg = segment_override.unwrap_or(SegmentReg::Ds);
@@ -1626,7 +1628,7 @@ impl Cpu {
                     } else {
                         self.si = self.si.wrapping_add(2);
                     }
-                    if rep_prefix == Some(0xF3) {
+                    if rep_prefix.is_some() {
                         self.cx = self.cx.wrapping_sub(1);
                     }
                 }
