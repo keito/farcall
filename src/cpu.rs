@@ -1874,6 +1874,41 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((value & 0x80) != 0) ^ cf);
                     }
+                    0b001 => {
+                        // ROR r/m8, 1
+                        self.print_instruction(byte, &format_args!("ror {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = operand.rotate_right(1);
+                        self.write_operand(memory, &rm, result)?;
+                        // XOR of result's bits 7 and 6
+                        self.set_flag(Flag::Overflow, (result & 0x80 != 0) ^ (result & 0x40 != 0));
+                        // Last bit rotated out (i.e., the final result's bit 7)
+                        self.set_flag(Flag::Carry, result & 0x80 != 0);
+                    }
+                    0b010 => {
+                        // RCL R/M8, 1
+                        self.print_instruction(byte, &format_args!("rcl {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let wide_val = ((operand as u16) << 1) | self.get_flag(Flag::Carry) as u16;
+                        let result = wide_val as u8;
+                        self.write_operand(memory, &rm, result)?;
+                        let cf = (operand & 0x80) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(Flag::Overflow, ((result & 0x80) != 0) ^ cf);
+                    }
+                    0b011 => {
+                        // RCR R/M8, 1
+                        self.print_instruction(byte, &format_args!("rcr {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = (operand >> 1) | (self.get_flag(Flag::Carry) as u8) << 7;
+                        self.write_operand(memory, &rm, result)?;
+                        let cf = (operand & 1) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(
+                            Flag::Overflow,
+                            ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
+                        );
+                    }
                     0b100 => {
                         // SAL/SHL R/M8, 1
                         self.print_instruction(byte, &format_args!("shl {}, 1", rm));
