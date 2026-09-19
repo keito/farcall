@@ -1920,88 +1920,6 @@ impl Cpu {
         self.set_result_flags(new_value);
     }
 
-    fn shl8(&mut self, value: u8, count: u8) -> u8 {
-        if count == 0 {
-            return value;
-        }
-        let mut result = value;
-        let mut last_bit_7 = false;
-        for _ in 0..count {
-            last_bit_7 = (result & 0x80) != 0;
-            result = result << 1;
-        }
-        self.set_result_flags(result);
-        // Last bit shifted out of bit 7
-        self.set_flag(Flag::Carry, last_bit_7);
-        if count == 1 {
-            self.set_flag(
-                Flag::Overflow,
-                ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
-            )
-        }
-        return result;
-    }
-
-    fn shl16(&mut self, value: u16, count: u8) -> u16 {
-        if count == 0 {
-            return value;
-        }
-        let mut result = value;
-        let mut last_bit_15 = false;
-        for _ in 0..count {
-            last_bit_15 = (result & 0x8000) != 0;
-            result = result << 1;
-        }
-        self.set_result_flags(result);
-        // Last bit shifted out of bit 15
-        self.set_flag(Flag::Carry, last_bit_15);
-        if count == 1 {
-            self.set_flag(
-                Flag::Overflow,
-                ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
-            )
-        }
-        return result;
-    }
-
-    fn shr8(&mut self, value: u8, count: u8) -> u8 {
-        if count == 0 {
-            return value;
-        }
-        let mut result = value;
-        let mut last_bit_0 = false;
-        for _ in 0..count {
-            last_bit_0 = (result & 1) != 0;
-            result >>= 1;
-        }
-        self.set_result_flags(result);
-        // Last bit shifted out of bit 0
-        self.set_flag(Flag::Carry, last_bit_0);
-        if count == 1 {
-            self.set_flag(Flag::Overflow, (value & 0x80) != 0);
-        }
-        return result;
-    }
-
-    fn shr16(&mut self, value: u16, count: u8) -> u16 {
-        if count == 0 {
-            return value;
-        }
-        let mut result = value;
-        let mut last_bit_0 = false;
-        for _ in 0..count {
-            last_bit_0 = (result & 1) != 0;
-            result >>= 1;
-        }
-        self.set_result_flags(result);
-        // Last bit shifted out of bit 0
-        self.set_flag(Flag::Carry, last_bit_0);
-        if count == 1 {
-            self.set_flag(Flag::Overflow, (value & 0x8000) != 0);
-        }
-        return result;
-    }
-
     fn alu8(&mut self, op: AluOp, lhs: u8, rhs: u8) -> u8 {
         match op {
             AluOp::Add => self.add8(lhs, rhs, false),
@@ -2096,8 +2014,40 @@ impl Cpu {
                 );
                 result
             }
-            ShiftOp::Shl => self.shl8(value, count), // Shift operand left by count
-            ShiftOp::Shr => self.shr8(value, count), // Shift operand right by count
+            ShiftOp::Shl => {
+                // Shift operand left by count
+                let mut result = value;
+                let mut last_bit_7 = false;
+                for _ in 0..count {
+                    last_bit_7 = (result & 0x80) != 0;
+                    result = result << 1;
+                }
+                self.set_result_flags(result);
+                // Last bit shifted out of bit 7
+                self.set_flag(Flag::Carry, last_bit_7);
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x80) != 0) ^ self.get_flag(Flag::Carry),
+                );
+                result
+            }
+            ShiftOp::Shr => {
+                // Shift operand right by count
+                let mut result = value;
+                let mut last_bit_0 = false;
+                for _ in 0..count {
+                    last_bit_0 = (result & 1) != 0;
+                    result >>= 1;
+                }
+                self.set_result_flags(result);
+                // Last bit shifted out of bit 0
+                self.set_flag(Flag::Carry, last_bit_0);
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x80) != 0) ^ ((result & 0x40) != 0),
+                );
+                result
+            }
             ShiftOp::Sar => {
                 // Shift right by count, preserving sign bit
                 let mut result = value;
@@ -2159,8 +2109,40 @@ impl Cpu {
                 );
                 result
             }
-            ShiftOp::Shl => self.shl16(value, count), // Shift value left by count
-            ShiftOp::Shr => self.shr16(value, count), // Shift value right by count
+            ShiftOp::Shl => {
+                // Shift value left by count
+                let mut result = value;
+                let mut last_bit_15 = false;
+                for _ in 0..count {
+                    last_bit_15 = (result & 0x8000) != 0;
+                    result = result << 1;
+                }
+                self.set_result_flags(result);
+                // Last bit shifted out of bit 15
+                self.set_flag(Flag::Carry, last_bit_15);
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x8000) != 0) ^ self.get_flag(Flag::Carry),
+                );
+                result
+            }
+            ShiftOp::Shr => {
+                // Shift value right by count
+                let mut result = value;
+                let mut last_bit_0 = false;
+                for _ in 0..count {
+                    last_bit_0 = (result & 1) != 0;
+                    result >>= 1;
+                }
+                self.set_result_flags(result);
+                // Last bit shifted out of bit 0
+                self.set_flag(Flag::Carry, last_bit_0);
+                self.set_flag(
+                    Flag::Overflow,
+                    ((result & 0x8000) != 0) ^ ((result & 0x4000) != 0),
+                );
+                result
+            }
             ShiftOp::Sar => {
                 // Shift right by count, preserving sign bit
                 let mut result = value;
