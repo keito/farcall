@@ -1417,7 +1417,7 @@ impl Cpu {
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
                 match parsed.reg_field {
-                    0b000 => {
+                    0b000 | 0b001 => {
                         // TEST R/M8, IMMED8
                         let immediate = self.fetch_next_byte_and_advance_ip(memory);
                         self.print_instruction(
@@ -1505,7 +1505,7 @@ impl Cpu {
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 let operand = self.read_operand(memory, &rm)?;
                 match parsed.reg_field {
-                    0b000 => {
+                    0b000 | 0b001 => {
                         // TEST r/m 16, imm16
                         let immediate = self.fetch_next_word_and_advance_ip(memory);
                         self.print_instruction(
@@ -1728,7 +1728,7 @@ impl Cpu {
                         self.ip = target_ip;
                         self.cs = target_cs;
                     }
-                    0b110 => {
+                    0b110 | 0b111 => {
                         // PUSH r/m16
                         self.print_instruction(byte, &format_args!("push {}", rm));
                         let value = match rm {
