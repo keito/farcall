@@ -155,8 +155,21 @@ impl Machine {
     fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
         let op = self.cpu.get_reg(Reg8::Ah);
         match op {
+            // Set video mode
+            0x00 => {
+                let mode = self.cpu.get_reg(Reg8::Al);
+                if mode != 0x03 {
+                    return Err(MachineError::VideoServiceError(format!(
+                        "Terribly sorry, we only support 03h; you want {:#X}h",
+                        mode
+                    )));
+                }
+                self.text_video.clear(&mut self.memory)?;
+                self.text_video.set_scan_lines(6, 7);
+                Ok(InterruptResult::ResumeExecution)
+            }
             // Set text cursor shape
-            0x1 => {
+            0x01 => {
                 self.text_video.set_scan_lines(
                     self.cpu.get_reg(Reg8::Ch) as usize,
                     self.cpu.get_reg(Reg8::Cl) as usize,
@@ -164,7 +177,7 @@ impl Machine {
                 Ok(InterruptResult::ResumeExecution)
             }
             // Read Cursor Position, Size, and Shape
-            0x3 => {
+            0x03 => {
                 let display_page = self.cpu.get_reg(Reg8::Bh);
                 if display_page != 0 {
                     return Err(MachineError::VideoServiceError(format!(
@@ -183,17 +196,32 @@ impl Machine {
 
                 Ok(InterruptResult::ResumeExecution)
             }
+            // Select active display page
+            0x05 => {
+                let display_page = self.cpu.get_reg(Reg8::Al);
+                if display_page != 0 {
+                    return Err(MachineError::VideoServiceError(format!(
+                        "Unsupported display page: {:#X}h",
+                        display_page
+                    )));
+                }
+                Ok(InterruptResult::ResumeExecution)
+            }
             // BIOS character output
-            0xe => {
+            0x0E => {
                 let c = self.cpu.get_reg(Reg8::Al);
                 self.text_video.write_char(&mut self.memory, c)?;
                 Ok(InterruptResult::ResumeExecution)
             }
             // Get current video mode
-            0xf => {
+            0x0F => {
                 self.cpu.set_reg(Reg8::Al, 0x3); // 80x25 color text mode
                 self.cpu.set_reg(Reg8::Ah, 80); // 80 columns in decimal
                 self.cpu.set_reg(Reg8::Bh, 0); // active display page
+                Ok(InterruptResult::ResumeExecution)
+            }
+            0x10..=0xFF => {
+                // Original PC BIOS ignores video functions beyond 0Fh
                 Ok(InterruptResult::ResumeExecution)
             }
             _ => Err(MachineError::VideoServiceError(format!(
