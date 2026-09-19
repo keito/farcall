@@ -313,14 +313,16 @@ impl Cpu {
                     self.set_reg(Reg8::Al, result);
                 }
             }
-            0x05 => {
-                // ADD AX, IMMED16
+            0x05 | 0x0D | 0x15 | 0x1D | 0x25 | 0x2D | 0x35 | 0x3D => {
+                // ALU ops on AX, IMMED16
+                let op = AluOp::try_from((byte >> 3) & 7)?;
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("add ax, {:04X}h", immediate));
+                self.print_instruction(byte, &format_args!("{} ax, {:04X}h", op, immediate));
 
-                let reg_value = self.get_reg(Reg16::Ax);
-                let value = self.add16(reg_value, immediate, false);
-                self.set_reg(Reg16::Ax, value);
+                let result = self.alu16(op, self.get_reg(Reg16::Ax), immediate);
+                if op != AluOp::Cmp {
+                    self.set_reg(Reg16::Ax, result);
+                }
             }
             0x06 => {
                 // PUSH ES
@@ -380,15 +382,6 @@ impl Cpu {
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
             }
-            0x0D => {
-                // OR AX, IMMED16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("or ax, {}", operand));
-
-                let value = operand | self.get_reg(Reg16::Ax);
-                self.set_reg(Reg16::Ax, value);
-                self.update_logic_flags(value);
-            }
             0x0E => {
                 // PUSH CS
                 self.print_instruction(byte, &format_args!("push cs"));
@@ -429,14 +422,6 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("adc {}, {}", dest_reg, rm));
                 let result = self.add16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg(dest_reg, result);
-            }
-            0x15 => {
-                // ADC AX, IMMED16
-                let ax_val = self.get_reg(Reg16::Ax);
-                let immed = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("adc ax, {}", immed));
-                let result = self.add16(ax_val, immed, self.get_flag(Flag::Carry));
-                self.set_reg(Reg16::Ax, result);
             }
             0x16 => {
                 // PUSH SS
@@ -489,14 +474,6 @@ impl Cpu {
                 let result = self.subtract16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg(dest_reg, result);
             }
-            0x1D => {
-                // SBB AX, IMMED16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("sbb ax, {:X}h", operand));
-                let result =
-                    self.subtract16(self.get_reg(Reg16::Ax), operand, self.get_flag(Flag::Carry));
-                self.set_reg(Reg16::Ax, result);
-            }
             0x1E => {
                 // PUSH DS
                 self.print_instruction(byte, &format_args!("push ds"));
@@ -542,15 +519,6 @@ impl Cpu {
                 let rm_value = self.read_operand(memory, &rm)?;
                 let value = self.get_reg(dest_reg) & rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags(value);
-            }
-            0x25 => {
-                // AND AX, IMMED16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("and ax, {:X}h", operand));
-                let reg_value = self.get_reg(Reg16::Ax);
-                let value = reg_value & operand;
-                self.set_reg(Reg16::Ax, value);
                 self.update_logic_flags(value);
             }
             0x27 => {
@@ -610,13 +578,6 @@ impl Cpu {
                 let value = self.subtract16(self.get_reg(dest_reg), rm_value, false);
                 self.set_reg(dest_reg, value);
             }
-            0x2D => {
-                // SUB AX, IMMED16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("sub ax, {:X}h", operand));
-                let new_val = self.subtract16(self.get_reg(Reg16::Ax), operand, false);
-                self.set_reg(Reg16::Ax, new_val);
-            }
             0x30 => {
                 // XOR R/M8, REG8
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
@@ -665,14 +626,6 @@ impl Cpu {
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
             }
-            0x35 => {
-                // XOR AX, IMMED16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("xor ax, {:X}h", operand));
-                let result = self.get_reg(Reg16::Ax) ^ operand;
-                self.set_reg(Reg16::Ax, result);
-                self.update_logic_flags(result);
-            }
             0x38 => {
                 // CMP r/m8, r8
                 let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
@@ -704,12 +657,6 @@ impl Cpu {
 
                 let rm_value = self.read_operand(memory, &rm)?;
                 self.subtract16(self.get_reg(dest_reg), rm_value, false);
-            }
-            0x3D => {
-                // CMP AX, imm16
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("cmp ax, {:X}h", operand));
-                self.subtract16(self.get_reg(Reg16::Ax), operand, false);
             }
             0x3F => {
                 // AAS: ASCII Adjust After Subtraction
