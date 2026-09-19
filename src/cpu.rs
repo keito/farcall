@@ -302,14 +302,16 @@ impl Cpu {
                 let value = self.add16(reg_value, rm_value, false);
                 self.set_reg(dest_reg, value);
             }
-            0x04 => {
-                // ADD AL, IMMED8
+            0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => {
+                // ALU ops on AL, IMMED8
+                let op = AluOp::try_from((byte >> 3) & 7)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("add al, {:04X}h", immediate));
+                self.print_instruction(byte, &format_args!("{} al, {:X}h", op, immediate));
 
-                let reg_value = self.get_reg(Reg8::Al);
-                let value = self.add8(reg_value, immediate, false);
-                self.set_reg(Reg8::Al, value);
+                let result = self.alu8(op, self.get_reg(Reg8::Al), immediate);
+                if op != AluOp::Cmp {
+                    self.set_reg(Reg8::Al, result);
+                }
             }
             0x05 => {
                 // ADD AX, IMMED16
@@ -378,15 +380,6 @@ impl Cpu {
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
             }
-            0x0C => {
-                // OR AL, IMMED8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("or al, {}", operand));
-
-                let value = operand | self.get_reg(Reg8::Al);
-                self.set_reg(Reg8::Al, value);
-                self.update_logic_flags(value);
-            }
             0x0D => {
                 // OR AX, IMMED16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
@@ -436,14 +429,6 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("adc {}, {}", dest_reg, rm));
                 let result = self.add16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg(dest_reg, result);
-            }
-            0x14 => {
-                // ADC AL, IMMED8
-                let al_val = self.get_reg(Reg8::Al);
-                let immed = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("adc al, {}", immed));
-                let result = self.add8(al_val, immed, self.get_flag(Flag::Carry));
-                self.set_reg(Reg8::Al, result);
             }
             0x15 => {
                 // ADC AX, IMMED16
@@ -504,14 +489,6 @@ impl Cpu {
                 let result = self.subtract16(dest_reg_val, operand, self.get_flag(Flag::Carry));
                 self.set_reg(dest_reg, result);
             }
-            0x1C => {
-                // SBB AL, IMMED8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("sbb al, {:X}h", operand));
-                let result =
-                    self.subtract8(self.get_reg(Reg8::Al), operand, self.get_flag(Flag::Carry));
-                self.set_reg(Reg8::Al, result);
-            }
             0x1D => {
                 // SBB AX, IMMED16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
@@ -565,15 +542,6 @@ impl Cpu {
                 let rm_value = self.read_operand(memory, &rm)?;
                 let value = self.get_reg(dest_reg) & rm_value;
                 self.set_reg(dest_reg, value);
-                self.update_logic_flags(value);
-            }
-            0x24 => {
-                // AND AL, IMMED8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("and al, {:X}h", operand));
-                let reg_value = self.get_reg(Reg8::Al);
-                let value = reg_value & operand;
-                self.set_reg(Reg8::Al, value);
                 self.update_logic_flags(value);
             }
             0x25 => {
@@ -642,13 +610,6 @@ impl Cpu {
                 let value = self.subtract16(self.get_reg(dest_reg), rm_value, false);
                 self.set_reg(dest_reg, value);
             }
-            0x2C => {
-                // SUB AL, IMMED8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("sub al, {:X}h", operand));
-                let new_val = self.subtract8(self.get_reg(Reg8::Al), operand, false);
-                self.set_reg(Reg8::Al, new_val);
-            }
             0x2D => {
                 // SUB AX, IMMED16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
@@ -704,14 +665,6 @@ impl Cpu {
                 self.set_reg(dest_reg, value);
                 self.update_logic_flags(value);
             }
-            0x34 => {
-                // XOR AL, IMMED8
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("xor al, {:X}h", operand));
-                let result = self.get_reg(Reg8::Al) ^ operand;
-                self.set_reg(Reg8::Al, result);
-                self.update_logic_flags(result);
-            }
             0x35 => {
                 // XOR AX, IMMED16
                 let operand = self.fetch_next_word_and_advance_ip(memory);
@@ -751,12 +704,6 @@ impl Cpu {
 
                 let rm_value = self.read_operand(memory, &rm)?;
                 self.subtract16(self.get_reg(dest_reg), rm_value, false);
-            }
-            0x3C => {
-                // CMP AL, imm8 - basically SUB AL that doesn't change AL
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("cmp al, {:X}h", operand));
-                self.subtract8(self.get_reg(Reg8::Al), operand, false);
             }
             0x3D => {
                 // CMP AX, imm16
