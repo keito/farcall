@@ -128,7 +128,6 @@ impl Machine {
         match *resource {
             Resource::Stdin | Resource::Console => {
                 self.keyboard_buffer.clear();
-                self.pending_key = None;
             }
             _ => {}
         };

@@ -66,7 +66,6 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         boot_time: Instant::now(),
         verbosity: 0,
         load_mode: LoadMode::Boot,
-        pending_key: None,
         pending_input: None,
         keyboard_buffer: Default::default(),
         console_read_buffer: Default::default(),

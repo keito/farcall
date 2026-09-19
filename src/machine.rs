@@ -33,7 +33,6 @@ pub struct Machine {
     keyboard_buffer: VecDeque<KeyPress>,
     load_mode: LoadMode,
     memory: Vec<u8>,
-    pending_key: Option<(u8, u8)>,
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
     text_video: TextVideo,
@@ -112,7 +111,6 @@ impl Machine {
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
-            pending_key: None,
             text_video: TextVideo::new(),
             verbosity,
         };
