@@ -778,88 +778,26 @@ impl Cpu {
                 // Clear the upper nibble
                 self.set_reg(Reg8::Al, al & 0xf);
             }
-            0x40 => self.inc16(byte, Reg16::Ax),
-            0x41 => self.inc16(byte, Reg16::Cx),
-            0x42 => self.inc16(byte, Reg16::Dx),
-            0x43 => self.inc16(byte, Reg16::Bx),
-            0x44 => self.inc16(byte, Reg16::Sp),
-            0x45 => self.inc16(byte, Reg16::Bp),
-            0x46 => self.inc16(byte, Reg16::Si),
-            0x47 => self.inc16(byte, Reg16::Di),
-            0x48 => self.dec16(byte, Reg16::Ax),
-            0x49 => self.dec16(byte, Reg16::Cx),
-            0x4A => self.dec16(byte, Reg16::Dx),
-            0x4B => self.dec16(byte, Reg16::Bx),
-            0x4C => self.dec16(byte, Reg16::Sp),
-            0x4D => self.dec16(byte, Reg16::Bp),
-            0x4E => self.dec16(byte, Reg16::Si),
-            0x4F => self.dec16(byte, Reg16::Di),
+            // Register INC/DEC
+            0x40..=0x47 => self.inc16(byte, Reg16::try_from(byte & 7)?),
+            0x48..=0x4F => self.dec16(byte, Reg16::try_from(byte & 7)?),
             // PUSH/POP 50-5F
-            0x50 => {
-                self.print_instruction(byte, &format_args!("push ax"));
-                self.push_onto_stack(memory, self.ax)?;
-            }
-            0x51 => {
-                self.print_instruction(byte, &format_args!("push cx"));
-                self.push_onto_stack(memory, self.cx)?;
-            }
-            0x52 => {
-                self.print_instruction(byte, &format_args!("push dx"));
-                self.push_onto_stack(memory, self.dx)?;
-            }
-            0x53 => {
-                self.print_instruction(byte, &format_args!("push bx"));
-                self.push_onto_stack(memory, self.bx)?;
-            }
-            0x54 => {
-                self.print_instruction(byte, &format_args!("push sp"));
-                // 8086/8088 hardware quirk
-                let value = self.sp.wrapping_sub(2);
+            0x50..=0x57 => {
+                let reg = Reg16::try_from(byte & 7)?;
+                self.print_instruction(byte, &format_args!("push {}", reg));
+                let value = if reg == Reg16::Sp {
+                    // 8086/8088 hardware quirk
+                    self.sp.wrapping_sub(2)
+                } else {
+                    self.get_reg(reg)
+                };
                 self.push_onto_stack(memory, value)?;
             }
-            0x55 => {
-                self.print_instruction(byte, &format_args!("push bp"));
-                self.push_onto_stack(memory, self.bp)?;
-            }
-            0x56 => {
-                self.print_instruction(byte, &format_args!("push si"));
-                self.push_onto_stack(memory, self.si)?;
-            }
-            0x57 => {
-                self.print_instruction(byte, &format_args!("push di"));
-                self.push_onto_stack(memory, self.di)?;
-            }
-            0x58 => {
-                self.print_instruction(byte, &format_args!("pop ax"));
-                self.ax = self.pop_from_stack(memory)?;
-            }
-            0x59 => {
-                self.print_instruction(byte, &format_args!("pop cx"));
-                self.cx = self.pop_from_stack(memory)?;
-            }
-            0x5A => {
-                self.print_instruction(byte, &format_args!("pop dx"));
-                self.dx = self.pop_from_stack(memory)?;
-            }
-            0x5B => {
-                self.print_instruction(byte, &format_args!("pop bx"));
-                self.bx = self.pop_from_stack(memory)?;
-            }
-            0x5C => {
-                self.print_instruction(byte, &format_args!("pop sp"));
-                self.sp = self.pop_from_stack(memory)?;
-            }
-            0x5D => {
-                self.print_instruction(byte, &format_args!("pop bp"));
-                self.bp = self.pop_from_stack(memory)?;
-            }
-            0x5E => {
-                self.print_instruction(byte, &format_args!("pop si"));
-                self.si = self.pop_from_stack(memory)?;
-            }
-            0x5F => {
-                self.print_instruction(byte, &format_args!("pop di"));
-                self.di = self.pop_from_stack(memory)?;
+            0x58..=0x5F => {
+                let reg = Reg16::try_from(byte & 7)?;
+                self.print_instruction(byte, &format_args!("pop {}", reg));
+                let value = self.pop_from_stack(memory)?;
+                self.set_reg(reg, value);
             }
             // Jumps
             0x60 | 0x70 => {
@@ -1217,44 +1155,12 @@ impl Cpu {
                 self.write_operand(memory, &rm, value)?;
             }
             // XCHG AX,
-            0x90 => {
-                // XCHG AX, AX (NOP)
-                self.print_instruction(byte, &format_args!("xchg ax, ax"));
-            }
-            0x91 => {
-                // XCHG AX, CX
-                self.print_instruction(byte, &format_args!("xchg ax, cx"));
-                std::mem::swap(&mut self.ax, &mut self.cx);
-            }
-            0x92 => {
-                // XCHG AX, DX
-                self.print_instruction(byte, &format_args!("xchg ax, dx"));
-                std::mem::swap(&mut self.ax, &mut self.dx);
-            }
-            0x93 => {
-                // XCHG AX, BX
-                self.print_instruction(byte, &format_args!("xchg ax, bx"));
-                std::mem::swap(&mut self.ax, &mut self.bx);
-            }
-            0x94 => {
-                // XCHG AX, SP
-                self.print_instruction(byte, &format_args!("xchg ax, sp"));
-                std::mem::swap(&mut self.ax, &mut self.sp);
-            }
-            0x95 => {
-                // XCHG AX, BP
-                self.print_instruction(byte, &format_args!("xchg ax, bp"));
-                std::mem::swap(&mut self.ax, &mut self.bp);
-            }
-            0x96 => {
-                // XCHG AX, SI
-                self.print_instruction(byte, &format_args!("xchg ax, si"));
-                std::mem::swap(&mut self.ax, &mut self.si);
-            }
-            0x97 => {
-                // XCHG AX, DI
-                self.print_instruction(byte, &format_args!("xchg ax, di"));
-                std::mem::swap(&mut self.ax, &mut self.di);
+            0x90..=0x97 => {
+                let reg = Reg16::try_from(byte & 7)?;
+                self.print_instruction(byte, &format_args!("xchg ax, {}", reg));
+                let other_reg_val = self.get_reg(reg);
+                self.set_reg(reg, self.ax);
+                self.ax = other_reg_val;
             }
             0x98 => {
                 // CBW
@@ -1611,86 +1517,18 @@ impl Cpu {
                 }
             }
             // B0-B7: move an 8-bit immediate into an 8-bit register
-            0xB0 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov al, {:X}h", operand));
-                self.set_reg(Reg8::Al, operand);
-            }
-            0xB1 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov cl, {:X}h", operand));
-                self.set_reg(Reg8::Cl, operand);
-            }
-            0xB2 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov dl, {:X}h", operand));
-                self.set_reg(Reg8::Dl, operand);
-            }
-            0xB3 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov bl, {:X}h", operand));
-                self.set_reg(Reg8::Bl, operand);
-            }
-            0xB4 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov ah, {:X}h", operand));
-                self.set_reg(Reg8::Ah, operand);
-            }
-            0xB5 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov ch, {:X}h", operand));
-                self.set_reg(Reg8::Ch, operand);
-            }
-            0xB6 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov dh, {:X}h", operand));
-                self.set_reg(Reg8::Dh, operand);
-            }
-            0xB7 => {
-                let operand = self.fetch_next_byte_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov bh, {:X}h", operand));
-                self.set_reg(Reg8::Bh, operand);
+            0xB0..=0xB7 => {
+                let reg = Reg8::try_from(byte & 7)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("mov {}, {:X}h", reg, immediate));
+                self.set_reg(reg, immediate);
             }
             // B8-BF: move a 16-bit immediate into a 16-bit register
-            0xB8 => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov ax, {:X}h", operand));
-                self.ax = operand;
-            }
-            0xB9 => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov cx, {:X}h", operand));
-                self.cx = operand;
-            }
-            0xBA => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov dx, {:X}h", operand));
-                self.dx = operand;
-            }
-            0xBB => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov bx, {:X}h", operand));
-                self.bx = operand;
-            }
-            0xBC => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov sp, {:X}h", operand));
-                self.sp = operand;
-            }
-            0xBD => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov bp, {:X}h", operand));
-                self.bp = operand;
-            }
-            0xBE => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov si, {:X}h", operand));
-                self.si = operand;
-            }
-            0xBF => {
-                let operand = self.fetch_next_word_and_advance_ip(memory);
-                self.print_instruction(byte, &format_args!("mov di, {:X}h", operand));
-                self.di = operand;
+            0xB8..=0xBF => {
+                let reg = Reg16::try_from(byte & 7)?;
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("mov {}, {:X}h", reg, immediate));
+                self.set_reg(reg, immediate);
             }
             0xC3 => {
                 // RET
