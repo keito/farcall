@@ -1889,6 +1889,17 @@ impl Cpu {
                         let result = self.shr8(operand, 1);
                         self.write_operand(memory, &rm, result)?;
                     }
+                    0b111 => {
+                        // SAR r/m8, 1
+                        // Shift right by 1 while preserving sign bit and store result in rm
+                        self.print_instruction(byte, &format_args!("sar {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = ((operand as i8) >> 1) as u8;
+                        self.write_operand(memory, &rm, result)?;
+                        self.set_result_flags(result);
+                        self.set_flag(Flag::Carry, operand & 1 != 0);
+                        self.set_flag(Flag::Overflow, false);
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
@@ -1947,6 +1958,17 @@ impl Cpu {
                         let result = self.shr16(operand, 1);
                         self.write_operand(memory, &rm, result)?;
                     }
+                    0b111 => {
+                        // SAR r/m16, 1
+                        // Shift right by 1 while preserving sign bit and store result in rm
+                        self.print_instruction(byte, &format_args!("sar {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = ((operand as i16) >> 1) as u16;
+                        self.write_operand(memory, &rm, result)?;
+                        self.set_result_flags(result);
+                        self.set_flag(Flag::Carry, operand & 1 != 0);
+                        self.set_flag(Flag::Overflow, false);
+                    }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
                 };
             }
@@ -1992,6 +2014,26 @@ impl Cpu {
                             let operand = self.read_operand(memory, &rm)?;
                             let result = self.shr8(operand, cl);
                             self.write_operand(memory, &rm, result)?;
+                        }
+                    }
+                    0b111 => {
+                        // SAR r/m8, CL
+                        // Shift right by CL while preserving sign bit and store result in rm
+                        self.print_instruction(byte, &format_args!("sar {}, cl", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let cl = self.get_reg(Reg8::Cl);
+                        if cl != 0 {
+                            let mut result = operand;
+                            let mut carry = false;
+                            for _ in 0..cl {
+                                carry = result & 1 != 0;
+                                result = ((result as i8) >> 1) as u8;
+                            }
+
+                            self.write_operand(memory, &rm, result)?;
+                            self.set_result_flags(result);
+                            self.set_flag(Flag::Carry, carry);
+                            self.set_flag(Flag::Overflow, false);
                         }
                     }
                     _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
