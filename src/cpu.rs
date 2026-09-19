@@ -945,63 +945,15 @@ impl Cpu {
                 }
             }
             0x80 | 0x82 => {
-                // Does a lot of things! on REG8/MEM8, IMMED8
+                // Does a lot of ALU ops on REG8/MEM8, IMMED8
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
                 let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
                 let immediate = self.fetch_next_byte_and_advance_ip(memory);
                 let destination = self.read_operand(memory, &rm)?;
-                let mut is_cmp = false;
-                let value = match parsed.reg_field {
-                    0 => {
-                        // ADD
-                        self.print_instruction(byte, &format_args!("add {}, {:X}h", rm, immediate));
-                        self.add8(destination, immediate, false)
-                    }
-                    1 => {
-                        // OR
-                        self.print_instruction(byte, &format_args!("or {}, {:X}h", rm, immediate));
-                        let result = destination | immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    2 => {
-                        // ADC
-                        self.print_instruction(byte, &format_args!("adc {}, {:X}h", rm, immediate));
-                        self.add8(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    3 => {
-                        // SBB
-                        self.print_instruction(byte, &format_args!("sbb {}, {:X}h", rm, immediate));
-                        self.subtract8(destination, immediate, self.get_flag(Flag::Carry))
-                    }
-                    4 => {
-                        // AND
-                        self.print_instruction(byte, &format_args!("and {}, {:X}h", rm, immediate));
-                        let result = destination & immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    5 => {
-                        // SUB
-                        self.print_instruction(byte, &format_args!("sub {}, {:X}h", rm, immediate));
-                        self.subtract8(destination, immediate, false)
-                    }
-                    6 => {
-                        // XOR
-                        self.print_instruction(byte, &format_args!("xor {}, {:X}h", rm, immediate));
-                        let result = destination ^ immediate;
-                        self.update_logic_flags(result);
-                        result
-                    }
-                    7 => {
-                        // CMP
-                        self.print_instruction(byte, &format_args!("cmp {}, {:X}h", rm, immediate));
-                        is_cmp = true;
-                        self.subtract8(destination, immediate, false)
-                    }
-                    _ => return Err(CpuError::UnsupportedRegisterField(byte, parsed.reg_field)),
-                };
-                if !is_cmp {
+                let op = AluOp::try_from(parsed.reg_field)?;
+                self.print_instruction(byte, &format_args!("{} {}, {:X}h", op, rm, immediate));
+                let value = self.alu8(op, destination, immediate);
+                if op != AluOp::Cmp {
                     self.write_operand(memory, &rm, value)?;
                 }
             }
@@ -2647,6 +2599,30 @@ impl Cpu {
             self.set_flag(Flag::Overflow, (value & 0x8000) != 0);
         }
         return result;
+    }
+
+    fn alu8(&mut self, op: AluOp, lhs: u8, rhs: u8) -> u8 {
+        match op {
+            AluOp::Add => self.add8(lhs, rhs, false),
+            AluOp::Or => {
+                let result = lhs | rhs;
+                self.update_logic_flags(result);
+                result
+            }
+            AluOp::Adc => self.add8(lhs, rhs, self.get_flag(Flag::Carry)),
+            AluOp::Sbb => self.subtract8(lhs, rhs, self.get_flag(Flag::Carry)),
+            AluOp::And => {
+                let result = lhs & rhs;
+                self.update_logic_flags(result);
+                result
+            }
+            AluOp::Sub | AluOp::Cmp => self.subtract8(lhs, rhs, false),
+            AluOp::Xor => {
+                let result = lhs ^ rhs;
+                self.update_logic_flags(result);
+                result
+            }
+        }
     }
 
     fn alu16(&mut self, op: AluOp, lhs: u16, rhs: u16) -> u16 {
