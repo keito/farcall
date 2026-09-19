@@ -1864,6 +1864,19 @@ impl Cpu {
                         self.set_flag(Flag::Carry, cf);
                         self.set_flag(Flag::Overflow, ((result & 0x8000) != 0) ^ cf);
                     }
+                    0b011 => {
+                        // RCR r/m16, 1
+                        self.print_instruction(byte, &format_args!("rcr {}, 1", rm));
+                        let operand = self.read_operand(memory, &rm)?;
+                        let result = (operand >> 1) | (self.get_flag(Flag::Carry) as u16) << 15;
+                        self.write_operand(memory, &rm, result)?;
+                        let cf = (operand & 1) != 0;
+                        self.set_flag(Flag::Carry, cf);
+                        self.set_flag(
+                            Flag::Overflow,
+                            ((result & 0x8000) != 0) ^ ((result & 0x4000) != 0),
+                        );
+                    }
                     0b100 => {
                         // SAL/SHL r/m16, 1
                         // Shift a 16-bit operand left by 1, and store result in rm
