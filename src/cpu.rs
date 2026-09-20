@@ -1178,6 +1178,11 @@ impl Cpu {
                 self.ip = ip;
                 self.cs = cs;
             }
+            0xCC => {
+                // INT3
+                self.print_instruction(byte, &format_args!("int3"));
+                result = CpuStepResult::Interrupt(0x3);
+            }
             0xCD => {
                 // INT
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
