@@ -11,10 +11,10 @@ pub(crate) struct ModifierState {
 pub(crate) fn translate_winit_key(
     key: KeyCode,
     text: Option<SmolStr>,
-    shift: bool,
+    modifiers: &ModifierState,
 ) -> Option<KeyPress> {
     // Shift-Tab has no ASCII text
-    if key == KeyCode::Tab && shift {
+    if key == KeyCode::Tab && modifiers.shift {
         return Some(KeyPress {
             ascii: None,
             scan_code: 0x0F,
@@ -78,6 +78,14 @@ pub(crate) fn translate_winit_key(
         _ => return None,
     };
 
+    // Send the right ASCII code between 0x01 and 0x1A for Ctrl+a through z
+    if modifiers.ctrl && key >= KeyCode::KeyA && key <= KeyCode::KeyZ {
+        return Some(KeyPress {
+            ascii: Some(key as u8 - KeyCode::KeyA as u8 + 1),
+            scan_code,
+        });
+    }
+
     // Make sure dead keys don't register
     let ascii = match text {
         Some(t) if t.is_ascii() && t.len() == 1 => Some(t.as_bytes()[0]),
@@ -100,7 +108,7 @@ pub(crate) fn translate_winit_key(
         _ => return None,
     };
 
-    let scan_code = if shift {
+    let scan_code = if modifiers.shift {
         scan_code_with_shift
     } else {
         scan_code
