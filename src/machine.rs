@@ -285,9 +285,13 @@ impl Machine {
                 self.cpu.set_reg(Reg8::Al, 0);
                 Ok(InterruptResult::ResumeExecution)
             }
-            _ => Err(MachineError::TimeOfDayServiceError(
-                "Unsupported operation".to_string(),
-            )),
+            0x02 => {
+                // Read the real-time clock (not supported by the 8088)
+                Ok(InterruptResult::ResumeExecution)
+            }
+            _ => Err(MachineError::TimeOfDayServiceError(format!(
+                "Unsupported operation: {operation:X}h"
+            ))),
         }
     }
 
@@ -330,12 +334,24 @@ impl Machine {
         }
     }
 
-    fn bios_system_service(&mut self) -> Result<InterruptResult, MachineError> {
+    // INT 15h
+    fn bios_system_services(&mut self) -> Result<InterruptResult, MachineError> {
         let op = self.cpu.get_reg(Reg8::Ah);
         match op {
+            0x41 => {
+                // Wait for External Event (IBM PC Convertible)
+                // TODO: We don't support it.
+                self.cpu.set_reg(Reg8::Ah, 0x80);
+                self.cpu.set_flag(Flag::Carry, true);
+            }
             0x88 => {
-                // Get extended memory size (RAM above 1 MiB)
+                // Extended Memory Size Determine (RAM above 1 MiB)
                 // TODO: We don't support it. IBM PC/PCjr return 80h; PC/XT returns 86h
+                self.cpu.set_reg(Reg8::Ah, 0x80);
+                self.cpu.set_flag(Flag::Carry, true);
+            }
+            0xC0 => {
+                // Return System Configuration Parameters (not supported on PC/PCjr)
                 self.cpu.set_reg(Reg8::Ah, 0x80);
                 self.cpu.set_flag(Flag::Carry, true);
             }
@@ -398,7 +414,7 @@ impl Machine {
             0x12 => self.amount_conventional_ram_service(),
             0x13 => self.disk_service(),
             0x14 => self.serial_port_service(),
-            0x15 => self.bios_system_service(),
+            0x15 => self.bios_system_services(),
             0x16 => self.keyboard_service(),
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
