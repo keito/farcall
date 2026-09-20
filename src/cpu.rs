@@ -263,57 +263,39 @@ impl Cpu {
         let mut result = CpuStepResult::Continue;
         // Table 4-13
         match byte {
-            // Arithmetic
-            0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 => {
-                // ALU ops on r/m8, r8
+            // ALU ops
+            0x00 | 0x08 | 0x10 | 0x18 | 0x20 | 0x28 | 0x30 | 0x38 | 0x02 | 0x0A | 0x12 | 0x1A
+            | 0x22 | 0x2A | 0x32 | 0x3A => {
+                // ALU ops on r/m8, r8 and r8, r/m8
                 let op = AluOp::try_from((byte >> 3) & 7)?;
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("{} {}, {}", op, rm, source_reg));
+                let (reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
+                let reg = RegisterOrMemoryOperand::Register(reg);
+                let (dest, source) = if byte & 2 == 0 { (rm, reg) } else { (reg, rm) };
+                self.print_instruction(byte, &format_args!("{} {}, {}", op, dest, source));
 
-                let reg_value = self.get_reg(source_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-                let result = self.alu8(op, rm_value, reg_value);
+                let lhs = self.read_operand(memory, &dest)?;
+                let rhs = self.read_operand(memory, &source)?;
+                let result = self.alu8(op, lhs, rhs);
+
                 if op != AluOp::Cmp {
-                    self.write_operand(memory, &rm, result)?;
+                    self.write_operand(memory, &dest, result)?;
                 }
             }
-            0x01 | 0x09 | 0x11 | 0x19 | 0x21 | 0x29 | 0x31 | 0x39 => {
-                // ALU ops on r/m16, r16
+            0x01 | 0x09 | 0x11 | 0x19 | 0x21 | 0x29 | 0x31 | 0x39 | 0x03 | 0x0B | 0x13 | 0x1B
+            | 0x23 | 0x2B | 0x33 | 0x3B => {
+                // ALU ops on r/m16, r16 and r16, r/m16
                 let op = AluOp::try_from((byte >> 3) & 7)?;
-                let (source_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("{} {}, {}", op, rm, source_reg));
+                let (reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
+                let reg = RegisterOrMemoryOperand::Register(reg);
+                let (dest, source) = if byte & 2 == 0 { (rm, reg) } else { (reg, rm) };
+                self.print_instruction(byte, &format_args!("{} {}, {}", op, dest, source));
 
-                let reg_value = self.get_reg(source_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-                let value = self.alu16(op, rm_value, reg_value);
-                if op != AluOp::Cmp {
-                    self.write_operand(memory, &rm, value)?;
-                }
-            }
-            0x02 | 0x0A | 0x12 | 0x1A | 0x22 | 0x2A | 0x32 | 0x3A => {
-                // ALU ops on r8, r/m8
-                let op = AluOp::try_from((byte >> 3) & 7)?;
-                let (dest_reg, rm) = self.fetch_reg_rm::<Reg8>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("{} {}, {}", op, dest_reg, rm));
+                let lhs = self.read_operand(memory, &dest)?;
+                let rhs = self.read_operand(memory, &source)?;
+                let result = self.alu16(op, lhs, rhs);
 
-                let reg_value = self.get_reg(dest_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-                let value = self.alu8(op, reg_value, rm_value);
                 if op != AluOp::Cmp {
-                    self.set_reg(dest_reg, value);
-                }
-            }
-            0x03 | 0x0B | 0x13 | 0x1B | 0x23 | 0x2B | 0x33 | 0x3B => {
-                // ALU ops on r16, r/m16
-                let op = AluOp::try_from((byte >> 3) & 7)?;
-                let (dest_reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
-                self.print_instruction(byte, &format_args!("{} {}, {}", op, dest_reg, rm));
-
-                let reg_value = self.get_reg(dest_reg);
-                let rm_value = self.read_operand(memory, &rm)?;
-                let value = self.alu16(op, reg_value, rm_value);
-                if op != AluOp::Cmp {
-                    self.set_reg(dest_reg, value);
+                    self.write_operand(memory, &dest, result)?;
                 }
             }
             0x04 | 0x0C | 0x14 | 0x1C | 0x24 | 0x2C | 0x34 | 0x3C => {
