@@ -719,7 +719,8 @@ impl Cpu {
                 // MOV r/m16, segment register
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
-                let source_segment = SegmentReg::try_from(parsed.reg_field)?;
+                // 8088 ignores the high order bit of the reg field
+                let source_segment = SegmentReg::try_from(parsed.reg_field & 3)?;
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", rm, source_segment));
 
@@ -746,7 +747,8 @@ impl Cpu {
                 // MOV SEGREG, REG16/MEM16
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 let parsed = parse_mod_rm(operand);
-                let dest_segment = SegmentReg::try_from(parsed.reg_field)?;
+                // 8088 ignores the high order bit of the reg field
+                let dest_segment = SegmentReg::try_from(parsed.reg_field & 3)?;
                 let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
                 self.print_instruction(byte, &format_args!("mov {}, {}", dest_segment, rm));
 
