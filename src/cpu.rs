@@ -377,13 +377,38 @@ impl Cpu {
                 self.set_reg(Reg8::Al, result);
                 self.set_result_flags(result);
             }
+            0x2F => {
+                // DAS - Decimal Adjust AL After Subtraction
+                self.print_instruction(byte, &format_args!("das"));
+                let original_al = self.get_reg(Reg8::Al);
+                let original_cf = self.get_flag(Flag::Carry);
+                let original_af = self.get_flag(Flag::AuxiliaryCarry);
+                let mut result = original_al;
+
+                if (result & 0x0F) > 9 || self.get_flag(Flag::AuxiliaryCarry) {
+                    result = result.wrapping_sub(0x06) & 0xFF;
+                    self.set_flag(Flag::AuxiliaryCarry, true);
+                } else {
+                    self.set_flag(Flag::AuxiliaryCarry, false);
+                }
+
+                if original_al > (if original_af { 0x9F } else { 0x99 }) || original_cf {
+                    result = result.wrapping_sub(0x60) & 0xFF;
+                    self.set_flag(Flag::Carry, true);
+                } else {
+                    self.set_flag(Flag::Carry, false);
+                }
+
+                self.set_reg(Reg8::Al, result);
+                self.set_result_flags(result);
+            }
             0x37 => {
                 // AAA: ASCII Adjust After Addition
                 self.print_instruction(byte, &format_args!("aaa"));
                 let mut al = self.get_reg(Reg8::Al);
                 let flag;
                 if (al & 0x0F) > 9 || self.get_flag(Flag::AuxiliaryCarry) {
-                    al = al.wrapping_add(6); // wrapping byte addition
+                    al = al.wrapping_add(6);
                     self.set_reg(Reg8::Ah, self.get_reg(Reg8::Ah).wrapping_add(1));
                     flag = true;
                 } else {
