@@ -750,6 +750,20 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("cwd"));
                 self.set_reg(Reg16::Dx, result);
             }
+            0x9A => {
+                // CALL FAR_PROC
+                let offset = self.fetch_next_word_and_advance_ip(memory);
+                let segment = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(
+                    byte,
+                    &format_args!("call far {:04X}h:{:04X}h", segment, offset),
+                );
+
+                self.push_onto_stack(memory, self.cs)?;
+                self.push_onto_stack(memory, self.ip)?;
+                self.cs = segment;
+                self.ip = offset;
+            }
             0x9C => {
                 // PUSHF
                 self.print_instruction(byte, &format_args!("pushf"));
