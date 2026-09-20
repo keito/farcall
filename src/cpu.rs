@@ -1189,6 +1189,13 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("int {:X}h", operand));
                 result = CpuStepResult::Interrupt(operand);
             }
+            0xCE => {
+                // INTO: Interrupt on Overflow
+                self.print_instruction(byte, &format_args!("into"));
+                if self.get_flag(Flag::Overflow) {
+                    result = CpuStepResult::Interrupt(4);
+                }
+            }
             0xCF => {
                 // IRET
                 self.print_instruction(byte, &format_args!("iret"));
