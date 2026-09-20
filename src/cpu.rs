@@ -1101,6 +1101,13 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", reg, immediate));
                 self.set_reg(reg, immediate);
             }
+            0xC2 => {
+                // RET IMMED16 (intrasegment)
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("ret {:X}h", immediate));
+                self.ip = self.pop_from_stack(memory)?;
+                self.sp = self.sp.wrapping_add(immediate);
+            }
             0xC3 => {
                 // RET
                 self.print_instruction(byte, &format_args!("ret"));
