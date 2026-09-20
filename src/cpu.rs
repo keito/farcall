@@ -360,6 +360,7 @@ impl Cpu {
                 // Decimal Adjust AL After Addition
                 self.print_instruction(byte, &format_args!("daa"));
                 let al = self.get_reg(Reg8::Al);
+                let original_af = self.get_flag(Flag::AuxiliaryCarry);
                 let mut result = al;
                 // If low nibble is greater than 9 or incoming AF is set
                 if (al & 0x0f) > 0b1001 || self.get_flag(Flag::AuxiliaryCarry) {
@@ -368,7 +369,7 @@ impl Cpu {
                 } else {
                     self.set_flag(Flag::AuxiliaryCarry, false);
                 }
-                if al > 0x99 || self.get_flag(Flag::Carry) {
+                if al > if original_af { 0x9F } else { 0x99 } || self.get_flag(Flag::Carry) {
                     result = result.wrapping_add(0x60);
                     self.set_flag(Flag::Carry, true);
                 } else {
