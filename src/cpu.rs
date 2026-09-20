@@ -1356,6 +1356,18 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(displacement as i16);
                 }
             }
+            0xE4 => {
+                // IN AL, imm8
+                let port = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("in al, {:X}h", port));
+                return Ok(CpuStepResult::PortRead8 { port: port as u16 });
+            }
+            0xE5 => {
+                // IN AX, imm8
+                let port = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("in ax, {:X}h", port));
+                return Ok(CpuStepResult::PortRead16 { port: port as u16 });
+            }
             0xE6 => {
                 // OUT imm8, AL
                 let port = self.fetch_next_byte_and_advance_ip(memory);
@@ -1424,6 +1436,14 @@ impl Cpu {
                 return Ok(CpuStepResult::PortWrite8 {
                     port: port,
                     value: self.get_reg(Reg8::Al),
+                });
+            }
+            0xEF => {
+                // OUT DX, AX
+                self.print_instruction(byte, &format_args!("out dx, ax"));
+                return Ok(CpuStepResult::PortWrite16 {
+                    port: self.dx,
+                    value: self.ax,
                 });
             }
             0xF6 => {
