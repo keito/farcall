@@ -14,7 +14,10 @@ use winit::{
 };
 
 use crate::{
-    frontend::keyboard::{ModifierState, translate_winit_key},
+    frontend::{
+        cga_renderer::CgaRenderer,
+        keyboard::{ModifierState, translate_winit_key},
+    },
     machine::{DiskType, LoadMode, Machine, MachineStepResult},
 };
 
@@ -26,10 +29,12 @@ pub struct App {
     next_frame: Instant,
     exit_code: Option<u8>,
     modifier_state: ModifierState,
+    cga_renderer: Option<CgaRenderer>,
 }
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 200;
+const CORRECTED_HEIGHT: u32 = 480;
 const WINDOW_TITLE: &str = "PC86";
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_700); // 60 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
@@ -51,16 +56,14 @@ impl ApplicationHandler for App {
                 event_loop.create_window(
                     Window::default_attributes()
                         .with_title(WINDOW_TITLE)
-                        .with_inner_size(LogicalSize::new(
-                            f64::from(WIDTH) * 2.0,
-                            f64::from(HEIGHT) * 2.0,
-                        ))
-                        .with_min_inner_size(LogicalSize::new(WIDTH as f64, HEIGHT as f64)),
+                        .with_inner_size(LogicalSize::new(WIDTH, CORRECTED_HEIGHT))
+                        .with_min_inner_size(LogicalSize::new(WIDTH, CORRECTED_HEIGHT)),
                 )?,
             );
             let size = window.inner_size();
             let surface = SurfaceTexture::new(size.width, size.height, window.clone());
             let pixels = Pixels::new(WIDTH, HEIGHT, surface)?;
+            self.cga_renderer = Some(CgaRenderer::new(&pixels));
             Ok((window, pixels))
         })();
         match result {
@@ -118,7 +121,16 @@ impl ApplicationHandler for App {
                 window.pre_present_notify();
                 let pixels = self.pixels.as_mut().unwrap();
                 self.machine.render_video(pixels.frame_mut());
-                if let Err(error) = pixels.render() {
+                if let Err(error) = pixels.render_with(|encoder, render_target, _context| {
+                    let margin = (12.0 * window.scale_factor()) as f32;
+                    self.cga_renderer.as_ref().unwrap().render(
+                        encoder,
+                        render_target,
+                        size.width,
+                        size.height,
+                        margin,
+                    )
+                }) {
                     self.fail(event_loop, error.into());
                 }
             }
@@ -180,6 +192,7 @@ pub(crate) fn run(
             ctrl: false,
             alt: false,
         },
+        cga_renderer: None,
     };
     event_loop.run_app(&mut app)?;
     match app.error {
