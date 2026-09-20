@@ -377,6 +377,22 @@ impl Cpu {
                 self.set_reg(Reg8::Al, result);
                 self.set_result_flags(result);
             }
+            0x37 => {
+                // AAA: ASCII Adjust After Addition
+                self.print_instruction(byte, &format_args!("aaa"));
+                let mut al = self.get_reg(Reg8::Al);
+                let flag;
+                if (al & 0x0F) > 9 || self.get_flag(Flag::AuxiliaryCarry) {
+                    al = al.wrapping_add(6); // wrapping byte addition
+                    self.set_reg(Reg8::Ah, self.get_reg(Reg8::Ah).wrapping_add(1));
+                    flag = true;
+                } else {
+                    flag = false;
+                }
+                self.set_flag(Flag::AuxiliaryCarry, flag);
+                self.set_flag(Flag::Carry, flag);
+                self.set_reg(Reg8::Al, al & 0x0F);
+            }
             0x3F => {
                 // AAS: ASCII Adjust After Subtraction
                 self.print_instruction(byte, &format_args!("aas"));
