@@ -6,6 +6,17 @@ pub(super) struct Fdc {
     dor: u8,
     interrupt_request: bool,
     result_bytes: VecDeque<u8>,
+    command_state: CommandState,
+    step_rate: u8,
+    head_unload_time: u8,
+    head_load_time: u8,
+    non_dma: bool,
+}
+
+enum CommandState {
+    Idle,
+    SpecifyFirst,
+    SpecifySecond,
 }
 
 impl Fdc {
@@ -14,6 +25,11 @@ impl Fdc {
             dor: 0,
             interrupt_request: false,
             result_bytes: VecDeque::new(),
+            command_state: CommandState::Idle,
+            step_rate: 0,
+            head_unload_time: 0,
+            head_load_time: 0,
+            non_dma: false,
         }
     }
 
@@ -21,7 +37,10 @@ impl Fdc {
         match port {
             // Idle vs result bytes available status
             0x3F4 => {
-                if self.result_bytes.is_empty() {
+                if !matches!(self.command_state, CommandState::Idle) {
+                    // Command busy bit set
+                    0x90
+                } else if self.result_bytes.is_empty() {
                     0x80
                 } else {
                     0xD0
@@ -30,6 +49,21 @@ impl Fdc {
             // Result bytes from commands
             0x3F5 => self.result_bytes.pop_front().unwrap_or(0),
             _ => unreachable!(),
+        }
+    }
+
+    fn sense_interrupt_status(&mut self) {
+        // TODO: Fix the check here
+        if self.interrupt_request {
+            // Sense Interrupt Status
+            self.interrupt_request = false;
+            // Ready-change status for drive A (ST0)
+            self.result_bytes.push_back(0xC0);
+            // Cylinder 0
+            self.result_bytes.push_back(0x00);
+        } else {
+            // Invalid command
+            self.result_bytes.push_back(0x80);
         }
     }
 
@@ -42,26 +76,39 @@ impl Fdc {
                 } else if (self.dor & 0x4 != 0) && (value & 0x4 == 0) {
                     // Entering Reset
                     self.result_bytes.clear();
+                    self.command_state = CommandState::Idle;
                     self.interrupt_request = false;
                 }
                 self.dor = value;
             }
             0x3F5 => {
                 // Command bytes
-                if value == 0x08 {
-                    // TODO: Fix the check here
-                    if self.interrupt_request {
-                        // Sense Interrupt Status
-                        self.interrupt_request = false;
-                        // Ready-change status for drive A (ST0)
-                        self.result_bytes.push_back(0xC0);
-                        // Cylinder 0
-                        self.result_bytes.push_back(0x00);
-                    } else {
-                        // Invalid command
-                        self.result_bytes.push_back(0x80);
-                    }
+                // Disallow new commands while there are results to be read
+                if !self.result_bytes.is_empty() {
+                    return;
                 }
+                match self.command_state {
+                    CommandState::Idle => {
+                        match value {
+                            0x03 => self.command_state = CommandState::SpecifyFirst,
+                            0x08 => self.sense_interrupt_status(),
+                            _ => {
+                                // Unknown command
+                                self.result_bytes.push_back(0x80);
+                            }
+                        };
+                    }
+                    CommandState::SpecifyFirst => {
+                        self.step_rate = value >> 4;
+                        self.head_unload_time = value & 0x0F;
+                        self.command_state = CommandState::SpecifySecond;
+                    }
+                    CommandState::SpecifySecond => {
+                        self.head_load_time = value >> 1;
+                        self.non_dma = value & 1 != 0;
+                        self.command_state = CommandState::Idle;
+                    }
+                };
             }
             _ => unreachable!(),
         }
