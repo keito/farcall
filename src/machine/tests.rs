@@ -1,4 +1,4 @@
-use crate::machine::{Pic, Pit, Ppi};
+use crate::machine::{Fdc, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
 use std::time::Instant;
@@ -23,6 +23,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     cpu: Cpu::new(0),
                     memory: vec![0xCC; 0x50000],
                     handles: vec![],
+                    fdc: Fdc::new(),
                     floppy_image: None,
                     boot_time: Instant::now(),
                     last_step_time: Instant::now(),
@@ -144,6 +145,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         cpu: Cpu::new(0),
         memory: vec![0xCC; 0x40000],
         handles: vec![],
+        fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
         last_step_time: Instant::now(),
@@ -230,6 +232,7 @@ fn write_service_clears_only_carry() {
         cpu: Cpu::new(0),
         memory: vec![0; 16],
         handles: vec![],
+        fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
         last_step_time: Instant::now(),
@@ -267,6 +270,7 @@ fn dos_termination_returns_al_as_exit_code() {
             cpu: Cpu::new(0),
             memory: vec![],
             handles: vec![],
+            fdc: Fdc::new(),
             floppy_image: None,
             boot_time: Instant::now(),
             last_step_time: Instant::now(),
@@ -301,6 +305,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         cpu: Cpu::new(0),
         memory: vec![0xCC; 0x100000],
         handles: vec![Some(super::Resource::Stdin)],
+        fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
         last_step_time: Instant::now(),

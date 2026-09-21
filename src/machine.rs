@@ -13,6 +13,7 @@ use crate::memory::{
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
+use fdc::Fdc;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
@@ -23,6 +24,7 @@ pub use disk::DiskType;
 mod console;
 mod disk;
 mod dos;
+mod fdc;
 mod pic;
 mod pit;
 mod ppi;
@@ -37,6 +39,7 @@ pub struct Machine {
     /// Read line buffer (DOS mode only)
     console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
+    fdc: Fdc,
     floppy_image: Option<FloppyDisk>,
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
@@ -126,6 +129,7 @@ impl Machine {
                 Some(Resource::Stdout),
                 Some(Resource::Console),
             ],
+            fdc: Fdc::new(),
             floppy_image: None,
             keyboard_buffer: VecDeque::new(),
             keyboard_irq_pending: false,
@@ -584,11 +588,16 @@ impl Machine {
                     }
                     0x40..=0x43 => {
                         self.pit.write(port, value);
-                        // Synchronize PIC's IRQ lines with the PIT
+                        // Synchronize PIC's IRQ lines with the PIT's output
                         self.pic.set_irq_line(0, self.pit.output0());
                     }
                     0x60..=0x63 => {
                         self.ppi.write(port, value);
+                    }
+                    0x3F2 => {
+                        self.fdc.write(port, value);
+                        // Synchronize PIC's IRQ line with the FDC's output
+                        self.pic.set_irq_line(6, self.fdc.irq_output());
                     }
                     _ => (),
                 };
