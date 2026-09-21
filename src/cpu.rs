@@ -1344,25 +1344,13 @@ impl Cpu {
                 let result = read_byte(memory, PhysAddr::new(seg_addr, offset))?;
                 self.set_reg(Reg8::Al, result);
             }
-            0xD9 => {
-                // 8087 instruction
-                let next_byte = self.fetch_next_byte_and_advance_ip(memory);
-                if next_byte == 0x3E {
-                    // This is FNSTCW [disp16]
-                    // TODO: We don't emulate an 8087. Fetch the next word and ignore it
-                    self.fetch_next_word_and_advance_ip(memory);
-                } else {
-                    return Err(CpuError::UnsupportedInstruction(0xD9));
-                }
-            }
-            0xDB => {
-                // 8087 instruction
-                let next_byte = self.fetch_next_byte_and_advance_ip(memory);
-                if next_byte == 0xE3 {
-                    // This is the FNINIT (initialize 8087 without waiting)
-                    // TODO: We don't emulate an 8087. We'll consume it and ignore it
-                } else {
-                    return Err(CpuError::UnsupportedInstruction(0xE3));
+            0xD8..=0xDF => {
+                // ESC: 8087 instruction
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                if let RegisterOrMemoryOperand::Memory(_, _) = rm {
+                    // Perform dummy read of the word at that location
+                    self.read_operand(memory, &rm)?;
                 }
             }
             0xE0 => {
