@@ -567,6 +567,10 @@ impl Machine {
                         // Video Service
                         self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
                     }
+                    0x3F4 | 0x3F5 => {
+                        let result = self.fdc.read(port);
+                        self.cpu.set_reg(Reg8::Al, result);
+                    }
                     0x60..=0x63 => {
                         let result = self.ppi.read(port);
                         self.cpu.set_reg(Reg8::Al, result);
@@ -594,7 +598,7 @@ impl Machine {
                     0x60..=0x63 => {
                         self.ppi.write(port, value);
                     }
-                    0x3F2 => {
+                    0x3F2 | 0x3F5 => {
                         self.fdc.write(port, value);
                         // Synchronize PIC's IRQ line with the FDC's output
                         self.pic.set_irq_line(6, self.fdc.irq_output());
