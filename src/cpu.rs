@@ -30,6 +30,7 @@ pub(crate) struct Cpu {
     pub(crate) es: u16,
     pub(crate) ss: u16,
     pub(crate) flags: u16,
+    pub(crate) halted: bool,
     pub(crate) verbosity: u8,
 }
 
@@ -94,6 +95,7 @@ impl Cpu {
             es: 0x0,
             ss: 0x0,
             flags: normalize_flags(0),
+            halted: false,
             verbosity,
         }
     }
@@ -225,6 +227,10 @@ impl Cpu {
 
     /// Fetch, decode, and execute one instruction
     pub(crate) fn step(&mut self, memory: &mut [u8]) -> Result<CpuStepResult, CpuError> {
+        if self.halted {
+            return Ok(CpuStepResult::Continue);
+        }
+
         let mut byte;
         let mut segment_override = None;
         let mut rep_prefix = None;
@@ -1478,6 +1484,11 @@ impl Cpu {
                     value: self.ax,
                 });
             }
+            0xF4 => {
+                // HLT
+                self.halted = true;
+                return Ok(CpuStepResult::Continue);
+            }
             0xF6 => {
                 // Does many things with REG8/MEM8(, IMMED8)
                 let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
@@ -1838,6 +1849,8 @@ impl Cpu {
         if self.ip == 0 && self.cs == 0 && self.verbosity > 0 {
             eprintln!("Warning: INT {interrupt:02X}h vector points to 0000:0000");
         }
+
+        self.halted = false;
 
         Ok(())
     }
