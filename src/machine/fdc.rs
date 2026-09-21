@@ -14,6 +14,7 @@ pub(super) struct Fdc {
     head_unload_time: u8,
     head_load_time: u8,
     non_dma: bool,
+    read_data: Option<ReadData>,
 }
 
 enum PendingInterrupt {
@@ -26,6 +27,13 @@ enum CommandState {
     SpecifyFirst,
     SpecifySecond,
     RecalibrateDrive,
+    ReadData,
+}
+
+struct ReadData {
+    command: u8,
+    parameters: [u8; 8],
+    next: usize,
 }
 
 impl Fdc {
@@ -39,6 +47,7 @@ impl Fdc {
             head_unload_time: 0,
             head_load_time: 0,
             non_dma: false,
+            read_data: None,
         }
     }
 
@@ -81,6 +90,15 @@ impl Fdc {
         }
     }
 
+    fn read_data(&mut self) {
+        let read_data = self.read_data.as_ref().expect("expectorant");
+        todo!(
+            "read_data not impled. command: {}, parameters: {:?}",
+            read_data.command,
+            read_data.parameters
+        );
+    }
+
     pub(super) fn write(&mut self, port: u16, value: u8) {
         match port {
             0x3F2 => {
@@ -92,6 +110,7 @@ impl Fdc {
                     self.result_bytes.clear();
                     self.command_state = CommandState::Idle;
                     self.interrupt_request = None;
+                    self.read_data = None;
                 }
                 self.dor = value;
             }
@@ -107,6 +126,14 @@ impl Fdc {
                             0x03 => self.command_state = CommandState::SpecifyFirst,
                             0x07 => self.command_state = CommandState::RecalibrateDrive,
                             0x08 => self.sense_interrupt_status(),
+                            _ if value & 0x1F == 0x06 => {
+                                self.read_data = Some(ReadData {
+                                    command: value,
+                                    parameters: [0; 8],
+                                    next: 0,
+                                });
+                                self.command_state = CommandState::ReadData;
+                            }
                             _ => {
                                 // Unknown command
                                 self.result_bytes.push_back(0x80);
@@ -129,6 +156,18 @@ impl Fdc {
                             drive: value & 0x03,
                         });
                         self.command_state = CommandState::Idle;
+                    }
+                    CommandState::ReadData => {
+                        let Some(read_data) = self.read_data.as_mut() else {
+                            panic!("ReadData state without read_data set");
+                        };
+                        read_data.parameters[read_data.next] = value;
+                        if read_data.next == 7 {
+                            self.command_state = CommandState::Idle;
+                            self.read_data();
+                        } else {
+                            read_data.next += 1;
+                        }
                     }
                 };
             }
