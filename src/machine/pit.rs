@@ -36,23 +36,40 @@ impl Counter {
         if self.current == 0 {
             return;
         }
-        for _ in 0..ticks {
-            // By checking if current is odd, we catch the first time an odd reload is ticked
-            if self.current % 2 != 0 {
-                if self.output {
-                    // If at the start of the high half-period, subtract 1
+
+        match self.mode {
+            2 => {
+                for _ in 0..ticks {
                     self.current -= 1;
-                } else {
-                    // If at the start of the low half-period, subtract 3
-                    self.current -= 3;
+                    if self.current == 1 {
+                        self.output = false;
+                    } else if self.current == 0 {
+                        self.output = true;
+                        self.current = self.reload;
+                    }
                 }
-            } else {
-                self.current -= 2;
             }
-            if self.current == 0 {
-                self.current = self.reload;
-                self.output = !self.output;
+            3 => {
+                for _ in 0..ticks {
+                    // By checking if current is odd, we catch the first time an odd reload is ticked
+                    if self.current % 2 != 0 {
+                        if self.output {
+                            // If at the start of the high half-period, subtract 1
+                            self.current -= 1;
+                        } else {
+                            // If at the start of the low half-period, subtract 3
+                            self.current -= 3;
+                        }
+                    } else {
+                        self.current -= 2;
+                    }
+                    if self.current == 0 {
+                        self.current = self.reload;
+                        self.output = !self.output;
+                    }
+                }
             }
+            _ => unreachable!(),
         }
     }
 
@@ -130,10 +147,11 @@ impl Pit {
                 }
                 counter.mode = (value >> 1) & 0b111;
                 match counter.mode {
-                    3 => {
-                        counter.output = true;
-                    }
-                    _ => todo!("Only mode 3 is supported: {}", counter.mode),
+                    2 | 3 => counter.output = true,
+                    _ => todo!(
+                        "Only modes 2 and 3 are supported: Requested mode {}",
+                        counter.mode
+                    ),
                 }
                 counter.bcd = value & 1 != 0;
                 if counter.bcd {
