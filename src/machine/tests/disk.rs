@@ -1,6 +1,6 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
-use crate::machine::{LoadMode, MachineError, Ppi, TextVideo};
+use crate::machine::{LoadMode, MachineError, Pic, Ppi, TextVideo};
 use crate::memory::MemoryError;
 use std::time::Instant;
 
@@ -69,6 +69,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         pending_input: None,
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
+        pic: Pic::new(),
         ppi: Ppi::new(),
         console_read_buffer: Default::default(),
         text_video: TextVideo::new(),

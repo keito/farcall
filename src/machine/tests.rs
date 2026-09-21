@@ -1,4 +1,4 @@
-use crate::machine::Ppi;
+use crate::machine::{Pic, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
 use std::time::Instant;
@@ -30,6 +30,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     pending_input: None,
                     keyboard_buffer: Default::default(),
                     keyboard_irq_pending: false,
+                    pic: Pic::new(),
                     ppi: Ppi::new(),
                     console_read_buffer: Default::default(),
                     text_video: TextVideo::new(),
@@ -147,6 +148,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         pending_input: None,
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
+        pic: Pic::new(),
         ppi: Ppi::new(),
         console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
@@ -229,6 +231,7 @@ fn write_service_clears_only_carry() {
         pending_input: None,
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
+        pic: Pic::new(),
         ppi: Ppi::new(),
         console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
@@ -262,6 +265,7 @@ fn dos_termination_returns_al_as_exit_code() {
             pending_input: None,
             keyboard_buffer: Default::default(),
             keyboard_irq_pending: false,
+            pic: Pic::new(),
             ppi: Ppi::new(),
             console_read_buffer: Default::default(),
             text_video: TextVideo::new(),
@@ -292,6 +296,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         pending_input: None,
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
+        pic: Pic::new(),
         ppi: Ppi::new(),
         console_read_buffer: Default::default(),
         text_video: TextVideo::new(),

@@ -13,6 +13,7 @@ use crate::memory::{
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
+use pic::Pic;
 use ppi::Ppi;
 use video::TextVideo;
 
@@ -21,6 +22,7 @@ pub use disk::DiskType;
 mod console;
 mod disk;
 mod dos;
+mod pic;
 mod ppi;
 #[cfg(test)]
 mod tests;
@@ -41,6 +43,7 @@ pub struct Machine {
     memory: Vec<u8>,
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
+    pic: Pic,
     ppi: Ppi,
     text_video: TextVideo,
     verbosity: u8,
@@ -120,6 +123,7 @@ impl Machine {
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
+            pic: Pic::new(),
             ppi: Ppi::new(),
             text_video: TextVideo::new(),
             verbosity,
@@ -489,6 +493,12 @@ impl Machine {
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         if self.pending_input.is_some() {
             return self.handle_pending_input();
+        }
+
+        // Check PIC for pending interrupts
+        if self.pic.interrupt_pending() && self.cpu.get_flag(Flag::InterruptEnable) {
+            let vector = self.pic.acknowledge();
+            self.cpu.enter_interrupt(&mut self.memory, vector)?;
         }
 
         // Deliver keyboard IRQ
