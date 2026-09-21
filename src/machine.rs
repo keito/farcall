@@ -523,6 +523,10 @@ impl Machine {
             }
             CpuStepResult::PortRead8 { port } => {
                 match port {
+                    0x20 | 0x21 => {
+                        let result = self.pic.read(port);
+                        self.cpu.set_reg(Reg8::Al, result);
+                    }
                     0x3DA => {
                         // Video Service
                         self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
@@ -543,6 +547,9 @@ impl Machine {
             }
             CpuStepResult::PortWrite8 { port, value } => {
                 match port {
+                    0x20 | 0x21 => {
+                        self.pic.write(port, value);
+                    }
                     0x60..=0x63 => {
                         self.ppi.write(port, value);
                     }
