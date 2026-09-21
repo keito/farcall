@@ -133,7 +133,7 @@ impl Pit {
                     3 => {
                         counter.output = true;
                     }
-                    _ => todo!("Only mode 3 is supported"),
+                    _ => todo!("Only mode 3 is supported: {}", counter.mode),
                 }
                 counter.bcd = value & 1 != 0;
                 if counter.bcd {
@@ -150,5 +150,9 @@ impl Pit {
         self.counter0.advance(ticks);
         self.counter1.advance(ticks);
         self.counter2.advance(ticks);
+    }
+
+    pub(super) fn output0(&self) -> bool {
+        self.counter0.output
     }
 }

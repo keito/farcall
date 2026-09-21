@@ -33,6 +33,7 @@ mod video;
 // Owns everything
 pub struct Machine {
     boot_time: Instant,
+    last_step_time: Instant,
     /// Read line buffer (DOS mode only)
     console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
@@ -49,6 +50,8 @@ pub struct Machine {
     pit: Pit,
     ppi: Ppi,
     text_video: TextVideo,
+    /// Fraction of a PIT tick remaining after a step
+    tick_remainder: u128,
     verbosity: u8,
 }
 
@@ -115,6 +118,7 @@ impl Machine {
 
         let mut machine = Machine {
             boot_time: Instant::now(),
+            last_step_time: Instant::now(),
             console_read_buffer: VecDeque::new(),
             cpu: Cpu::new(verbosity),
             handles: vec![
@@ -132,6 +136,7 @@ impl Machine {
             pit: Pit::new(),
             ppi: Ppi::new(),
             text_video: TextVideo::new(),
+            tick_remainder: 0,
             verbosity,
         };
         machine.handles.resize(20, None);
@@ -496,10 +501,27 @@ impl Machine {
         }
     }
 
+    fn advance_devices(&mut self) {
+        let now = Instant::now();
+        let ns_elapsed = now.duration_since(self.last_step_time).as_nanos();
+        let scaled = ns_elapsed * 1_193_182 + self.tick_remainder;
+        let ticks = scaled / 1_000_000_000;
+        self.tick_remainder = scaled % 1_000_000_000;
+        self.last_step_time = now;
+
+        for _ in 0..ticks {
+            self.pit.advance(1);
+            self.pic.set_irq_line(0, self.pit.output0());
+        }
+    }
+
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
         if self.pending_input.is_some() {
             return self.handle_pending_input();
         }
+
+        // Advance non-CPU devices
+        self.advance_devices();
 
         // Check PIC for pending interrupts
         if self.pic.interrupt_pending() && self.cpu.get_flag(Flag::InterruptEnable) {
@@ -562,6 +584,8 @@ impl Machine {
                     }
                     0x40..=0x43 => {
                         self.pit.write(port, value);
+                        // Synchronize PIC's IRQ lines with the PIT
+                        self.pic.set_irq_line(0, self.pit.output0());
                     }
                     0x60..=0x63 => {
                         self.ppi.write(port, value);

@@ -64,6 +64,8 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         handles: vec![],
         floppy_image: image.map(floppy_360kib),
         boot_time: Instant::now(),
+        last_step_time: Instant::now(),
+        tick_remainder: 0,
         verbosity: 0,
         load_mode: LoadMode::Boot,
         pending_input: None,
