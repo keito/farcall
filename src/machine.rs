@@ -13,6 +13,7 @@ use crate::memory::{
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
+use ppi::Ppi;
 use video::TextVideo;
 
 pub use disk::DiskType;
@@ -20,6 +21,7 @@ pub use disk::DiskType;
 mod console;
 mod disk;
 mod dos;
+mod ppi;
 #[cfg(test)]
 mod tests;
 mod video;
@@ -39,6 +41,7 @@ pub struct Machine {
     memory: Vec<u8>,
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
+    ppi: Ppi,
     text_video: TextVideo,
     verbosity: u8,
 }
@@ -117,6 +120,7 @@ impl Machine {
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
+            ppi: Ppi::new(),
             text_video: TextVideo::new(),
             verbosity,
         };
@@ -508,19 +512,34 @@ impl Machine {
                 }
             }
             CpuStepResult::PortRead8 { port } => {
-                if port == 0x3DA {
-                    // Video Service
-                    self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
-                } else {
-                    self.cpu.set_reg(Reg8::Al, 0xFF);
-                }
+                match port {
+                    0x3DA => {
+                        // Video Service
+                        self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
+                    }
+                    0x60..=0x63 => {
+                        let result = self.ppi.read(port);
+                        self.cpu.set_reg(Reg8::Al, result);
+                    }
+                    _ => {
+                        self.cpu.set_reg(Reg8::Al, 0xFF);
+                    }
+                };
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortRead16 { .. } => {
                 self.cpu.ax = 0xFFFF;
                 Ok(MachineStepResult::Continue)
             }
-            CpuStepResult::PortWrite8 { .. } => Ok(MachineStepResult::Continue),
+            CpuStepResult::PortWrite8 { port, value } => {
+                match port {
+                    0x60..=0x63 => {
+                        self.ppi.write(port, value);
+                    }
+                    _ => (),
+                };
+                Ok(MachineStepResult::Continue)
+            }
             CpuStepResult::PortWrite16 { .. } => Ok(MachineStepResult::Continue),
         };
         self.cpu.trace();
