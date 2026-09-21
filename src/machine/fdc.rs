@@ -1,5 +1,8 @@
 use std::collections::VecDeque;
 
+#[cfg(test)]
+mod tests;
+
 /// Emulates a Floppy Disk Controller
 pub(super) struct Fdc {
     /// Digital Output Register

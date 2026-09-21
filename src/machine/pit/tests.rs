@@ -1,5 +1,8 @@
 use super::{Counter, Pit};
 
+mod latch;
+mod mode2;
+
 // Intel 8253/8253-5, Mode 3: https://web.cecs.pdx.edu/~mpj/llp/references/8253.pdf
 // Binary counting, with GATE assumed enabled. Traces start after the initial
 // count is loaded, as modeled by the current write API; pin-level load timing

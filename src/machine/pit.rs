@@ -9,25 +9,29 @@ pub(super) struct Pit {
 }
 
 struct Counter {
-    reload: u32,
-    pending_reload: u16,
-    current: u32,
-    state: CounterState,
-    mode: u8,
+    access_mode: AccessMode,
     bcd: bool,
+    byte_phase: BytePhase,
+    current: u32,
+    latched_count: Option<u16>,
+    mode: u8,
     output: bool,
+    pending_reload: u16,
+    reload: u32,
 }
 
 impl Counter {
     fn new() -> Self {
         Self {
+            access_mode: AccessMode::LowThenHigh,
+            byte_phase: BytePhase::Low,
             reload: 0,
             pending_reload: 0,
             current: 0,
-            state: CounterState::Undefined,
             mode: 0,
             bcd: false,
             output: false,
+            latched_count: None,
         }
     }
 
@@ -52,6 +56,7 @@ impl Counter {
             3 => {
                 for _ in 0..ticks {
                     // By checking if current is odd, we catch the first time an odd reload is ticked
+                    // because after that, the subtraction below makes it even
                     if self.current % 2 != 0 {
                         if self.output {
                             // If at the start of the high half-period, subtract 1
@@ -73,19 +78,50 @@ impl Counter {
         }
     }
 
+    fn read(&mut self) -> u8 {
+        let Some(latched_count) = self.latched_count else {
+            return 0;
+        };
+
+        match self.access_mode {
+            AccessMode::LowThenHigh => match self.byte_phase {
+                BytePhase::Low => {
+                    self.byte_phase = BytePhase::High;
+                    (latched_count & 0xFF) as u8
+                }
+                BytePhase::High => {
+                    self.byte_phase = BytePhase::Low;
+                    self.latched_count = None;
+                    (latched_count >> 8) as u8
+                }
+            },
+            AccessMode::LowOnly => {
+                self.latched_count = None;
+                (latched_count & 0xFF) as u8
+            }
+            AccessMode::HighOnly => {
+                self.latched_count = None;
+                (latched_count >> 8) as u8
+            }
+        }
+    }
+
     fn write(&mut self, value: u8) {
-        match self.state {
-            CounterState::Undefined => panic!("Undef"),
-            CounterState::ExpectLeastSignificantByte => {
-                self.pending_reload = value as u16;
-                self.state = CounterState::ExpectMostSignificantByte;
-            }
-            CounterState::ExpectMostSignificantByte => {
-                self.update_reload(((self.pending_reload & 0x00FF) | ((value as u16) << 8)) as u32);
-                self.state = CounterState::ExpectLeastSignificantByte;
-            }
-            CounterState::LeastSignificantByteOnly => self.update_reload(value as u32),
-            CounterState::MostSignificantByteOnly => self.update_reload((value as u32) << 8),
+        match self.access_mode {
+            AccessMode::LowThenHigh => match self.byte_phase {
+                BytePhase::Low => {
+                    self.pending_reload = value as u16;
+                    self.byte_phase = BytePhase::High;
+                }
+                BytePhase::High => {
+                    self.update_reload(
+                        ((self.pending_reload & 0x00FF) | ((value as u16) << 8)) as u32,
+                    );
+                    self.byte_phase = BytePhase::Low;
+                }
+            },
+            AccessMode::LowOnly => self.update_reload(value as u32),
+            AccessMode::HighOnly => self.update_reload((value as u32) << 8),
         }
     }
 
@@ -100,12 +136,15 @@ impl Counter {
     }
 }
 
-enum CounterState {
-    Undefined,
-    MostSignificantByteOnly,
-    LeastSignificantByteOnly,
-    ExpectLeastSignificantByte,
-    ExpectMostSignificantByte,
+enum AccessMode {
+    LowOnly,
+    HighOnly,
+    LowThenHigh,
+}
+
+enum BytePhase {
+    Low,
+    High,
 }
 
 impl Pit {
@@ -117,9 +156,12 @@ impl Pit {
         }
     }
 
-    pub(super) fn read(&self, port: u16) -> u8 {
+    pub(super) fn read(&mut self, port: u16) -> u8 {
         match port {
-            _ => todo!(),
+            0x40 => self.counter0.read(),
+            0x41 => self.counter1.read(),
+            0x42 => self.counter2.read(),
+            _ => unreachable!(),
         }
     }
 
@@ -139,12 +181,28 @@ impl Pit {
                 };
                 // RL - Read/Load
                 match (value >> 4) & 0b11 {
-                    0b00 => todo!("Counter latching operation"),
-                    0b10 => counter.state = CounterState::MostSignificantByteOnly,
-                    0b01 => counter.state = CounterState::LeastSignificantByteOnly,
-                    0b11 => counter.state = CounterState::ExpectLeastSignificantByte,
+                    0b00 => {
+                        // Ignore command if we still have a latched count stored
+                        if counter.latched_count.is_some() {
+                            return;
+                        }
+                        counter.latched_count = Some(if counter.current == 65_536 {
+                            0
+                        } else {
+                            counter.current as u16
+                        });
+                        counter.byte_phase = BytePhase::Low;
+                        return;
+                    }
+                    0b10 => counter.access_mode = AccessMode::HighOnly,
+                    0b01 => counter.access_mode = AccessMode::LowOnly,
+                    0b11 => {
+                        counter.access_mode = AccessMode::LowThenHigh;
+                        counter.byte_phase = BytePhase::Low;
+                    }
                     _ => unreachable!(),
                 }
+
                 counter.mode = (value >> 1) & 0b111;
                 match counter.mode {
                     2 | 3 => counter.output = true,
