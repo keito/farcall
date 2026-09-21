@@ -14,6 +14,7 @@ use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
 use dos::Resource;
 use pic::Pic;
+use pit::Pit;
 use ppi::Ppi;
 use video::TextVideo;
 
@@ -23,6 +24,7 @@ mod console;
 mod disk;
 mod dos;
 mod pic;
+mod pit;
 mod ppi;
 #[cfg(test)]
 mod tests;
@@ -44,6 +46,7 @@ pub struct Machine {
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
     pic: Pic,
+    pit: Pit,
     ppi: Ppi,
     text_video: TextVideo,
     verbosity: u8,
@@ -79,6 +82,8 @@ pub enum MachineError {
     KeyboardServiceError(String),
     #[error("BIOS System Service error: {0}")]
     BiosSystemServiceError(String),
+    #[error("PIC error: {0}")]
+    PicError(String),
 }
 
 enum InterruptResult {
@@ -124,6 +129,7 @@ impl Machine {
             memory: vec![0; memory_size],
             pending_input: None,
             pic: Pic::new(),
+            pit: Pit::new(),
             ppi: Ppi::new(),
             text_video: TextVideo::new(),
             verbosity,
@@ -497,7 +503,7 @@ impl Machine {
 
         // Check PIC for pending interrupts
         if self.pic.interrupt_pending() && self.cpu.get_flag(Flag::InterruptEnable) {
-            let vector = self.pic.acknowledge();
+            let vector = self.pic.acknowledge()?;
             self.cpu.enter_interrupt(&mut self.memory, vector)?;
         }
 
@@ -527,6 +533,10 @@ impl Machine {
                         let result = self.pic.read(port);
                         self.cpu.set_reg(Reg8::Al, result);
                     }
+                    0x40..=0x43 => {
+                        let result = self.pit.read(port);
+                        self.cpu.set_reg(Reg8::Al, result);
+                    }
                     0x3DA => {
                         // Video Service
                         self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
@@ -549,6 +559,9 @@ impl Machine {
                 match port {
                     0x20 | 0x21 => {
                         self.pic.write(port, value);
+                    }
+                    0x40..=0x43 => {
+                        self.pit.write(port, value);
                     }
                     0x60..=0x63 => {
                         self.ppi.write(port, value);

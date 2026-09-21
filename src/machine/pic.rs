@@ -1,3 +1,5 @@
+use crate::machine::MachineError;
+
 #[cfg(test)]
 mod tests;
 
@@ -12,17 +14,15 @@ pub(super) struct Pic {
     read_selector: ReadSelector,
 }
 
-#[derive(PartialEq)]
 enum PicState {
     ExpectIcw2,
     ExpectIcw4,
     Normal,
 }
 
-#[derive(PartialEq)]
 enum ReadSelector {
-    ReturnIrr,
-    ReturnIsr,
+    Irr,
+    Isr,
 }
 
 impl Pic {
@@ -34,19 +34,16 @@ impl Pic {
             imr: 0,
             vector_base: 0x08,
             state: PicState::Normal,
-            read_selector: ReadSelector::ReturnIrr,
+            read_selector: ReadSelector::Irr,
         }
     }
 
     pub(super) fn read(&self, port: u16) -> u8 {
         match port {
-            0x20 => {
-                if self.read_selector == ReadSelector::ReturnIrr {
-                    self.irr
-                } else {
-                    self.isr
-                }
-            }
+            0x20 => match self.read_selector {
+                ReadSelector::Irr => self.irr,
+                ReadSelector::Isr => self.isr,
+            },
             0x21 => self.imr,
             _ => 0,
         }
@@ -60,39 +57,29 @@ impl Pic {
                     // TODO: value is ICW1
                     self.state = PicState::ExpectIcw2;
                     self.imr = 0;
-                    self.read_selector = ReadSelector::ReturnIrr;
+                    self.read_selector = ReadSelector::Irr;
                     return;
                 }
 
                 if value & 0x08 != 0 {
                     // OCW3: read selection, polling, special mask mode
                     match value {
-                        0xA => {
-                            self.read_selector = ReadSelector::ReturnIrr;
-                        }
-                        0xB => {
-                            self.read_selector = ReadSelector::ReturnIsr;
-                        }
+                        0xA => self.read_selector = ReadSelector::Irr,
+                        0xB => self.read_selector = ReadSelector::Isr,
                         _ => (),
                     };
                 } else {
                     // OCW2: EOI and priority control
                     match value >> 5 {
-                        0b001 => {
-                            self.end_interrupt(None);
-                        }
-                        0b011 => {
-                            // value is 60h | irq
-                            self.end_interrupt(Some(value & 0x07));
-                        }
+                        0b001 => self.end_interrupt(None),
+                        // value is 60h | irq
+                        0b011 => self.end_interrupt(Some(value & 0x07)),
                         _ => (),
                     };
                 }
             }
             0x21 => match self.state {
-                PicState::Normal => {
-                    self.imr = value;
-                }
+                PicState::Normal => self.imr = value,
                 PicState::ExpectIcw2 => {
                     self.vector_base = value;
                     self.state = PicState::ExpectIcw4;
@@ -145,15 +132,15 @@ impl Pic {
     }
 
     /// Called by the CPU to acknowledge an interrupt and receive the interrupt vector address.
-    pub(super) fn acknowledge(&mut self) -> u8 {
-        let Some(irq) = self.next_pending_irq() else {
-            panic!("Acknowledge called when no pending IRQ")
-        };
+    pub(super) fn acknowledge(&mut self) -> Result<u8, MachineError> {
+        let irq = self.next_pending_irq().ok_or_else(|| {
+            MachineError::PicError("Acknowledge called when no pending IRQ".to_string())
+        })?;
 
         self.irr &= !(1 << irq);
         self.isr |= 1 << irq;
 
-        (self.vector_base & 0xF8) | irq
+        Ok((self.vector_base & 0xF8) | irq)
     }
 
     /// Called on End Of Interrupt, optionally with an IRQ
@@ -162,13 +149,7 @@ impl Pic {
             self.isr &= !(1 << irq);
         } else {
             // Non-specific EOI: clear the highest-priority in-service bit
-            for i in 0..8 {
-                let mask = 1 << i;
-                if self.isr & mask != 0 {
-                    self.isr &= !mask;
-                    break;
-                }
-            }
+            self.isr &= self.isr.wrapping_sub(1);
         }
     }
 }

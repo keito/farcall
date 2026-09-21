@@ -24,7 +24,7 @@ fn each_irq_maps_to_its_pc_vector_and_polling_does_not_consume_it() {
         for _ in 0..3 {
             assert!(pic.interrupt_pending());
         }
-        assert_eq!(pic.acknowledge(), vector);
+        assert_eq!(pic.acknowledge().unwrap(), vector);
         assert_eq!(pic.irr, 0);
         assert_eq!(pic.isr, 1 << irq);
         assert!(!pic.interrupt_pending());
@@ -39,7 +39,7 @@ fn simultaneous_requests_are_serviced_in_priority_order_without_loss() {
     }
     for vector in 0x08..=0x0F {
         assert!(pic.interrupt_pending());
-        assert_eq!(pic.acknowledge(), vector);
+        assert_eq!(pic.acknowledge().unwrap(), vector);
         assert!(
             !pic.interrupt_pending(),
             "lower priorities must wait for EOI"
@@ -54,7 +54,7 @@ fn held_high_line_does_not_retrigger_until_a_new_rising_edge() {
     for irq in 0..8 {
         let mut pic = Pic::new();
         pic.set_irq_line(irq, true);
-        pic.acknowledge();
+        pic.acknowledge().unwrap();
         pic.end_interrupt(Some(irq));
         for _ in 0..3 {
             pic.set_irq_line(irq, true);
@@ -64,7 +64,7 @@ fn held_high_line_does_not_retrigger_until_a_new_rising_edge() {
         assert!(!pic.interrupt_pending());
         pic.set_irq_line(irq, true);
         assert!(pic.interrupt_pending());
-        assert_eq!(pic.acknowledge(), 0x08 + irq);
+        assert_eq!(pic.acknowledge().unwrap(), 0x08 + irq);
     }
 }
 
@@ -73,13 +73,13 @@ fn new_edge_during_service_waits_for_eoi_and_is_not_lost() {
     for irq in 0..8 {
         let mut pic = Pic::new();
         pic.set_irq_line(irq, true);
-        pic.acknowledge();
+        pic.acknowledge().unwrap();
         pic.set_irq_line(irq, false);
         pic.set_irq_line(irq, true);
         assert!(!pic.interrupt_pending());
         pic.end_interrupt(None);
         assert!(pic.interrupt_pending());
-        assert_eq!(pic.acknowledge(), 0x08 + irq);
+        assert_eq!(pic.acknowledge().unwrap(), 0x08 + irq);
         pic.end_interrupt(None);
         assert!(!pic.interrupt_pending());
     }
@@ -99,7 +99,7 @@ fn mask_preserves_requests_until_they_are_unmasked() {
     for irq in (0..8).rev() {
         pic.imr = !(1 << irq);
         assert!(pic.interrupt_pending());
-        assert_eq!(pic.acknowledge(), 0x08 + irq);
+        assert_eq!(pic.acknowledge().unwrap(), 0x08 + irq);
         pic.end_interrupt(None);
         assert!(!pic.interrupt_pending());
     }
@@ -113,7 +113,7 @@ fn in_service_priority_blocks_same_and_lower_but_allows_higher_irqs() {
         for requested in 0..8 {
             let mut pic = Pic::new();
             pic.set_irq_line(active, true);
-            pic.acknowledge();
+            pic.acknowledge().unwrap();
             pic.set_irq_line(requested, false);
             pic.set_irq_line(requested, true);
             assert_eq!(
@@ -125,7 +125,7 @@ fn in_service_priority_blocks_same_and_lower_but_allows_higher_irqs() {
                 pic.end_interrupt(Some(active));
                 assert!(pic.interrupt_pending());
             }
-            assert_eq!(pic.acknowledge(), 0x08 + requested);
+            assert_eq!(pic.acknowledge().unwrap(), 0x08 + requested);
         }
     }
 }
@@ -134,16 +134,16 @@ fn in_service_priority_blocks_same_and_lower_but_allows_higher_irqs() {
 fn nonspecific_eoi_unwinds_nested_service_in_priority_order() {
     let mut pic = Pic::new();
     pic.set_irq_line(6, true);
-    assert_eq!(pic.acknowledge(), 0x0E);
+    assert_eq!(pic.acknowledge().unwrap(), 0x0E);
     pic.set_irq_line(1, true);
-    assert_eq!(pic.acknowledge(), 0x09);
+    assert_eq!(pic.acknowledge().unwrap(), 0x09);
     pic.set_irq_line(3, true);
     assert!(!pic.interrupt_pending());
 
     pic.end_interrupt(None);
     assert_eq!(pic.isr, 0x40, "IRQ6 remains in service after IRQ1's EOI");
     assert!(pic.interrupt_pending());
-    assert_eq!(pic.acknowledge(), 0x0B);
+    assert_eq!(pic.acknowledge().unwrap(), 0x0B);
     pic.end_interrupt(None);
     assert_eq!(pic.isr, 0x40);
     pic.end_interrupt(None);
@@ -155,9 +155,9 @@ fn nonspecific_eoi_unwinds_nested_service_in_priority_order() {
 fn specific_eoi_clears_only_the_named_in_service_irq() {
     let mut pic = Pic::new();
     pic.set_irq_line(6, true);
-    pic.acknowledge();
+    pic.acknowledge().unwrap();
     pic.set_irq_line(1, true);
-    pic.acknowledge();
+    pic.acknowledge().unwrap();
     pic.set_irq_line(3, true);
 
     pic.end_interrupt(Some(3)); // Pending, but not in service.
@@ -169,7 +169,7 @@ fn specific_eoi_clears_only_the_named_in_service_irq() {
     pic.end_interrupt(Some(1));
     assert!(pic.interrupt_pending());
     assert_eq!(
-        pic.acknowledge(),
+        pic.acknowledge().unwrap(),
         0x0B,
         "EOI must not erase a pending request"
     );
@@ -179,12 +179,12 @@ fn specific_eoi_clears_only_the_named_in_service_irq() {
 fn masking_an_in_service_irq_does_not_release_its_priority_block() {
     let mut pic = Pic::new();
     pic.set_irq_line(1, true);
-    pic.acknowledge();
+    pic.acknowledge().unwrap();
     pic.imr = 0x02;
     pic.set_irq_line(6, true);
     assert!(!pic.interrupt_pending());
     // Normal mask mode: EOI still clears the masked in-service IRQ.
     pic.end_interrupt(None);
     assert!(pic.interrupt_pending());
-    assert_eq!(pic.acknowledge(), 0x0E);
+    assert_eq!(pic.acknowledge().unwrap(), 0x0E);
 }
