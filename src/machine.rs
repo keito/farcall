@@ -1,6 +1,7 @@
 use core::fmt::Debug;
 use std::collections::VecDeque;
 use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 use thiserror::Error;
 
@@ -97,6 +98,7 @@ impl Machine {
         load_mode: LoadMode,
         image_type: Option<DiskType>,
         verbosity: u8,
+        rom: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
@@ -125,19 +127,25 @@ impl Machine {
         match load_mode {
             LoadMode::Com => machine.load_com(&data)?,
             LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
+            LoadMode::Rom => {
+                machine.load_boot_sector(data, image_type)?;
+                machine.load_rom(rom.unwrap())?;
+            }
         }
 
-        // Create a stub entry in the Interrupt Vector Table for INT 09h
-        // TODO: Do this properly
-        let iret_addr = PhysAddr::new(0xF000, 0x0100);
-        write_byte(&mut machine.memory, iret_addr, 0xCF)?; // IRET
-        // Put that memory address into IVT
-        write_word(&mut machine.memory, SegmentedAddr::new(0x0, 9 * 4), 0x0100)?; // Offset
-        write_word(
-            &mut machine.memory,
-            SegmentedAddr::new(0x0, 9 * 4 + 2),
-            0xF000,
-        )?; // Segment
+        if load_mode != LoadMode::Rom {
+            // Create a stub entry in the Interrupt Vector Table for INT 09h
+            // TODO: Do this properly
+            let iret_addr = PhysAddr::new(0xF000, 0x0100);
+            write_byte(&mut machine.memory, iret_addr, 0xCF)?; // IRET
+            // Put that memory address into IVT
+            write_word(&mut machine.memory, SegmentedAddr::new(0x0, 9 * 4), 0x0100)?; // Offset
+            write_word(
+                &mut machine.memory,
+                SegmentedAddr::new(0x0, 9 * 4 + 2),
+                0xF000,
+            )?; // Segment
+        }
 
         Ok(machine)
     }
@@ -407,6 +415,10 @@ impl Machine {
     }
 
     fn handle_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
+        // With a BIOS loaded, send all interrupts to the guest BIOS
+        if self.load_mode == LoadMode::Rom {
+            return self.handle_guest_interrupt(interrupt);
+        }
         match interrupt {
             // BIOS services
             0x10 => self.video_service(),
@@ -607,10 +619,27 @@ impl Machine {
 
         Ok(())
     }
+
+    fn load_rom(&mut self, path: PathBuf) -> Result<(), MachineError> {
+        let bytes: Vec<u8> = fs::read(path)?;
+        if bytes.len() != 8192 {
+            return Err(MachineError::BootSectorError(
+                "BIOS ROM must be 8192 bytes long".to_string(),
+            ));
+        }
+        // Copy 8192 bytes of the ROM to 0000h:FE000h
+        let validated_buffer = validate_buffer(&mut self.memory, PhysAddr::new(0xFE00, 0), 8192)?;
+        write_buffer(validated_buffer, &bytes)?;
+        self.cpu.cs = 0xFFFF;
+        self.cpu.ip = 0x0000;
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, PartialEq)]
 pub(crate) enum LoadMode {
     Com,
     Boot,
+    Rom,
 }

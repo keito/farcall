@@ -18,7 +18,7 @@ use crate::{
         cga_renderer::CgaRenderer,
         keyboard::{ModifierState, translate_winit_key},
     },
-    machine::{DiskType, LoadMode, Machine, MachineStepResult},
+    machine::{Machine, MachineStepResult},
 };
 
 pub struct App {
@@ -173,15 +173,10 @@ impl ApplicationHandler for App {
     }
 }
 
-pub(crate) fn run(
-    file_path: &str,
-    load_mode: LoadMode,
-    image_type: Option<DiskType>,
-    verbosity: u8,
-) -> anyhow::Result<u8> {
+pub(crate) fn run(machine: Machine) -> anyhow::Result<u8> {
     let event_loop = EventLoop::new()?;
     let mut app = App {
-        machine: Machine::new(file_path, load_mode, image_type, verbosity)?,
+        machine,
         pixels: None,
         window: None,
         error: None,

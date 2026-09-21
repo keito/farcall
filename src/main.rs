@@ -1,10 +1,12 @@
 use clap::ArgAction;
 use clap::Parser;
+use std::path::PathBuf;
 use std::process;
 
 use crate::frontend::window;
 use crate::machine::DiskType;
 use crate::machine::LoadMode;
+use crate::machine::Machine;
 
 mod cpu;
 mod frontend;
@@ -21,6 +23,10 @@ struct Cli {
     #[arg(long)]
     boot: bool,
 
+    /// Load a BIOS ROM image
+    #[arg(long)]
+    rom: Option<PathBuf>,
+
     /// Boot sector image type
     #[arg(long, value_enum)]
     image_type: Option<DiskType>,
@@ -32,12 +38,15 @@ struct Cli {
 
 fn main() -> anyhow::Result<process::ExitCode> {
     let cli = Cli::parse();
-    let load_mode = if cli.boot {
+    let load_mode = if cli.rom.is_some() {
+        LoadMode::Rom
+    } else if cli.boot {
         LoadMode::Boot
     } else {
         LoadMode::Com
     };
 
-    let exit_code = window::run(&cli.file, load_mode, cli.image_type, cli.verbose)?;
+    let machine = Machine::new(&cli.file, load_mode, cli.image_type, cli.verbose, cli.rom)?;
+    let exit_code = window::run(machine)?;
     Ok(exit_code.into())
 }
