@@ -1,5 +1,4 @@
 use core::fmt::Debug;
-use std::collections::VecDeque;
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -15,7 +14,7 @@ use crate::registers::Reg8;
 use bios_keyboard::BiosKeyboard;
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
-use dos::Resource;
+use dos::Dos;
 use fdc::{Fdc, FdcReadData};
 use pc_keyboard::PcKeyboard;
 use pic::Pic;
@@ -43,14 +42,11 @@ mod video;
 pub struct Machine {
     bios_keyboard: BiosKeyboard,
     boot_time: Instant,
-    /// Read line buffer (DOS mode only)
-    console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
     dma: Dma,
+    dos: Dos,
     fdc: Fdc,
     floppy_image: Option<FloppyDisk>,
-    /// Resource handles (DOS mode only)
-    handles: Vec<Option<Resource>>,
     keyboard_input_mode: KeyboardInputMode,
     last_step_time: Instant,
     load_mode: LoadMode,
@@ -142,14 +138,9 @@ impl Machine {
             bios_keyboard: BiosKeyboard::new(),
             boot_time: Instant::now(),
             last_step_time: Instant::now(),
-            console_read_buffer: VecDeque::new(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
-            handles: vec![
-                Some(Resource::Stdin),
-                Some(Resource::Stdout),
-                Some(Resource::Console),
-            ],
+            dos: Dos::new(),
             fdc: Fdc::new(),
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
@@ -168,7 +159,6 @@ impl Machine {
             tick_remainder: 0,
             verbosity,
         };
-        machine.handles.resize(20, None);
         machine.text_video.clear(&mut machine.memory)?;
 
         let data: Vec<u8> = fs::read(file_path)?;

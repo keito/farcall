@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crate::{
     cpu::Flag,
     machine::{
@@ -7,6 +9,28 @@ use crate::{
     memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer},
     registers::{Reg8, Reg16},
 };
+
+pub(super) struct Dos {
+    /// Read line buffer
+    pub(crate) console_read_buffer: VecDeque<u8>,
+    /// Resource handles
+    handles: Vec<Option<Resource>>,
+}
+
+impl Dos {
+    pub(super) fn new() -> Self {
+        let mut dos = Self {
+            console_read_buffer: VecDeque::new(),
+            handles: vec![
+                Some(Resource::Stdin),
+                Some(Resource::Stdout),
+                Some(Resource::Console),
+            ],
+        };
+        dos.handles.resize(20, None);
+        dos
+    }
+}
 
 #[derive(Clone, PartialEq)]
 pub(super) enum Resource {
@@ -18,7 +42,7 @@ pub(super) enum Resource {
 impl Machine {
     /// Emulates the read one character with echo service (INT 21h, AH=01h)
     pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let Some(Some(resource)) = self.handles.get(0) else {
+        let Some(Some(resource)) = self.dos.handles.get(0) else {
             return Err(MachineError::ReadServiceError(
                 "Handle 0 is not set".to_string(),
             ));
@@ -37,7 +61,7 @@ impl Machine {
     /// Emulates the DOS output char service (INT 21h, AH=02h)
     pub(super) fn output_char_service(&mut self) -> Result<InterruptResult, MachineError> {
         let c = self.cpu.get_reg(Reg8::Dl);
-        let Some(Some(resource)) = self.handles.get(1) else {
+        let Some(Some(resource)) = self.dos.handles.get(1) else {
             return Err(MachineError::WriteServiceError(
                 "Handle 1 is not set".to_string(),
             ));
@@ -57,7 +81,7 @@ impl Machine {
     /// Emulates the DOS read service (INT21h, AH=3Fh)
     pub(super) fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
         let dest = self.cpu.bx as usize;
-        let Some(Some(resource)) = self.handles.get(dest) else {
+        let Some(Some(resource)) = self.dos.handles.get(dest) else {
             // Unknown handle
             self.cpu.ax = 6;
             self.cpu.set_flag(Flag::Carry, true);
@@ -121,7 +145,7 @@ impl Machine {
     /// Emulates the DOS flush and read service (INT 21h, AH=0Ch)
     pub(super) fn flush_and_read_service(&mut self) -> Result<InterruptResult, MachineError> {
         // Flush input if handle 0 is a console
-        let Some(Some(resource)) = self.handles.get(0) else {
+        let Some(Some(resource)) = self.dos.handles.get(0) else {
             return Err(MachineError::ReadServiceError(
                 "Handle 0 is not set".to_string(),
             ));
@@ -186,19 +210,19 @@ impl Machine {
         &mut self,
     ) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg(Reg16::Bx);
-        let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
+        let Some(Some(resource)) = self.dos.handles.get(handle_num as usize) else {
             // Unknown handle number
             self.cpu.ax = 6;
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
-        let Some(pos) = self.handles.iter().position(|h| h.is_none()) else {
+        let Some(pos) = self.dos.handles.iter().position(|h| h.is_none()) else {
             // No open positions in table
             self.cpu.ax = 4;
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
-        self.handles[pos] = Some(resource.clone());
+        self.dos.handles[pos] = Some(resource.clone());
         self.cpu.ax = pos as u16;
         self.cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
@@ -207,14 +231,14 @@ impl Machine {
     /// INT21h, AH=3Eh: Emulates the Close Handle Service
     pub(super) fn close_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
         let handle_num = self.cpu.get_reg(Reg16::Bx);
-        if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
+        if !matches!(self.dos.handles.get(handle_num as usize), Some(Some(_))) {
             // Handle is already closed or nonexistent
             self.cpu.ax = 6;
             self.cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
         };
 
-        self.handles[handle_num as usize] = None;
+        self.dos.handles[handle_num as usize] = None;
         self.cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
     }

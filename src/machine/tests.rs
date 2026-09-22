@@ -1,4 +1,5 @@
 use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
+use crate::machine::dos::Dos;
 use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
@@ -24,7 +25,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     cpu: Cpu::new(0),
                     memory: vec![0xCC; 0x50000],
                     dma: Dma::new(),
-                    handles: vec![],
+                    dos: Dos::new(),
                     fdc: Fdc::new(),
                     floppy_image: None,
                     boot_time: Instant::now(),
@@ -40,7 +41,6 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     pic: Pic::new(),
                     pit: Pit::new(),
                     ppi: Ppi::new(),
-                    console_read_buffer: Default::default(),
                     text_video: TextVideo::new(),
                 };
                 machine.cpu.cs = 0x1000;
@@ -149,7 +149,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         cpu: Cpu::new(0),
         memory: vec![0xCC; 0x40000],
         dma: Dma::new(),
-        handles: vec![],
+        dos: Dos::new(),
         fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
@@ -165,7 +165,6 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
     };
     machine.cpu.cs = 0x1000;
@@ -239,7 +238,7 @@ fn write_service_clears_only_carry() {
         cpu: Cpu::new(0),
         dma: Dma::new(),
         memory: vec![0; 16],
-        handles: vec![],
+        dos: Dos::new(),
         fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
@@ -255,7 +254,6 @@ fn write_service_clears_only_carry() {
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
     };
     machine.cpu.ax = 0x4000;
@@ -281,7 +279,7 @@ fn dos_termination_returns_al_as_exit_code() {
             cpu: Cpu::new(0),
             dma: Dma::new(),
             memory: vec![],
-            handles: vec![],
+            dos: Dos::new(),
             fdc: Fdc::new(),
             floppy_image: None,
             boot_time: Instant::now(),
@@ -296,7 +294,6 @@ fn dos_termination_returns_al_as_exit_code() {
             pic: Pic::new(),
             pit: Pit::new(),
             ppi: Ppi::new(),
-            console_read_buffer: Default::default(),
             text_video: TextVideo::new(),
         };
         machine.cpu.ax = ax;
@@ -319,7 +316,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         cpu: Cpu::new(0),
         dma: Dma::new(),
         memory: vec![0xCC; 0x100000],
-        handles: vec![Some(super::Resource::Stdin)],
+        dos: Dos::new(),
         fdc: Fdc::new(),
         floppy_image: None,
         boot_time: Instant::now(),
@@ -334,7 +331,6 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        console_read_buffer: Default::default(),
         text_video: TextVideo::new(),
     };
     machine.cpu.cs = 0x1000;
@@ -367,7 +363,7 @@ fn dos_handle_read_normalizes_the_buffer_before_crossing_the_original_offset_bou
         let mut machine = machine_for_pending_read(3);
         machine.cpu.ds = ds;
         machine.cpu.dx = dx;
-        machine.console_read_buffer.extend(b"A\r\n");
+        machine.dos.console_read_buffer.extend(b"A\r\n");
         let mut expected = machine.memory.clone();
         expected[0x2000F..0x20012].copy_from_slice(b"A\r\n");
 
@@ -384,7 +380,7 @@ fn dos_handle_read_normalizes_the_buffer_before_crossing_the_original_offset_bou
         assert_eq!(machine.cpu.flags, 0x0242);
         assert_eq!((machine.cpu.ds, machine.cpu.dx), (ds, dx));
         assert!(machine.pending_input.is_none());
-        assert!(machine.console_read_buffer.is_empty());
+        assert!(machine.dos.console_read_buffer.is_empty());
         assert!(
             machine.memory == expected,
             "DS:DX={ds:04X}:{dx:04X}: input belongs at 2000Fh–20011h, not at the original segment base"
@@ -469,6 +465,7 @@ fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment
         machine.cpu.dx = dx;
         // Preloaded input avoids keyboard echo and guest loops.
         machine
+            .dos
             .console_read_buffer
             .extend(vec![b'R'; requested as usize]);
         let mut expected_memory = machine.memory.clone();
@@ -491,7 +488,7 @@ fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment
         assert_eq!((machine.cpu.ds, machine.cpu.dx), (0x1001, dx));
         assert_eq!(machine.cpu.flags, 0x0242);
         assert_eq!(
-            machine.console_read_buffer.len(),
+            machine.dos.console_read_buffer.len(),
             (requested - expected_count) as usize
         );
         assert!(machine.pending_input.is_none());
@@ -637,7 +634,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
             suffix,
             "stop consuming keystrokes at the first Enter"
         );
-        assert!(machine.console_read_buffer.is_empty());
+        assert!(machine.dos.console_read_buffer.is_empty());
     }
 }
 
@@ -677,6 +674,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
             );
             assert_eq!(
                 machine
+                    .dos
                     .console_read_buffer
                     .iter()
                     .copied()
@@ -702,7 +700,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         assert_eq!(machine.cpu.ax, 6);
         assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
         assert!(machine.bios_keyboard.peek().is_none());
-        assert!(machine.console_read_buffer.is_empty());
+        assert!(machine.dos.console_read_buffer.is_empty());
     }
 }
 
