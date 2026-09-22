@@ -174,8 +174,8 @@ impl TextVideo {
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
         for row in 0..NUM_ROWS {
             for column in 0..NUM_COLUMNS {
-                let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
-                let attributes = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column) + 1];
+                let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * NUM_COLUMNS + column)];
+                let attributes = memory[VIDEO_ADDR_BASE + 2 * (row * NUM_COLUMNS + column) + 1];
                 let offset = usize::from(text_byte) * 8;
                 let glyph = GLYPH_BYTES.get(offset..offset + 8).unwrap_or(&[0; 8]);
 
