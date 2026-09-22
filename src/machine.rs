@@ -88,8 +88,6 @@ pub enum MachineError {
     MemoryError(#[from] MemoryError),
     #[error("PIC error: {0}")]
     PicError(String),
-    #[error("Video Service error: {0}")]
-    VideoServiceError(String),
 }
 
 enum InterruptResult {
@@ -200,86 +198,6 @@ impl Machine {
         self.pc_keyboard.enqueue(scan_code, pressed);
     }
 
-    /// Emulates the Video Service (INT 10h)
-    fn video_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let op = self.cpu.get_reg(Reg8::Ah);
-        match op {
-            // Set video mode
-            0x00 => {
-                let mode = self.cpu.get_reg(Reg8::Al);
-                if mode != 0x03 {
-                    return Err(MachineError::VideoServiceError(format!(
-                        "Terribly sorry, we only support 03h; you want {:#X}h",
-                        mode
-                    )));
-                }
-                self.text_video.clear(&mut self.memory)?;
-                self.text_video.set_scan_lines(6, 7);
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // Set text cursor shape
-            0x01 => {
-                self.text_video.set_scan_lines(
-                    self.cpu.get_reg(Reg8::Ch) as usize,
-                    self.cpu.get_reg(Reg8::Cl) as usize,
-                );
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // Read Cursor Position, Size, and Shape
-            0x03 => {
-                let display_page = self.cpu.get_reg(Reg8::Bh);
-                if display_page != 0 {
-                    return Err(MachineError::VideoServiceError(format!(
-                        "Unsupported display page: {:#X}h",
-                        display_page
-                    )));
-                }
-
-                let scan_lines = self.text_video.get_scan_lines();
-                self.cpu.set_reg(Reg8::Ch, scan_lines.0 as u8);
-                self.cpu.set_reg(Reg8::Cl, scan_lines.1 as u8);
-
-                let (column, row) = self.text_video.get_cursor();
-                self.cpu.set_reg(Reg8::Dh, row as u8);
-                self.cpu.set_reg(Reg8::Dl, column as u8);
-
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // Select active display page
-            0x05 => {
-                let display_page = self.cpu.get_reg(Reg8::Al);
-                if display_page != 0 {
-                    return Err(MachineError::VideoServiceError(format!(
-                        "Unsupported display page: {:#X}h",
-                        display_page
-                    )));
-                }
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // BIOS character output
-            0x0E => {
-                let c = self.cpu.get_reg(Reg8::Al);
-                self.text_video.write_char(&mut self.memory, c)?;
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // Get current video mode
-            0x0F => {
-                self.cpu.set_reg(Reg8::Al, 0x3); // 80x25 color text mode
-                self.cpu.set_reg(Reg8::Ah, 80); // 80 columns in decimal
-                self.cpu.set_reg(Reg8::Bh, 0); // active display page
-                Ok(InterruptResult::ResumeExecution)
-            }
-            0x10..=0xFF => {
-                // Original PC BIOS ignores video functions beyond 0Fh
-                Ok(InterruptResult::ResumeExecution)
-            }
-            _ => Err(MachineError::VideoServiceError(format!(
-                "Unsupported command: {:#X}h",
-                op
-            ))),
-        }
-    }
-
     // Keyboard Service (INT 16h)
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
         let operation = self.cpu.get_reg(Reg8::Ah);
@@ -331,7 +249,11 @@ impl Machine {
         }
         match interrupt {
             // BIOS services
-            0x10 => self.video_service(),
+            0x10 => Ok(self.bios.as_ref().expect("Must").video_service(
+                &mut self.cpu,
+                &mut self.memory,
+                &mut self.text_video,
+            )?),
             0x11 => Ok(self
                 .bios
                 .as_ref()
