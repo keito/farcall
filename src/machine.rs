@@ -5,12 +5,14 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
+use crate::machine::bios::BiosError;
 use crate::machine::bios_keyboard::BiosKeyStroke;
 use crate::machine::dos::DosError;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
 };
 use crate::registers::Reg8;
+use bios::Bios;
 use bios_keyboard::BiosKeyboard;
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
@@ -24,6 +26,7 @@ use video::TextVideo;
 
 pub use disk::DiskType;
 
+mod bios;
 pub mod bios_keyboard;
 mod disk;
 mod dma;
@@ -39,9 +42,9 @@ mod video;
 
 // Owns everything
 pub struct Machine {
+    bios: Option<Bios>,
     bios_keyboard: BiosKeyboard,
     bios_pending_read: bool,
-    boot_time: Instant,
     cpu: Cpu,
     dma: Dma,
     dos: Option<Dos>,
@@ -65,8 +68,8 @@ pub struct Machine {
 
 #[derive(Error, Debug)]
 pub enum MachineError {
-    #[error("BIOS System Service error: {0}")]
-    BiosSystemServiceError(String),
+    #[error(transparent)]
+    Bios(#[from] BiosError),
     #[error("Boot Sector error: {0}")]
     BootSectorError(String),
     #[error("CPU Error: {0}")]
@@ -85,8 +88,6 @@ pub enum MachineError {
     MemoryError(#[from] MemoryError),
     #[error("PIC error: {0}")]
     PicError(String),
-    #[error("Time of Day Service error: {0}")]
-    TimeOfDayServiceError(String),
     #[error("Video Service error: {0}")]
     VideoServiceError(String),
 }
@@ -125,9 +126,12 @@ impl Machine {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
         let mut machine = Machine {
+            bios: match load_mode {
+                LoadMode::Rom => None,
+                _ => Some(Bios::new()),
+            },
             bios_keyboard: BiosKeyboard::new(),
             bios_pending_read: false,
-            boot_time: Instant::now(),
             last_step_time: Instant::now(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
@@ -276,55 +280,6 @@ impl Machine {
         }
     }
 
-    /// Emulates the Equipment List Service
-    fn equipment_list_service(&mut self) -> Result<InterruptResult, MachineError> {
-        // One floppy drive, 64 KiB motherboard RAM, 80x25 color, and nothing else
-        self.cpu.ax = 0b0000_0000_0010_1101;
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// Emulates the Serial Port Service
-    fn serial_port_service(&mut self) -> Result<InterruptResult, MachineError> {
-        // Serial port unavailable
-        self.cpu.ax = 0x8000;
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// Emulates the Printer Service
-    fn printer_service(&mut self) -> Result<InterruptResult, MachineError> {
-        // Unavailable or timed-out hardware
-        self.cpu.set_reg(Reg8::Ah, 0x01);
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// Emulates the Amount Conventional Ram Service
-    fn amount_conventional_ram_service(&mut self) -> Result<InterruptResult, MachineError> {
-        self.cpu.ax = 640; // decimal
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    fn time_of_day_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let operation = self.cpu.get_reg(Reg8::Ah);
-        match operation {
-            0x00 => {
-                // Read the clock (divide by 55 for approximate tick rate)
-                let ticks = self.boot_time.elapsed().as_millis() as u32 / 55;
-                self.cpu.cx = (ticks >> 16) as u16;
-                self.cpu.dx = ticks as u16;
-                // TODO: Support day rollover
-                self.cpu.set_reg(Reg8::Al, 0);
-                Ok(InterruptResult::ResumeExecution)
-            }
-            0x02 => {
-                // Read the real-time clock (not supported by the 8088)
-                Ok(InterruptResult::ResumeExecution)
-            }
-            _ => Err(MachineError::TimeOfDayServiceError(format!(
-                "Unsupported operation: {operation:X}h"
-            ))),
-        }
-    }
-
     // Keyboard Service (INT 16h)
     fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
         let operation = self.cpu.get_reg(Reg8::Ah);
@@ -364,37 +319,6 @@ impl Machine {
         }
     }
 
-    // INT 15h
-    fn bios_system_services(&mut self) -> Result<InterruptResult, MachineError> {
-        let op = self.cpu.get_reg(Reg8::Ah);
-        match op {
-            0x41 => {
-                // Wait for External Event (IBM PC Convertible)
-                // TODO: We don't support it.
-                self.cpu.set_reg(Reg8::Ah, 0x80);
-                self.cpu.set_flag(Flag::Carry, true);
-            }
-            0x88 => {
-                // Extended Memory Size Determine (RAM above 1 MiB)
-                // TODO: We don't support it. IBM PC/PCjr return 80h; PC/XT returns 86h
-                self.cpu.set_reg(Reg8::Ah, 0x80);
-                self.cpu.set_flag(Flag::Carry, true);
-            }
-            0xC0 => {
-                // Return System Configuration Parameters (not supported on PC/PCjr)
-                self.cpu.set_reg(Reg8::Ah, 0x80);
-                self.cpu.set_flag(Flag::Carry, true);
-            }
-            _ => {
-                return Err(MachineError::BiosSystemServiceError(format!(
-                    "Unsupported operation: {:#X}",
-                    op
-                )));
-            }
-        }
-        Ok(InterruptResult::ResumeExecution)
-    }
-
     fn handle_guest_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         self.cpu.enter_interrupt(&mut self.memory, interrupt)?;
         Ok(InterruptResult::ResumeExecution)
@@ -408,14 +332,38 @@ impl Machine {
         match interrupt {
             // BIOS services
             0x10 => self.video_service(),
-            0x11 => self.equipment_list_service(),
-            0x12 => self.amount_conventional_ram_service(),
+            0x11 => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .equipment_list_service(&mut self.cpu)?),
+            0x12 => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .amount_conventional_ram_service(&mut self.cpu)?),
             0x13 => self.disk_service(),
-            0x14 => self.serial_port_service(),
-            0x15 => self.bios_system_services(),
+            0x14 => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .serial_port_service(&mut self.cpu)?),
+            0x15 => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .bios_system_services(&mut self.cpu)?),
             0x16 => self.keyboard_service(),
-            0x17 => self.printer_service(),
-            0x1A => self.time_of_day_service(),
+            0x17 => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .printer_service(&mut self.cpu)?),
+            0x1A => Ok(self
+                .bios
+                .as_ref()
+                .expect("Must")
+                .time_of_day_service(&mut self.cpu)?),
             0x20 | 0x21 | 0x28 | 0x29 => {
                 // DOS services - in COM mode, send to our emulated DOS
                 if let Some(dos) = self.dos.as_mut() {

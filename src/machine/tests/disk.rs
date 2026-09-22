@@ -1,4 +1,5 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
+use crate::machine::bios::Bios;
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
 use crate::machine::{
     BiosKeyboard, Dma, Fdc, KeyboardInputMode, LoadMode, MachineError, PcKeyboard, Pic, Pit, Ppi,
@@ -62,6 +63,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
     cpu.bp = 0x9ABC;
     cpu.flags = 0xFFD7;
     Machine {
+        bios: Some(Bios::new()),
         bios_keyboard: BiosKeyboard::new(),
         cpu,
         dma: Dma::new(),
@@ -69,7 +71,6 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         dos: None,
         fdc: Fdc::new(),
         floppy_image: image.map(floppy_360kib),
-        boot_time: Instant::now(),
         last_step_time: Instant::now(),
         tick_remainder: 0,
         verbosity: 0,

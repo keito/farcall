@@ -1,3 +1,4 @@
+use crate::machine::bios::Bios;
 use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use crate::machine::dos::Dos;
 use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
@@ -22,13 +23,13 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                 (&[0xF7, 0x36, 0x34, 0x12][..], 0xFFFE, 0x0002),
             ] {
                 let mut machine = Machine {
+                    bios: Some(Bios::new()),
                     cpu: Cpu::new(0),
                     memory: vec![0xCC; 0x50000],
                     dma: Dma::new(),
                     dos: Some(Dos::new()),
                     fdc: Fdc::new(),
                     floppy_image: None,
-                    boot_time: Instant::now(),
                     last_step_time: Instant::now(),
                     tick_remainder: 0,
                     verbosity: 0,
@@ -146,13 +147,13 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
 #[test]
 fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segment() {
     let mut machine = Machine {
+        bios: Some(Bios::new()),
         cpu: Cpu::new(0),
         memory: vec![0xCC; 0x40000],
         dma: Dma::new(),
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_image: None,
-        boot_time: Instant::now(),
         last_step_time: Instant::now(),
         tick_remainder: 0,
         verbosity: 0,
@@ -235,13 +236,13 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
 #[test]
 fn write_service_clears_only_carry() {
     let mut machine = Machine {
+        bios: Some(Bios::new()),
         cpu: Cpu::new(0),
         dma: Dma::new(),
         memory: vec![0; 16],
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_image: None,
-        boot_time: Instant::now(),
         last_step_time: Instant::now(),
         tick_remainder: 0,
         verbosity: 0,
@@ -282,6 +283,7 @@ fn write_service_clears_only_carry() {
 fn dos_termination_returns_al_as_exit_code() {
     for (ax, expected_code) in [(0x4C00, 0), (0x4C01, 1), (0x4CFF, 255)] {
         let mut machine = Machine {
+            bios: Some(Bios::new()),
             bios_keyboard: BiosKeyboard::new(),
             cpu: Cpu::new(0),
             dma: Dma::new(),
@@ -289,7 +291,6 @@ fn dos_termination_returns_al_as_exit_code() {
             dos: Some(Dos::new()),
             fdc: Fdc::new(),
             floppy_image: None,
-            boot_time: Instant::now(),
             last_step_time: Instant::now(),
             tick_remainder: 0,
             verbosity: 0,
@@ -319,6 +320,7 @@ fn dos_termination_returns_al_as_exit_code() {
 
 fn machine_for_pending_read(max_bytes: u16) -> Machine {
     let mut machine = Machine {
+        bios: Some(Bios::new()),
         bios_keyboard: BiosKeyboard::new(),
         cpu: Cpu::new(0),
         dma: Dma::new(),
@@ -326,7 +328,6 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_image: None,
-        boot_time: Instant::now(),
         last_step_time: Instant::now(),
         tick_remainder: 0,
         verbosity: 0,
