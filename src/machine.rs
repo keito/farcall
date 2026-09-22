@@ -6,11 +6,13 @@ use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
+use crate::machine::bios_keyboard::BiosKeyStroke;
 use crate::machine::console::PendingInput;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
 };
 use crate::registers::{Reg8, Reg16};
+use bios_keyboard::BiosKeyboard;
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
 use dos::Resource;
@@ -23,6 +25,7 @@ use video::TextVideo;
 
 pub use disk::DiskType;
 
+pub mod bios_keyboard;
 mod console;
 mod disk;
 mod dma;
@@ -38,6 +41,7 @@ mod video;
 
 // Owns everything
 pub struct Machine {
+    bios_keyboard: BiosKeyboard,
     boot_time: Instant,
     last_step_time: Instant,
     /// Read line buffer (DOS mode only)
@@ -49,7 +53,6 @@ pub struct Machine {
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
     pc_keyboard: PcKeyboard,
-    bios_key_queue: VecDeque<BiosKeyStroke>,
     keyboard_irq_pending: bool,
     load_mode: LoadMode,
     memory: Vec<u8>,
@@ -112,11 +115,6 @@ pub enum MachineStepResult {
     Exit(u8),
 }
 
-pub struct BiosKeyStroke {
-    pub ascii: Option<u8>,
-    pub scan_code: u8,
-}
-
 enum BytePhase {
     Low,
     High,
@@ -133,6 +131,7 @@ impl Machine {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
         let mut machine = Machine {
+            bios_keyboard: BiosKeyboard::new(),
             boot_time: Instant::now(),
             last_step_time: Instant::now(),
             console_read_buffer: VecDeque::new(),
@@ -146,7 +145,6 @@ impl Machine {
             fdc: Fdc::new(),
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
-            bios_key_queue: VecDeque::new(),
             keyboard_irq_pending: false,
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
@@ -194,7 +192,7 @@ impl Machine {
 
     /// Used for COM and Boot modes
     pub fn enqueue_bios_keystroke(&mut self, key: BiosKeyStroke) {
-        self.bios_key_queue.push_back(key);
+        self.bios_keyboard.enqueue(key);
         self.keyboard_irq_pending = true;
     }
 
@@ -356,7 +354,7 @@ impl Machine {
         match operation {
             0x00 => {
                 // Read key
-                if let Some(first_key) = self.bios_key_queue.pop_front() {
+                if let Some(first_key) = self.bios_keyboard.pop() {
                     self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     Ok(InterruptResult::ResumeExecution)
@@ -367,7 +365,7 @@ impl Machine {
             }
             0x01 => {
                 // Check key
-                if let Some(first_key) = self.bios_key_queue.front() {
+                if let Some(first_key) = self.bios_keyboard.peek() {
                     self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     self.cpu.set_flag(Flag::Zero, false);

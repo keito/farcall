@@ -1,6 +1,8 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
-use crate::machine::{Dma, Fdc, LoadMode, MachineError, PcKeyboard, Pic, Pit, Ppi, TextVideo};
+use crate::machine::{
+    BiosKeyboard, Dma, Fdc, LoadMode, MachineError, PcKeyboard, Pic, Pit, Ppi, TextVideo,
+};
 use crate::memory::MemoryError;
 use std::time::Instant;
 
@@ -59,6 +61,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
     cpu.bp = 0x9ABC;
     cpu.flags = 0xFFD7;
     Machine {
+        bios_keyboard: BiosKeyboard::new(),
         cpu,
         dma: Dma::new(),
         memory: vec![0xCC; 0x40000],
@@ -72,7 +75,6 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         load_mode: LoadMode::Boot,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),

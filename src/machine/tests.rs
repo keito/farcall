@@ -1,3 +1,4 @@
+use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use crate::machine::{Dma, Fdc, PcKeyboard, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
@@ -33,7 +34,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     load_mode: LoadMode::Com,
                     pending_input: None,
                     pc_keyboard: PcKeyboard::new(),
-                    bios_key_queue: Default::default(),
+                    bios_keyboard: BiosKeyboard::new(),
                     keyboard_irq_pending: false,
                     pic: Pic::new(),
                     pit: Pit::new(),
@@ -157,7 +158,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        bios_key_queue: Default::default(),
+        bios_keyboard: BiosKeyboard::new(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -246,7 +247,7 @@ fn write_service_clears_only_carry() {
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        bios_key_queue: Default::default(),
+        bios_keyboard: BiosKeyboard::new(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -273,6 +274,7 @@ fn write_service_clears_only_carry() {
 fn dos_termination_returns_al_as_exit_code() {
     for (ax, expected_code) in [(0x4C00, 0), (0x4C01, 1), (0x4CFF, 255)] {
         let mut machine = Machine {
+            bios_keyboard: BiosKeyboard::new(),
             cpu: Cpu::new(0),
             dma: Dma::new(),
             memory: vec![],
@@ -286,7 +288,6 @@ fn dos_termination_returns_al_as_exit_code() {
             load_mode: LoadMode::Com,
             pending_input: None,
             pc_keyboard: PcKeyboard::new(),
-            bios_key_queue: Default::default(),
             keyboard_irq_pending: false,
             pic: Pic::new(),
             pit: Pit::new(),
@@ -310,6 +311,7 @@ fn dos_termination_returns_al_as_exit_code() {
 
 fn machine_for_pending_read(max_bytes: u16) -> Machine {
     let mut machine = Machine {
+        bios_keyboard: BiosKeyboard::new(),
         cpu: Cpu::new(0),
         dma: Dma::new(),
         memory: vec![0xCC; 0x100000],
@@ -323,7 +325,6 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -345,8 +346,8 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     machine
 }
 
-fn ascii_key(byte: u8) -> super::BiosKeyStroke {
-    super::BiosKeyStroke {
+fn ascii_key(byte: u8) -> BiosKeyStroke {
+    BiosKeyStroke {
         ascii: Some(byte),
         scan_code: 0, // These tests exercise DOS character input, not BIOS scan codes.
     }
@@ -625,9 +626,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
             "only echo cells and the returned bytes at DS:DX should change"
         );
         assert_eq!(
-            machine
-                .bios_key_queue
-                .iter()
+            std::iter::from_fn(|| machine.bios_keyboard.pop())
                 .map(|key| key.ascii.unwrap())
                 .collect::<Vec<_>>(),
             suffix,
@@ -680,16 +679,14 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
                 &line[consumed..]
             );
             assert_eq!(
-                machine
-                    .bios_key_queue
-                    .iter()
-                    .map(|key| key.ascii.unwrap())
-                    .collect::<Vec<_>>(),
-                b"next\r",
-                "consume submitted leftovers before any new line"
+                machine.bios_keyboard.peek().and_then(|key| key.ascii),
+                Some(b'n'),
+                "leave the next line queued while consuming submitted leftovers"
             );
         }
 
+        // Reading the entire next line below verifies that every queued byte,
+        // not just the first key observed by peek(), survived the small reads.
         machine.cpu.cx = 64;
         machine.cpu.dx = 0x1240;
         machine.read_service().unwrap();
@@ -699,7 +696,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         ));
         assert_eq!(machine.cpu.ax, 6);
         assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
-        assert!(machine.bios_key_queue.is_empty());
+        assert!(machine.bios_keyboard.peek().is_none());
         assert!(machine.console_read_buffer.is_empty());
     }
 }

@@ -1,6 +1,6 @@
 use winit::keyboard::{KeyCode, SmolStr};
 
-use crate::machine::BiosKeyStroke;
+use crate::machine::bios_keyboard::BiosKeyStroke;
 
 #[cfg(test)]
 mod tests;
