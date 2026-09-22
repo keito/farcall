@@ -49,7 +49,7 @@ pub struct Machine {
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
     pc_keyboard: PcKeyboard,
-    keyboard_buffer: VecDeque<KeyPress>,
+    bios_key_queue: VecDeque<BiosKeyStroke>,
     keyboard_irq_pending: bool,
     load_mode: LoadMode,
     memory: Vec<u8>,
@@ -112,7 +112,7 @@ pub enum MachineStepResult {
     Exit(u8),
 }
 
-pub struct KeyPress {
+pub struct BiosKeyStroke {
     pub ascii: Option<u8>,
     pub scan_code: u8,
 }
@@ -146,7 +146,7 @@ impl Machine {
             fdc: Fdc::new(),
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
-            keyboard_buffer: VecDeque::new(),
+            bios_key_queue: VecDeque::new(),
             keyboard_irq_pending: false,
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
@@ -193,8 +193,8 @@ impl Machine {
     }
 
     /// Used for COM and Boot modes
-    pub fn enqueue_input_character(&mut self, key: KeyPress) {
-        self.keyboard_buffer.push_back(key);
+    pub fn enqueue_bios_keystroke(&mut self, key: BiosKeyStroke) {
+        self.bios_key_queue.push_back(key);
         self.keyboard_irq_pending = true;
     }
 
@@ -356,7 +356,7 @@ impl Machine {
         match operation {
             0x00 => {
                 // Read key
-                if let Some(first_key) = self.keyboard_buffer.pop_front() {
+                if let Some(first_key) = self.bios_key_queue.pop_front() {
                     self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     Ok(InterruptResult::ResumeExecution)
@@ -367,7 +367,7 @@ impl Machine {
             }
             0x01 => {
                 // Check key
-                if let Some(first_key) = self.keyboard_buffer.front() {
+                if let Some(first_key) = self.bios_key_queue.front() {
                     self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     self.cpu.set_flag(Flag::Zero, false);

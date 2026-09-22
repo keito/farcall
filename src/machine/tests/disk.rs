@@ -72,7 +72,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         load_mode: LoadMode::Boot,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        keyboard_buffer: Default::default(),
+        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),

@@ -154,7 +154,7 @@ impl ApplicationHandler for App {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     let key = translate_winit_key(code, event.text, &self.modifier_state);
                     if let Some(key) = key {
-                        self.machine.enqueue_input_character(key);
+                        self.machine.enqueue_bios_keystroke(key);
                     }
                 }
             }

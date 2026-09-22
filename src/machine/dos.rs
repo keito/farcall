@@ -128,7 +128,7 @@ impl Machine {
         };
         match *resource {
             Resource::Stdin | Resource::Console => {
-                self.keyboard_buffer.clear();
+                self.bios_key_queue.clear();
             }
             _ => {}
         };

@@ -27,7 +27,7 @@ impl Machine {
             PendingInput::DosRead(read) => {
                 if self.console_read_buffer.is_empty() {
                     // Consume keystrokes until Enter. Move completed line into buffer.
-                    while let Some(key) = self.keyboard_buffer.pop_front() {
+                    while let Some(key) = self.bios_key_queue.pop_front() {
                         if key.ascii == Some(b'\r') {
                             // We finished the line
                             read.bytes.push(b'\r');
@@ -74,7 +74,7 @@ impl Machine {
                 return Ok(MachineStepResult::Continue);
             }
             PendingInput::DosReadCharWithEcho => {
-                if let Some(key) = self.keyboard_buffer.pop_front() {
+                if let Some(key) = self.bios_key_queue.pop_front() {
                     if let Some(char) = key.ascii {
                         self.text_video.write_char(&mut self.memory, char)?;
                         self.cpu.set_reg(Reg8::Al, char);
@@ -85,7 +85,7 @@ impl Machine {
                 return Ok(MachineStepResult::WaitingForInput);
             }
             PendingInput::KeyboardService => {
-                if let Some(key) = self.keyboard_buffer.pop_front() {
+                if let Some(key) = self.bios_key_queue.pop_front() {
                     self.cpu.set_reg(Reg8::Al, key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, key.scan_code);
                     self.pending_input = None;

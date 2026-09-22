@@ -33,7 +33,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     load_mode: LoadMode::Com,
                     pending_input: None,
                     pc_keyboard: PcKeyboard::new(),
-                    keyboard_buffer: Default::default(),
+                    bios_key_queue: Default::default(),
                     keyboard_irq_pending: false,
                     pic: Pic::new(),
                     pit: Pit::new(),
@@ -157,7 +157,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        keyboard_buffer: Default::default(),
+        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -246,7 +246,7 @@ fn write_service_clears_only_carry() {
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        keyboard_buffer: Default::default(),
+        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -286,7 +286,7 @@ fn dos_termination_returns_al_as_exit_code() {
             load_mode: LoadMode::Com,
             pending_input: None,
             pc_keyboard: PcKeyboard::new(),
-            keyboard_buffer: Default::default(),
+            bios_key_queue: Default::default(),
             keyboard_irq_pending: false,
             pic: Pic::new(),
             pit: Pit::new(),
@@ -323,7 +323,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         load_mode: LoadMode::Com,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        keyboard_buffer: Default::default(),
+        bios_key_queue: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
@@ -345,8 +345,8 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     machine
 }
 
-fn ascii_key(byte: u8) -> super::KeyPress {
-    super::KeyPress {
+fn ascii_key(byte: u8) -> super::BiosKeyStroke {
+    super::BiosKeyStroke {
         ascii: Some(byte),
         scan_code: 0, // These tests exercise DOS character input, not BIOS scan codes.
     }
@@ -594,7 +594,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         machine.step().unwrap(); // INT 21h starts the read.
 
         // Echo across frames, but do not write the guest read buffer before Enter.
-        machine.enqueue_input_character(ascii_key(b'h'));
+        machine.enqueue_bios_keystroke(ascii_key(b'h'));
         assert!(matches!(
             machine.step().unwrap(),
             MachineStepResult::WaitingForInput
@@ -606,7 +606,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         assert_eq!(machine.cpu.flags, 0x0243);
 
         for byte in b"i\r".iter().chain(suffix.iter()) {
-            machine.enqueue_input_character(ascii_key(*byte));
+            machine.enqueue_bios_keystroke(ascii_key(*byte));
         }
         assert!(matches!(
             machine.step().unwrap(),
@@ -626,7 +626,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
         );
         assert_eq!(
             machine
-                .keyboard_buffer
+                .bios_key_queue
                 .iter()
                 .map(|key| key.ascii.unwrap())
                 .collect::<Vec<_>>(),
@@ -643,7 +643,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
     for max_bytes in [1, 2, 3, 4, 5, 64] {
         let mut machine = machine_for_pending_read(max_bytes);
         for byte in b"abc\rnext\r" {
-            machine.enqueue_input_character(ascii_key(*byte));
+            machine.enqueue_bios_keystroke(ascii_key(*byte));
         }
         let line = b"abc\r\n";
         let mut consumed = 0;
@@ -681,7 +681,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
             );
             assert_eq!(
                 machine
-                    .keyboard_buffer
+                    .bios_key_queue
                     .iter()
                     .map(|key| key.ascii.unwrap())
                     .collect::<Vec<_>>(),
@@ -699,7 +699,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         ));
         assert_eq!(machine.cpu.ax, 6);
         assert_eq!(&machine.memory[0x21240..0x21246], b"next\r\n");
-        assert!(machine.keyboard_buffer.is_empty());
+        assert!(machine.bios_key_queue.is_empty());
         assert!(machine.console_read_buffer.is_empty());
     }
 }
@@ -716,7 +716,7 @@ fn dos_backspace_on_empty_input_preserves_the_prompt() {
     let original_memory = machine.memory.clone();
     machine.step().unwrap();
     for _ in 0..3 {
-        machine.enqueue_input_character(ascii_key(0x08));
+        machine.enqueue_bios_keystroke(ascii_key(0x08));
     }
     assert!(matches!(
         machine.step().unwrap(),
@@ -725,7 +725,7 @@ fn dos_backspace_on_empty_input_preserves_the_prompt() {
     assert!(machine.memory == original_memory, "do not erase the prompt");
 
     // Also verify that empty Backspace did not move the cursor.
-    machine.enqueue_input_character(ascii_key(b'x'));
+    machine.enqueue_bios_keystroke(ascii_key(b'x'));
     assert!(matches!(
         machine.step().unwrap(),
         MachineStepResult::WaitingForInput
@@ -749,7 +749,7 @@ fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
         }
         machine.step().unwrap();
         for byte in b"helo\x08" {
-            machine.enqueue_input_character(ascii_key(*byte));
+            machine.enqueue_bios_keystroke(ascii_key(*byte));
         }
         assert!(matches!(
             machine.step().unwrap(),
@@ -763,7 +763,7 @@ fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
         assert_eq!(machine.memory[0x21234], 0xCC, "do not submit before Enter");
 
         for byte in b"lo\r" {
-            machine.enqueue_input_character(ascii_key(*byte));
+            machine.enqueue_bios_keystroke(ascii_key(*byte));
         }
         assert!(matches!(
             machine.step().unwrap(),

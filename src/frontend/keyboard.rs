@@ -1,6 +1,6 @@
 use winit::keyboard::{KeyCode, SmolStr};
 
-use crate::machine::KeyPress;
+use crate::machine::BiosKeyStroke;
 
 #[cfg(test)]
 mod tests;
@@ -21,7 +21,7 @@ pub(crate) fn translate_winit_key(
     key: KeyCode,
     text: Option<SmolStr>,
     modifiers: &ModifierState,
-) -> Option<KeyPress> {
+) -> Option<BiosKeyStroke> {
     let (normal, shift, ctrl, alt) = match key {
         KeyCode::KeyA => (
             KeyMap::HostText(0x1E),
@@ -410,7 +410,7 @@ pub(crate) fn translate_winit_key(
     match map {
         KeyMap::HostText(scan_code) => text.map_or(None, |text| {
             if text.is_ascii() && text.len() == 1 {
-                Some(KeyPress {
+                Some(BiosKeyStroke {
                     scan_code,
                     ascii: Some(text.as_bytes()[0]),
                 })
@@ -418,7 +418,7 @@ pub(crate) fn translate_winit_key(
                 None
             }
         }),
-        KeyMap::Override(scan_code, ascii) => Some(KeyPress {
+        KeyMap::Override(scan_code, ascii) => Some(BiosKeyStroke {
             scan_code,
             ascii: Some(ascii),
         }),
