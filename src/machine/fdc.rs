@@ -21,6 +21,7 @@ pub(super) struct Fdc {
 enum PendingInterrupt {
     Reset,
     Recalibrated { drive: u8 },
+    SeekCompleted { drive_head: u8, cylinder: u8 },
 }
 
 enum CommandState {
@@ -30,6 +31,8 @@ enum CommandState {
     RecalibrateDrive,
     ReadData,
     ExecutingRead,
+    SeekDrive,
+    SeekCylinder { drive_head: u8 },
 }
 
 pub(super) struct FdcReadData {
@@ -84,15 +87,24 @@ impl Fdc {
         if let Some(interrupt_request) = self.interrupt_request.take() {
             match interrupt_request {
                 // Ready-change status for drive A (ST0)
-                PendingInterrupt::Reset => self.result_bytes.push_back(0xC0),
+                PendingInterrupt::Reset => {
+                    self.result_bytes.push_back(0xC0);
+                    // Cylinder 0
+                    self.result_bytes.push_back(0x00);
+                }
                 // Seek completed
                 PendingInterrupt::Recalibrated { drive } => {
-                    self.result_bytes.push_back(0x20 | drive)
+                    self.result_bytes.push_back(0x20 | drive);
+                    self.result_bytes.push_back(0x00);
+                }
+                PendingInterrupt::SeekCompleted {
+                    drive_head,
+                    cylinder,
+                } => {
+                    self.result_bytes.push_back(0x20 | drive_head);
+                    self.result_bytes.push_back(cylinder);
                 }
             }
-
-            // Cylinder 0
-            self.result_bytes.push_back(0x00);
         } else {
             // Invalid command
             self.result_bytes.push_back(0x80);
@@ -142,6 +154,7 @@ impl Fdc {
                                 });
                                 self.command_state = CommandState::ReadData;
                             }
+                            0x0F => self.command_state = CommandState::SeekDrive,
                             _ => {
                                 // Unknown command
                                 self.result_bytes.push_back(0x80);
@@ -179,6 +192,18 @@ impl Fdc {
                     }
                     CommandState::ExecutingRead => {
                         // TODO
+                    }
+                    CommandState::SeekDrive => {
+                        self.command_state = CommandState::SeekCylinder {
+                            drive_head: value & 0b111,
+                        }
+                    }
+                    CommandState::SeekCylinder { drive_head } => {
+                        self.interrupt_request = Some(PendingInterrupt::SeekCompleted {
+                            drive_head,
+                            cylinder: value,
+                        });
+                        self.command_state = CommandState::Idle;
                     }
                 };
             }
