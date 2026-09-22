@@ -119,18 +119,24 @@ impl TextVideo {
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
         for row in 0..NUM_ROWS {
             for column in 0..NUM_COLUMNS {
-                let byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
-                let glyph = BASIC_FONTS.get(char::from(byte)).unwrap_or([0; 8]);
+                let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
+                let attributes = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column) + 1];
+                let glyph = BASIC_FONTS.get(char::from(text_byte)).unwrap_or([0; 8]);
+
+                let (fg_red, fg_green, fg_blue) = attribute_color_to_rgb(attributes & 0x0F);
+                // TODO: Support blinking, change to 0x0F for blink disabled
+                let (bg_red, bg_green, bg_blue) = attribute_color_to_rgb((attributes >> 4) & 0x07);
+
                 for gy in 0..GLYPH_HEIGHT {
                     for gx in 0..GLYPH_WIDTH {
                         let lit = glyph[gy] & (1u8 << gx) != 0;
                         let x = column * GLYPH_WIDTH + gx;
                         let y = row * GLYPH_HEIGHT + gy;
                         let offset = BYTES_PER_PIXEL * (y * NUM_COLUMNS * GLYPH_WIDTH + x);
-                        let brightness = if lit { 0xAA } else { 0x00 };
-                        frame[offset] = brightness; // red
-                        frame[offset + 1] = brightness; // green
-                        frame[offset + 2] = brightness; // blue
+
+                        frame[offset] = if lit { fg_red } else { bg_red }; // red
+                        frame[offset + 1] = if lit { fg_green } else { bg_green }; // green
+                        frame[offset + 2] = if lit { fg_blue } else { bg_blue }; // blue
                         frame[offset + 3] = 0xFF; // alpha
                     }
                 }
@@ -142,5 +148,27 @@ impl TextVideo {
         // TODO: Do proper status
         self.status = !self.status;
         self.status
+    }
+}
+
+pub fn attribute_color_to_rgb(color: u8) -> (u8, u8, u8) {
+    match color {
+        0x00 => (0x00, 0x00, 0x00), // black
+        0x01 => (0x00, 0x00, 0xAA), // blue
+        0x02 => (0x00, 0xAA, 0x00), // green
+        0x03 => (0x00, 0xAA, 0xAA), // cyan
+        0x04 => (0xAA, 0x00, 0x00), // red
+        0x05 => (0xAA, 0x00, 0xAA), // magenta
+        0x06 => (0xAA, 0x55, 0x00), // brown
+        0x07 => (0xAA, 0xAA, 0xAA), // light gray
+        0x08 => (0x55, 0x55, 0x55), // dark gray
+        0x09 => (0x55, 0x55, 0xFF), // light blue
+        0x0A => (0x55, 0xFF, 0x55), // light green
+        0x0B => (0x55, 0xFF, 0xFF), // light cyan
+        0x0C => (0xFF, 0x55, 0x55), // light red
+        0x0D => (0xFF, 0x55, 0xFF), // light magenta
+        0x0E => (0xFF, 0xFF, 0x55), // yellow
+        0x0F => (0xFF, 0xFF, 0xFF), // bright white
+        _ => (255, 255, 255),       // white
     }
 }
