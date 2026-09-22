@@ -13,9 +13,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::frontend::cga_renderer::CgaRenderer;
 use crate::frontend::keyboard::{ModifierState, winit_to_bios_key_stroke, winit_to_pc_scan_code};
-use crate::machine::{LoadMode, Machine, MachineStepResult};
+use crate::machine::{Machine, MachineStepResult};
+use crate::{frontend::cga_renderer::CgaRenderer, machine::KeyboardInputMode};
 
 pub struct App {
     machine: Machine,
@@ -135,7 +135,7 @@ impl ApplicationHandler for App {
                 event,
                 is_synthetic,
             } => {
-                if self.machine.load_mode() == LoadMode::Rom {
+                if self.machine.keyboard_input_mode() == KeyboardInputMode::PcHardware {
                     if let PhysicalKey::Code(code) = event.physical_key {
                         if let Some(scan_code) = winit_to_pc_scan_code(code) {
                             // Directly send the raw key to the machine

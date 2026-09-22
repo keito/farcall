@@ -1,5 +1,5 @@
 use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
-use crate::machine::{Dma, Fdc, PcKeyboard, Pic, Pit, Ppi};
+use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
 use std::time::Instant;
@@ -32,6 +32,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     tick_remainder: 0,
                     verbosity: 0,
                     load_mode: LoadMode::Com,
+                    keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
                     pending_input: None,
                     pc_keyboard: PcKeyboard::new(),
                     bios_keyboard: BiosKeyboard::new(),
@@ -156,6 +157,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         tick_remainder: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
+        keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
@@ -245,6 +247,7 @@ fn write_service_clears_only_carry() {
         tick_remainder: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
+        keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
@@ -286,6 +289,7 @@ fn dos_termination_returns_al_as_exit_code() {
             tick_remainder: 0,
             verbosity: 0,
             load_mode: LoadMode::Com,
+            keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
             pending_input: None,
             pc_keyboard: PcKeyboard::new(),
             synthetic_int09_pending: false,
@@ -323,6 +327,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         tick_remainder: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
+        keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
         synthetic_int09_pending: false,

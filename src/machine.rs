@@ -43,7 +43,6 @@ mod video;
 pub struct Machine {
     bios_keyboard: BiosKeyboard,
     boot_time: Instant,
-    last_step_time: Instant,
     /// Read line buffer (DOS mode only)
     console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
@@ -52,16 +51,18 @@ pub struct Machine {
     floppy_image: Option<FloppyDisk>,
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
-    pc_keyboard: PcKeyboard,
-    /// Used to directly raise INT 09h when emulating a BIOS
-    synthetic_int09_pending: bool,
+    keyboard_input_mode: KeyboardInputMode,
+    last_step_time: Instant,
     load_mode: LoadMode,
     memory: Vec<u8>,
+    pc_keyboard: PcKeyboard,
     /// What kind of input we're pending
     pending_input: Option<PendingInput>,
     pic: Pic,
     pit: Pit,
     ppi: Ppi,
+    /// Used to directly raise INT 09h when emulating a BIOS
+    synthetic_int09_pending: bool,
     text_video: TextVideo,
     /// Fraction of a PIT tick remaining after a step
     tick_remainder: u128,
@@ -121,6 +122,12 @@ enum BytePhase {
     High,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub(crate) enum KeyboardInputMode {
+    BiosKeystrokes,
+    PcHardware,
+}
+
 impl Machine {
     pub fn new(
         file_path: &str,
@@ -147,6 +154,10 @@ impl Machine {
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
             synthetic_int09_pending: false,
+            keyboard_input_mode: match load_mode {
+                LoadMode::Rom => KeyboardInputMode::PcHardware,
+                _ => KeyboardInputMode::BiosKeystrokes,
+            },
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
@@ -547,7 +558,7 @@ impl Machine {
         // Advance non-CPU devices
         self.advance_devices();
 
-        if self.load_mode == LoadMode::Rom {
+        if self.keyboard_input_mode == KeyboardInputMode::PcHardware {
             if let Some(scan_code) = self.pc_keyboard.peek() {
                 if self.ppi.try_receive_scan_code(scan_code) {
                     self.pc_keyboard.pop_front();
@@ -563,8 +574,8 @@ impl Machine {
             self.cpu.enter_interrupt(&mut self.memory, vector)?;
         }
 
-        // Deliver keyboard IRQ if not in ROM mode
-        if self.load_mode != LoadMode::Rom
+        // Deliver keyboard IRQ if emulating BIOS keystrokes
+        if self.keyboard_input_mode == KeyboardInputMode::BiosKeystrokes
             && self.synthetic_int09_pending
             && self.cpu.get_flag(Flag::InterruptEnable)
         {
@@ -874,8 +885,8 @@ impl Machine {
         Ok(())
     }
 
-    pub(crate) fn load_mode(&self) -> LoadMode {
-        self.load_mode
+    pub(crate) fn keyboard_input_mode(&self) -> KeyboardInputMode {
+        self.keyboard_input_mode
     }
 }
 
