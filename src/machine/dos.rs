@@ -1,9 +1,9 @@
 use std::collections::VecDeque;
 
 use crate::{
-    cpu::Flag,
+    cpu::{Cpu, Flag},
     machine::{
-        InterruptResult, Machine, MachineError,
+        InterruptResult, Machine, MachineError, TextVideo,
         console::{PendingInput, PendingRead},
     },
     memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer},
@@ -29,6 +29,91 @@ impl Dos {
         };
         dos.handles.resize(20, None);
         dos
+    }
+
+    /// INT 21h, AH=02h: Emulates the DOS output char service
+    pub(super) fn output_char_service(
+        &self,
+        cpu: &Cpu,
+        memory: &mut [u8],
+        video: &mut TextVideo,
+    ) -> Result<InterruptResult, MachineError> {
+        let c = cpu.get_reg(Reg8::Dl);
+        let Some(Some(resource)) = self.handles.get(1) else {
+            return Err(MachineError::WriteServiceError(
+                "Handle 1 is not set".to_string(),
+            ));
+        };
+        // TODO: Support other resources in the future
+        if *resource != Resource::Stdout {
+            return Err(MachineError::WriteServiceError(
+                "Handle 1 must be stdout".to_string(),
+            ));
+        }
+
+        video.write_char(memory, c)?;
+
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=30h: Emulates the DOS version service
+    pub(super) fn dos_version_service(
+        &self,
+        cpu: &mut Cpu,
+    ) -> Result<InterruptResult, MachineError> {
+        // Report DOS version 2.0
+        cpu.set_reg(Reg8::Al, 2);
+        cpu.set_reg(Reg8::Ah, 0);
+        cpu.bx = 0;
+        cpu.cx = 0;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=3Eh: Emulates the Close Handle Service
+    pub(super) fn close_handle_service(
+        &mut self,
+        cpu: &mut Cpu,
+    ) -> Result<InterruptResult, MachineError> {
+        let handle_num = cpu.get_reg(Reg16::Bx);
+        if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
+            // Handle is already closed or nonexistent
+            cpu.ax = 6;
+            cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+
+        self.handles[handle_num as usize] = None;
+        cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=45h: Emulates the Duplicate File Handle Service
+    pub(super) fn duplicate_file_handle_service(
+        &mut self,
+        cpu: &mut Cpu,
+    ) -> Result<InterruptResult, MachineError> {
+        let handle_num = cpu.get_reg(Reg16::Bx);
+        let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
+            // Unknown handle number
+            cpu.ax = 6;
+            cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        let Some(pos) = self.handles.iter().position(|h| h.is_none()) else {
+            // No open positions in table
+            cpu.ax = 4;
+            cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        self.handles[pos] = Some(resource.clone());
+        cpu.ax = pos as u16;
+        cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=4Ch: Emulates the DOS termination service
+    pub(super) fn termination_service(&self, cpu: &Cpu) -> Result<InterruptResult, MachineError> {
+        Ok(InterruptResult::Exit((cpu.ax & 0xFF) as u8))
     }
 }
 
@@ -56,26 +141,6 @@ impl Machine {
                 "Unsupported resource in handle 0".to_string(),
             )),
         }
-    }
-
-    /// Emulates the DOS output char service (INT 21h, AH=02h)
-    pub(super) fn output_char_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let c = self.cpu.get_reg(Reg8::Dl);
-        let Some(Some(resource)) = self.dos.handles.get(1) else {
-            return Err(MachineError::WriteServiceError(
-                "Handle 1 is not set".to_string(),
-            ));
-        };
-        // TODO: Support other resources in the future
-        if *resource != Resource::Stdout {
-            return Err(MachineError::WriteServiceError(
-                "Handle 1 must be stdout".to_string(),
-            ));
-        }
-
-        self.text_video.write_char(&mut self.memory, c)?;
-
-        Ok(InterruptResult::ResumeExecution)
     }
 
     /// Emulates the DOS read service (INT21h, AH=3Fh)
@@ -187,59 +252,6 @@ impl Machine {
         self.cpu.ax = num_bytes as u16;
         self.cpu.set_flag(Flag::Carry, false);
 
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// INT21h, AH=4Ch: Emulates the DOS termination service
-    pub(super) fn termination_service(&mut self) -> Result<InterruptResult, MachineError> {
-        Ok(InterruptResult::Exit((self.cpu.ax & 0xFF) as u8))
-    }
-
-    /// INT21h, AH=30h: Emulates the DOS version service
-    pub(super) fn dos_version_service(&mut self) -> Result<InterruptResult, MachineError> {
-        // Report DOS version 2.0
-        self.cpu.set_reg(Reg8::Al, 2);
-        self.cpu.set_reg(Reg8::Ah, 0);
-        self.cpu.bx = 0;
-        self.cpu.cx = 0;
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// INT21h, AH=45h: Emulates the Duplicate File Handle Service
-    pub(super) fn duplicate_file_handle_service(
-        &mut self,
-    ) -> Result<InterruptResult, MachineError> {
-        let handle_num = self.cpu.get_reg(Reg16::Bx);
-        let Some(Some(resource)) = self.dos.handles.get(handle_num as usize) else {
-            // Unknown handle number
-            self.cpu.ax = 6;
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        };
-        let Some(pos) = self.dos.handles.iter().position(|h| h.is_none()) else {
-            // No open positions in table
-            self.cpu.ax = 4;
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        };
-        self.dos.handles[pos] = Some(resource.clone());
-        self.cpu.ax = pos as u16;
-        self.cpu.set_flag(Flag::Carry, false);
-        Ok(InterruptResult::ResumeExecution)
-    }
-
-    /// INT21h, AH=3Eh: Emulates the Close Handle Service
-    pub(super) fn close_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let handle_num = self.cpu.get_reg(Reg16::Bx);
-        if !matches!(self.dos.handles.get(handle_num as usize), Some(Some(_))) {
-            // Handle is already closed or nonexistent
-            self.cpu.ax = 6;
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        };
-
-        self.dos.handles[handle_num as usize] = None;
-        self.cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
     }
 }

@@ -439,15 +439,19 @@ impl Machine {
                 // AH contains the service ID
                 match self.cpu.get_reg(Reg8::Ah) {
                     0x01 => self.read_char_with_echo_service(),
-                    0x02 => self.output_char_service(),
+                    0x02 => self.dos.output_char_service(
+                        &self.cpu,
+                        &mut self.memory,
+                        &mut self.text_video,
+                    ),
                     0x09 => self.print_string_service(),
                     0x0C => self.flush_and_read_service(),
-                    0x30 => self.dos_version_service(),
-                    0x3E => self.close_handle_service(),
+                    0x30 => self.dos.dos_version_service(&mut self.cpu),
+                    0x3E => self.dos.close_handle_service(&mut self.cpu),
                     0x3F => self.read_service(),
                     0x40 => self.write_service(),
-                    0x45 => self.duplicate_file_handle_service(),
-                    0x4C => self.termination_service(),
+                    0x45 => self.dos.duplicate_file_handle_service(&mut self.cpu),
+                    0x4C => self.dos.termination_service(&self.cpu),
                     service => Err(MachineError::UnsupportedService(service)),
                 }
             }
