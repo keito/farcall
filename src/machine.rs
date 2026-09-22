@@ -205,52 +205,22 @@ impl Machine {
             return self.handle_guest_interrupt(interrupt);
         }
         match interrupt {
-            // BIOS services
-            0x10 => Ok(self.bios.as_ref().expect("Must").video_service(
-                &mut self.cpu,
-                &mut self.memory,
-                &mut self.text_video,
-            )?),
-            0x11 => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .equipment_list_service(&mut self.cpu)?),
-            0x12 => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .amount_conventional_ram_service(&mut self.cpu)?),
-            0x13 => Ok(self.bios.as_ref().expect("Must").disk_service(
-                &mut self.cpu,
-                &mut self.memory,
-                &self.floppy_image,
-            )?),
-            0x14 => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .serial_port_service(&mut self.cpu)?),
-            0x15 => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .bios_system_services(&mut self.cpu)?),
-            0x16 => Ok(self.bios.as_mut().expect("Must").keyboard_service(
-                &mut self.cpu,
-                &mut self.bios_keyboard,
-                self.verbosity,
-            )?),
-            0x17 => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .printer_service(&mut self.cpu)?),
-            0x1A => Ok(self
-                .bios
-                .as_ref()
-                .expect("Must")
-                .time_of_day_service(&mut self.cpu)?),
+            0x10..=0x17 | 0x1A => {
+                // BIOS services - in COM/Boot mode, send to our emulated BIOS
+                if let Some(bios) = self.bios.as_mut() {
+                    Ok(bios.handle_bios_service(
+                        interrupt,
+                        &mut self.cpu,
+                        &mut self.memory,
+                        &mut self.bios_keyboard,
+                        &self.floppy_image,
+                        &mut self.text_video,
+                        self.verbosity,
+                    )?)
+                } else {
+                    unreachable!("This should be ROM mode, which is handled above");
+                }
+            }
             0x20 | 0x21 | 0x28 | 0x29 => {
                 // DOS services - in COM mode, send to our emulated DOS
                 if let Some(dos) = self.dos.as_mut() {

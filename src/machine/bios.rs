@@ -4,7 +4,7 @@ mod disk;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{BiosKeyboard, InterruptResult, MachineStepResult, TextVideo},
+    machine::{BiosKeyboard, FloppyDisk, InterruptResult, MachineStepResult, TextVideo},
     memory::MemoryError,
     registers::Reg8,
 };
@@ -253,6 +253,30 @@ impl Bios {
             _ => Err(BiosError::TimeOfDayServiceError(format!(
                 "Unsupported operation: {operation:X}h"
             ))),
+        }
+    }
+
+    pub(super) fn handle_bios_service(
+        &mut self,
+        interrupt: u8,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+        bios_keyboard: &mut BiosKeyboard,
+        floppy_image: &Option<FloppyDisk>,
+        video: &mut TextVideo,
+        verbosity: u8,
+    ) -> Result<InterruptResult, BiosError> {
+        match interrupt {
+            0x10 => self.video_service(cpu, memory, video),
+            0x11 => self.equipment_list_service(cpu),
+            0x12 => self.amount_conventional_ram_service(cpu),
+            0x13 => self.disk_service(cpu, memory, floppy_image),
+            0x14 => self.serial_port_service(cpu),
+            0x15 => self.bios_system_services(cpu),
+            0x16 => self.keyboard_service(cpu, bios_keyboard, verbosity),
+            0x17 => self.printer_service(cpu),
+            0x1A => self.time_of_day_service(cpu),
+            _ => unreachable!("Interrupts should be filtered earlier"),
         }
     }
 }
