@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-pub(super) struct Keyboard {
+pub(super) struct PcKeyboard {
     scan_code_queue: VecDeque<u8>,
 }
 
-impl Keyboard {
+impl PcKeyboard {
     pub(super) fn new() -> Self {
         Self {
             scan_code_queue: VecDeque::new(),

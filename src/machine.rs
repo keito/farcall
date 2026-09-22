@@ -15,7 +15,7 @@ use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
 use dos::Resource;
 use fdc::{Fdc, FdcReadData};
-use keyboard::Keyboard;
+use pc_keyboard::PcKeyboard;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
@@ -28,7 +28,7 @@ mod disk;
 mod dma;
 mod dos;
 mod fdc;
-mod keyboard;
+mod pc_keyboard;
 mod pic;
 mod pit;
 mod ppi;
@@ -48,7 +48,7 @@ pub struct Machine {
     floppy_image: Option<FloppyDisk>,
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
-    keyboard: Keyboard,
+    pc_keyboard: PcKeyboard,
     keyboard_buffer: VecDeque<KeyPress>,
     keyboard_irq_pending: bool,
     load_mode: LoadMode,
@@ -145,7 +145,7 @@ impl Machine {
             ],
             fdc: Fdc::new(),
             floppy_image: None,
-            keyboard: Keyboard::new(),
+            pc_keyboard: PcKeyboard::new(),
             keyboard_buffer: VecDeque::new(),
             keyboard_irq_pending: false,
             load_mode: load_mode.clone(),
@@ -200,7 +200,7 @@ impl Machine {
 
     /// Used for ROM mode
     pub fn enqueue_raw_key_event(&mut self, scan_code: u8, pressed: bool) {
-        self.keyboard.enqueue(scan_code, pressed);
+        self.pc_keyboard.enqueue(scan_code, pressed);
     }
 
     /// Emulates the DOS termination service
@@ -549,9 +549,9 @@ impl Machine {
         self.advance_devices();
 
         if self.load_mode == LoadMode::Rom {
-            if let Some(scan_code) = self.keyboard.peek() {
+            if let Some(scan_code) = self.pc_keyboard.peek() {
                 if self.ppi.try_receive_scan_code(scan_code) {
-                    self.keyboard.pop_front();
+                    self.pc_keyboard.pop_front();
                 }
                 // Synchronize PIC with PPI
                 self.pic.set_irq_line(1, self.ppi.irq_output());
