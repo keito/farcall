@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{BiosKeyboard, InterruptResult, MachineError, MachineStepResult, TextVideo},
-    memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer, write_buffer},
+    machine::{BiosKeyboard, InterruptResult, MachineStepResult, TextVideo},
+    memory::{MemoryError, SegmentedAddr, read_buffer, read_byte, validate_buffer, write_buffer},
     registers::{Reg8, Reg16},
 };
 
@@ -41,7 +41,7 @@ impl Dos {
         memory: &mut [u8],
         bios_keyboard: &mut BiosKeyboard,
         video: &mut TextVideo,
-    ) -> Result<MachineStepResult, MachineError> {
+    ) -> Result<MachineStepResult, DosError> {
         let Some(pending_input) = &mut self.pending_input else {
             return Ok(MachineStepResult::Continue);
         };
@@ -108,10 +108,48 @@ impl Dos {
         }
     }
 
+    /// Handles DOS services
+    pub(super) fn handle_interrupt(
+        &mut self,
+        interrupt: u8,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+        bios_keyboard: &mut BiosKeyboard,
+        video: &mut TextVideo,
+    ) -> Result<InterruptResult, DosError> {
+        match interrupt {
+            // Terminate program service
+            0x20 => Ok(InterruptResult::Exit(0)),
+            0x21 => match cpu.get_reg(Reg8::Ah) {
+                // AH contains the service ID
+                0x01 => self.read_char_with_echo_service(),
+                0x02 => self.output_char_service(cpu, memory, video),
+                0x09 => self.print_string_service(cpu, memory, video),
+                0x0C => self.flush_and_read_service(cpu, bios_keyboard),
+                0x30 => self.dos_version_service(cpu),
+                0x3E => self.close_handle_service(cpu),
+                0x3F => self.read_service(cpu, memory),
+                0x40 => self.write_service(cpu, memory, video),
+                0x45 => self.duplicate_file_handle_service(cpu),
+                0x4C => self.termination_service(cpu),
+                service => Err(DosError::UnsupportedInt21hService(service)),
+            },
+            0x28 => self.idle_service(),
+            _ => Err(DosError::UnsupportedInterrupt(interrupt)),
+        }
+    }
+
+    /// Handles DOS Idle Service (INT 28h)
+    pub(super) fn idle_service(&self) -> Result<InterruptResult, DosError> {
+        // Noop for now
+        // TODO: support guest-installed handlers
+        Ok(InterruptResult::ResumeExecution)
+    }
+
     /// INT 21h, AH=01h: Emulates the read one character with echo service
-    pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
+    pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, DosError> {
         let Some(Some(resource)) = self.handles.get(0) else {
-            return Err(MachineError::ReadServiceError(
+            return Err(DosError::ReadServiceError(
                 "Handle 0 is not set".to_string(),
             ));
         };
@@ -120,7 +158,7 @@ impl Dos {
                 self.pending_input = Some(PendingInput::DosReadCharWithEcho);
                 Ok(InterruptResult::WaitingForInput)
             }
-            _ => Err(MachineError::ReadServiceError(
+            _ => Err(DosError::ReadServiceError(
                 "Unsupported resource in handle 0".to_string(),
             )),
         }
@@ -132,16 +170,16 @@ impl Dos {
         cpu: &Cpu,
         memory: &mut [u8],
         video: &mut TextVideo,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let c = cpu.get_reg(Reg8::Dl);
         let Some(Some(resource)) = self.handles.get(1) else {
-            return Err(MachineError::WriteServiceError(
+            return Err(DosError::WriteServiceError(
                 "Handle 1 is not set".to_string(),
             ));
         };
         // TODO: Support other resources in the future
         if *resource != Resource::Stdout {
-            return Err(MachineError::WriteServiceError(
+            return Err(DosError::WriteServiceError(
                 "Handle 1 must be stdout".to_string(),
             ));
         }
@@ -157,7 +195,7 @@ impl Dos {
         cpu: &mut Cpu,
         memory: &mut [u8],
         video: &mut TextVideo,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let mut segmented_addr = SegmentedAddr::new(cpu.ds, cpu.dx);
         let mut buf = vec![];
         let mut found_dollar = false;
@@ -171,7 +209,7 @@ impl Dos {
             segmented_addr = segmented_addr.wrapping_add(1);
         }
         if !found_dollar {
-            return Err(MachineError::PrintStringServiceError(
+            return Err(DosError::PrintStringServiceError(
                 "$ symbol not found in memory".to_string(),
             ));
         }
@@ -191,10 +229,10 @@ impl Dos {
         &mut self,
         cpu: &mut Cpu,
         bios_keyboard: &mut BiosKeyboard,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         // Flush input if handle 0 is a console
         let Some(Some(resource)) = self.handles.get(0) else {
-            return Err(MachineError::ReadServiceError(
+            return Err(DosError::ReadServiceError(
                 "Handle 0 is not set".to_string(),
             ));
         };
@@ -208,17 +246,14 @@ impl Dos {
         let al = cpu.get_reg(Reg8::Al);
         return match al {
             0x01 => self.read_char_with_echo_service(),
-            _ => Err(MachineError::ReadServiceError(
+            _ => Err(DosError::ReadServiceError(
                 "Unsupported mode in 0Ch service".to_string(),
             )),
         };
     }
 
     /// INT21h, AH=30h: Emulates the DOS version service
-    pub(super) fn dos_version_service(
-        &self,
-        cpu: &mut Cpu,
-    ) -> Result<InterruptResult, MachineError> {
+    pub(super) fn dos_version_service(&self, cpu: &mut Cpu) -> Result<InterruptResult, DosError> {
         // Report DOS version 2.0
         cpu.set_reg(Reg8::Al, 2);
         cpu.set_reg(Reg8::Ah, 0);
@@ -231,7 +266,7 @@ impl Dos {
     pub(super) fn close_handle_service(
         &mut self,
         cpu: &mut Cpu,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let handle_num = cpu.get_reg(Reg16::Bx);
         if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
             // Handle is already closed or nonexistent
@@ -250,7 +285,7 @@ impl Dos {
         &mut self,
         cpu: &mut Cpu,
         memory: &mut [u8],
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let dest = cpu.bx as usize;
         let Some(Some(resource)) = self.handles.get(dest) else {
             // Unknown handle
@@ -259,7 +294,7 @@ impl Dos {
             return Ok(InterruptResult::ResumeExecution);
         };
         if *resource != Resource::Stdin {
-            return Err(MachineError::ReadServiceError(
+            return Err(DosError::ReadServiceError(
                 "Unsupported resource".to_string(),
             ));
         }
@@ -289,13 +324,13 @@ impl Dos {
         cpu: &mut Cpu,
         memory: &mut [u8],
         video: &mut TextVideo,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let start_pos = normalize_addr(SegmentedAddr::new(cpu.ds, cpu.dx));
         // Limit size of write to 0x10000 - offset
         let num_bytes = (cpu.cx as usize).min(0x10000 - start_pos.offset as usize);
         let dest = cpu.bx;
         if dest != 1 {
-            return Err(MachineError::WriteServiceError(
+            return Err(DosError::WriteServiceError(
                 "Unsupported destination in bx".to_string(),
             ));
         }
@@ -316,7 +351,7 @@ impl Dos {
     pub(super) fn duplicate_file_handle_service(
         &mut self,
         cpu: &mut Cpu,
-    ) -> Result<InterruptResult, MachineError> {
+    ) -> Result<InterruptResult, DosError> {
         let handle_num = cpu.get_reg(Reg16::Bx);
         let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
             // Unknown handle number
@@ -337,7 +372,7 @@ impl Dos {
     }
 
     /// INT21h, AH=4Ch: Emulates the DOS termination service
-    pub(super) fn termination_service(&self, cpu: &Cpu) -> Result<InterruptResult, MachineError> {
+    pub(super) fn termination_service(&self, cpu: &Cpu) -> Result<InterruptResult, DosError> {
         Ok(InterruptResult::Exit((cpu.ax & 0xFF) as u8))
     }
 }
@@ -358,6 +393,22 @@ struct PendingRead {
     pub(super) destination: SegmentedAddr,
     pub(super) max_bytes: usize,
     pub(super) bytes: Vec<u8>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DosError {
+    #[error(transparent)]
+    Memory(#[from] MemoryError),
+    #[error("DOS Print String Service error: {0}")]
+    PrintStringServiceError(String),
+    #[error("DOS Read Service error: {0}")]
+    ReadServiceError(String),
+    #[error("Unsupported DOS service: INT {0:X}h")]
+    UnsupportedInterrupt(u8),
+    #[error("Unsupported DOS service: INT 21h AH={0:X}h")]
+    UnsupportedInt21hService(u8),
+    #[error("DOS Write Service error: {0}")]
+    WriteServiceError(String),
 }
 
 /// Normalize a segmented address, similar to what DOS 2.0 does, by moving

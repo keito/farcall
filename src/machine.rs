@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::machine::bios_keyboard::BiosKeyStroke;
+use crate::machine::dos::DosError;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
 };
@@ -64,38 +65,30 @@ pub struct Machine {
 
 #[derive(Error, Debug)]
 pub enum MachineError {
-    #[error("Not enough memory; offset {0} exceeds {1} bytes")]
-    NotEnoughMemory(usize, usize),
-    #[error("Unsupported interrupt: {0:X}h")]
-    UnsupportedInterrupt(u8),
-    #[error("Unsupported service: {0:X}h")]
-    UnsupportedService(u8),
-    #[error("IO error: {0}")]
-    IoError(#[from] std::io::Error),
-    #[error("Read Service error: {0}")]
-    ReadServiceError(String),
-    #[error("Write Service error: {0}")]
-    WriteServiceError(String),
-    #[error("Print String Service error: {0}")]
-    PrintStringServiceError(String),
-    #[error("Memory Error: {0}")]
-    MemoryError(#[from] MemoryError),
-    #[error("Video Service error: {0}")]
-    VideoServiceError(String),
-    #[error("CPU Error: {0}")]
-    CpuError(#[from] CpuError),
-    #[error("Boot Sector error: {0}")]
-    BootSectorError(String),
-    #[error("Time of Day Service error: {0}")]
-    TimeOfDayServiceError(String),
-    #[error("Keyboard Service error: {0}")]
-    KeyboardServiceError(String),
     #[error("BIOS System Service error: {0}")]
     BiosSystemServiceError(String),
-    #[error("PIC error: {0}")]
-    PicError(String),
+    #[error("Boot Sector error: {0}")]
+    BootSectorError(String),
+    #[error("CPU Error: {0}")]
+    CpuError(#[from] CpuError),
     #[error("Disk error: {0}")]
     DiskError(String),
+    #[error(transparent)]
+    Dos(#[from] DosError),
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+    #[error("Keyboard Service error: {0}")]
+    KeyboardServiceError(String),
+    #[error("Not enough memory; offset {0} exceeds {1} bytes")]
+    NotEnoughMemory(usize, usize),
+    #[error("Memory Error: {0}")]
+    MemoryError(#[from] MemoryError),
+    #[error("PIC error: {0}")]
+    PicError(String),
+    #[error("Time of Day Service error: {0}")]
+    TimeOfDayServiceError(String),
+    #[error("Video Service error: {0}")]
+    VideoServiceError(String),
 }
 
 enum InterruptResult {
@@ -420,66 +413,20 @@ impl Machine {
             0x16 => self.keyboard_service(),
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
-            0x20 => {
-                // In boot mode, send to the guest
-                if self.load_mode == LoadMode::Boot {
-                    return self.handle_guest_interrupt(interrupt);
-                }
-                Ok(InterruptResult::Exit(0))
-            }
-            0x21 => {
+            0x20 | 0x21 | 0x28 | 0x29 => {
                 // DOS services
                 // In boot mode, send to the guest
                 if self.load_mode == LoadMode::Boot {
                     return self.handle_guest_interrupt(interrupt);
                 }
-                // AH contains the service ID
-                match self.cpu.get_reg(Reg8::Ah) {
-                    0x01 => self.dos.read_char_with_echo_service(),
-                    0x02 => self.dos.output_char_service(
-                        &self.cpu,
-                        &mut self.memory,
-                        &mut self.text_video,
-                    ),
-                    0x09 => self.dos.print_string_service(
-                        &mut self.cpu,
-                        &mut self.memory,
-                        &mut self.text_video,
-                    ),
-                    0x0C => self
-                        .dos
-                        .flush_and_read_service(&mut self.cpu, &mut self.bios_keyboard),
-                    0x30 => self.dos.dos_version_service(&mut self.cpu),
-                    0x3E => self.dos.close_handle_service(&mut self.cpu),
-                    0x3F => self.dos.read_service(&mut self.cpu, &mut self.memory),
-                    0x40 => self.dos.write_service(
-                        &mut self.cpu,
-                        &mut self.memory,
-                        &mut self.text_video,
-                    ),
-                    0x45 => self.dos.duplicate_file_handle_service(&mut self.cpu),
-                    0x4C => self.dos.termination_service(&self.cpu),
-                    service => Err(MachineError::UnsupportedService(service)),
-                }
-            }
-            0x28 => {
-                // DOS idle
-                // In boot mode, send to the guest
-                if self.load_mode == LoadMode::Boot {
-                    return self.handle_guest_interrupt(interrupt);
-                }
-                // In COM mode, noop for now
-                // TODO: support guest-installed handlers
-                Ok(InterruptResult::ResumeExecution)
-            }
-            0x29 => {
-                // Fast console output
-                // In boot mode, send to the guest
-                if self.load_mode == LoadMode::Boot {
-                    return self.handle_guest_interrupt(interrupt);
-                }
-                // TODO: Emulate in COM mode
-                Err(MachineError::UnsupportedInterrupt(interrupt))
+                // In COM mode, send to our emulated DOS
+                Ok(self.dos.handle_interrupt(
+                    interrupt,
+                    &mut self.cpu,
+                    &mut self.memory,
+                    &mut self.bios_keyboard,
+                    &mut self.text_video,
+                )?)
             }
             // By default, send interrupts to the guest
             _ => self.handle_guest_interrupt(interrupt),
@@ -512,12 +459,12 @@ impl Machine {
         }
 
         if self.dos.has_pending_input() {
-            return self.dos.handle_pending_input(
+            return Ok(self.dos.handle_pending_input(
                 &mut self.cpu,
                 &mut self.memory,
                 &mut self.bios_keyboard,
                 &mut self.text_video,
-            );
+            )?);
         }
 
         // Advance non-CPU devices
