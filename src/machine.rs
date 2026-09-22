@@ -622,38 +622,47 @@ impl Machine {
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortWrite8 { port, value } => {
-                match port {
-                    0x04 | 0x05 | 0x81 | 0x0A | 0x0B | 0x0C | 0x0D => {
-                        self.dma.write(port, value);
-                    }
-                    0x20 | 0x21 => {
-                        self.pic.write(port, value);
-                    }
-                    0x40..=0x43 => {
-                        self.pit.write(port, value);
-                        // Synchronize PIC's IRQ lines with the PIT's output
-                        self.pic.set_irq_line(0, self.pit.output0());
-                    }
-                    0x60..=0x63 => {
-                        self.ppi.write(port, value);
-                        self.pic.set_irq_line(1, self.ppi.irq_output());
-                    }
-                    0x3F2 | 0x3F5 => {
-                        self.fdc.write(port, value);
-                        if let Some(read_request) = self.fdc.take_read_request() {
-                            self.handle_floppy_read(read_request)?;
-                        }
-                        // Synchronize PIC's IRQ line with the FDC's output
-                        self.pic.set_irq_line(6, self.fdc.irq_output());
-                    }
-                    _ => (),
-                };
+                self.write_port8(port, value)?;
                 Ok(MachineStepResult::Continue)
             }
-            CpuStepResult::PortWrite16 { .. } => Ok(MachineStepResult::Continue),
+            CpuStepResult::PortWrite16 { port, value } => {
+                self.write_port8(port, (value & 0xFF) as u8)?;
+                self.write_port8(port.wrapping_add(1), (value >> 8) as u8)?;
+                Ok(MachineStepResult::Continue)
+            }
         };
         self.cpu.trace();
         outcome
+    }
+
+    fn write_port8(&mut self, port: u16, value: u8) -> Result<(), MachineError> {
+        match port {
+            0x04 | 0x05 | 0x81 | 0x0A | 0x0B | 0x0C | 0x0D => {
+                self.dma.write(port, value);
+            }
+            0x20 | 0x21 => {
+                self.pic.write(port, value);
+            }
+            0x40..=0x43 => {
+                self.pit.write(port, value);
+                // Synchronize PIC's IRQ lines with the PIT's output
+                self.pic.set_irq_line(0, self.pit.output0());
+            }
+            0x60..=0x63 => {
+                self.ppi.write(port, value);
+                self.pic.set_irq_line(1, self.ppi.irq_output());
+            }
+            0x3F2 | 0x3F5 => {
+                self.fdc.write(port, value);
+                if let Some(read_request) = self.fdc.take_read_request() {
+                    self.handle_floppy_read(read_request)?;
+                }
+                // Synchronize PIC's IRQ line with the FDC's output
+                self.pic.set_irq_line(6, self.fdc.irq_output());
+            }
+            _ => (),
+        };
+        Ok(())
     }
 
     fn handle_floppy_read(&mut self, read_request: FdcReadData) -> Result<(), MachineError> {
