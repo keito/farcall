@@ -162,8 +162,9 @@ impl Machine {
             }
         }
 
-        if load_mode != LoadMode::Rom {
-            // Create a stub entry in the Interrupt Vector Table for INT 09h
+        if machine.keyboard_input_mode == KeyboardInputMode::BiosKeystrokes {
+            // Create a stub IRET entry in the Interrupt Vector Table for INT 09h
+            // so that applications have a default handler to hook into.
             // TODO: Do this properly
             let iret_addr = PhysAddr::new(0xF000, 0x0100);
             write_byte(&mut machine.memory, iret_addr, 0xCF)?; // IRET
