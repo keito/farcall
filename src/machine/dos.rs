@@ -56,6 +56,41 @@ impl Dos {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// Emulates the DOS print string service (INT 21h, AH=09h)
+    pub(super) fn print_string_service(
+        &self,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+        video: &mut TextVideo,
+    ) -> Result<InterruptResult, MachineError> {
+        let mut segmented_addr = SegmentedAddr::new(cpu.ds, cpu.dx);
+        let mut buf = vec![];
+        let mut found_dollar = false;
+        for _ in 0..memory.len() {
+            let byte = read_byte(memory, segmented_addr.to_physical())?;
+            if byte == b'$' {
+                found_dollar = true;
+                break;
+            }
+            buf.push(byte);
+            segmented_addr = segmented_addr.wrapping_add(1);
+        }
+        if !found_dollar {
+            return Err(MachineError::PrintStringServiceError(
+                "$ symbol not found in memory".to_string(),
+            ));
+        }
+
+        for c in buf {
+            video.write_char(memory, c)?;
+        }
+
+        // Observed in real DOS
+        cpu.set_reg(Reg8::Al, 0x24);
+
+        return Ok(InterruptResult::ResumeExecution);
+    }
+
     /// INT21h, AH=30h: Emulates the DOS version service
     pub(super) fn dos_version_service(
         &self,
@@ -84,6 +119,35 @@ impl Dos {
 
         self.handles[handle_num as usize] = None;
         cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// Emulates the DOS write service (INT 21h, AH=40h)
+    pub(super) fn write_service(
+        &self,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+        video: &mut TextVideo,
+    ) -> Result<InterruptResult, MachineError> {
+        let start_pos = normalize_addr(SegmentedAddr::new(cpu.ds, cpu.dx));
+        // Limit size of write to 0x10000 - offset
+        let num_bytes = (cpu.cx as usize).min(0x10000 - start_pos.offset as usize);
+        let dest = cpu.bx;
+        if dest != 1 {
+            return Err(MachineError::WriteServiceError(
+                "Unsupported destination in bx".to_string(),
+            ));
+        }
+
+        let buffer = read_buffer(memory, start_pos.to_physical(), num_bytes)?;
+        for c in &buffer {
+            video.write_char(memory, *c)?;
+        }
+
+        // Successfully written bytes to AX and clear CF
+        cpu.ax = num_bytes as u16;
+        cpu.set_flag(Flag::Carry, false);
+
         Ok(InterruptResult::ResumeExecution)
     }
 
@@ -177,36 +241,6 @@ impl Machine {
         Ok(InterruptResult::WaitingForInput)
     }
 
-    /// Emulates the DOS print string service (INT 21h, AH=09h)
-    pub(super) fn print_string_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let mut segmented_addr = SegmentedAddr::new(self.cpu.ds, self.cpu.dx);
-        let mut buf = vec![];
-        let mut found_dollar = false;
-        for _ in 0..self.memory.len() {
-            let byte = read_byte(&self.memory, segmented_addr.to_physical())?;
-            if byte == b'$' {
-                found_dollar = true;
-                break;
-            }
-            buf.push(byte);
-            segmented_addr = segmented_addr.wrapping_add(1);
-        }
-        if !found_dollar {
-            return Err(MachineError::PrintStringServiceError(
-                "$ symbol not found in memory".to_string(),
-            ));
-        }
-
-        for c in buf {
-            self.text_video.write_char(&mut self.memory, c)?;
-        }
-
-        // Observed in real DOS
-        self.cpu.set_reg(Reg8::Al, 0x24);
-
-        return Ok(InterruptResult::ResumeExecution);
-    }
-
     /// Emulates the DOS flush and read service (INT 21h, AH=0Ch)
     pub(super) fn flush_and_read_service(&mut self) -> Result<InterruptResult, MachineError> {
         // Flush input if handle 0 is a console
@@ -229,30 +263,6 @@ impl Machine {
                 "Unsupported mode in 0Ch service".to_string(),
             )),
         };
-    }
-
-    /// Emulates the DOS write service (INT 21h, AH=40h)
-    pub(super) fn write_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let start_pos = normalize_addr(SegmentedAddr::new(self.cpu.ds, self.cpu.dx));
-        // Limit size of write to 0x10000 - offset
-        let num_bytes = (self.cpu.cx as usize).min(0x10000 - start_pos.offset as usize);
-        let dest = self.cpu.bx;
-        if dest != 1 {
-            return Err(MachineError::WriteServiceError(
-                "Unsupported destination in bx".to_string(),
-            ));
-        }
-
-        let buffer = read_buffer(&self.memory, start_pos.to_physical(), num_bytes)?;
-        for c in &buffer {
-            self.text_video.write_char(&mut self.memory, *c)?;
-        }
-
-        // Successfully written bytes to AX and clear CF
-        self.cpu.ax = num_bytes as u16;
-        self.cpu.set_flag(Flag::Carry, false);
-
-        Ok(InterruptResult::ResumeExecution)
     }
 }
 

@@ -263,7 +263,12 @@ fn write_service_clears_only_carry() {
     machine.cpu.flags = 0x0243; // Carry, zero, interrupt-enable, and reserved bit 1.
 
     let result = machine
-        .write_service()
+        .dos
+        .write_service(
+            &mut machine.cpu,
+            &mut machine.memory,
+            &mut machine.text_video,
+        )
         .expect("stdout write should succeed");
 
     assert!(matches!(result, InterruptResult::ResumeExecution));
@@ -405,7 +410,14 @@ fn dos_handle_write_normalizes_the_buffer_before_crossing_the_original_offset_bo
         expected[0xB8002] = b'B';
 
         assert!(matches!(
-            machine.write_service().unwrap(),
+            machine
+                .dos
+                .write_service(
+                    &mut machine.cpu,
+                    &mut machine.memory,
+                    &mut machine.text_video,
+                )
+                .unwrap(),
             InterruptResult::ResumeExecution
         ));
 
@@ -435,7 +447,14 @@ fn dos_dollar_string_keeps_the_original_segment_when_its_offset_wraps() {
     expected[0xB8002] = b'Z';
 
     assert!(matches!(
-        machine.print_string_service().unwrap(),
+        machine
+            .dos
+            .print_string_service(
+                &mut machine.cpu,
+                &mut machine.memory,
+                &mut machine.text_video,
+            )
+            .unwrap(),
         InterruptResult::ResumeExecution
     ));
 
@@ -527,7 +546,14 @@ fn dos_handle_write_length_limit_includes_the_last_byte_of_the_normalized_segmen
         }
 
         assert!(matches!(
-            machine.write_service().unwrap(),
+            machine
+                .dos
+                .write_service(
+                    &mut machine.cpu,
+                    &mut machine.memory,
+                    &mut machine.text_video,
+                )
+                .unwrap(),
             InterruptResult::ResumeExecution
         ));
 
