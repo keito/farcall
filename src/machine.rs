@@ -6,7 +6,6 @@ use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::machine::bios_keyboard::BiosKeyStroke;
-use crate::machine::console::PendingInput;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
 };
@@ -25,7 +24,6 @@ use video::TextVideo;
 pub use disk::DiskType;
 
 pub mod bios_keyboard;
-mod console;
 mod disk;
 mod dma;
 mod dos;
@@ -41,6 +39,7 @@ mod video;
 // Owns everything
 pub struct Machine {
     bios_keyboard: BiosKeyboard,
+    bios_pending_read: bool,
     boot_time: Instant,
     cpu: Cpu,
     dma: Dma,
@@ -52,8 +51,6 @@ pub struct Machine {
     load_mode: LoadMode,
     memory: Vec<u8>,
     pc_keyboard: PcKeyboard,
-    /// What kind of input we're pending
-    pending_input: Option<PendingInput>,
     pic: Pic,
     pit: Pit,
     ppi: Ppi,
@@ -136,6 +133,7 @@ impl Machine {
 
         let mut machine = Machine {
             bios_keyboard: BiosKeyboard::new(),
+            bios_pending_read: false,
             boot_time: Instant::now(),
             last_step_time: Instant::now(),
             cpu: Cpu::new(verbosity),
@@ -151,7 +149,6 @@ impl Machine {
             },
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
-            pending_input: None,
             pic: Pic::new(),
             pit: Pit::new(),
             ppi: Ppi::new(),
@@ -346,7 +343,7 @@ impl Machine {
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     Ok(InterruptResult::ResumeExecution)
                 } else {
-                    self.pending_input = Some(PendingInput::BiosReadKey);
+                    self.bios_pending_read = true;
                     Ok(InterruptResult::WaitingForInput)
                 }
             }
@@ -438,7 +435,7 @@ impl Machine {
                 }
                 // AH contains the service ID
                 match self.cpu.get_reg(Reg8::Ah) {
-                    0x01 => self.read_char_with_echo_service(),
+                    0x01 => self.dos.read_char_with_echo_service(),
                     0x02 => self.dos.output_char_service(
                         &self.cpu,
                         &mut self.memory,
@@ -449,10 +446,12 @@ impl Machine {
                         &mut self.memory,
                         &mut self.text_video,
                     ),
-                    0x0C => self.flush_and_read_service(),
+                    0x0C => self
+                        .dos
+                        .flush_and_read_service(&mut self.cpu, &mut self.bios_keyboard),
                     0x30 => self.dos.dos_version_service(&mut self.cpu),
                     0x3E => self.dos.close_handle_service(&mut self.cpu),
-                    0x3F => self.read_service(),
+                    0x3F => self.dos.read_service(&mut self.cpu, &mut self.memory),
                     0x40 => self.dos.write_service(
                         &mut self.cpu,
                         &mut self.memory,
@@ -502,8 +501,23 @@ impl Machine {
     }
 
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
-        if self.pending_input.is_some() {
-            return self.handle_pending_input();
+        if self.bios_pending_read {
+            if let Some(key) = self.bios_keyboard.pop() {
+                self.cpu.set_reg(Reg8::Al, key.ascii.unwrap_or(0x0));
+                self.cpu.set_reg(Reg8::Ah, key.scan_code);
+                self.bios_pending_read = false;
+                return Ok(MachineStepResult::Continue);
+            }
+            return Ok(MachineStepResult::WaitingForInput);
+        }
+
+        if self.dos.has_pending_input() {
+            return self.dos.handle_pending_input(
+                &mut self.cpu,
+                &mut self.memory,
+                &mut self.bios_keyboard,
+                &mut self.text_video,
+            );
         }
 
         // Advance non-CPU devices

@@ -34,7 +34,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     verbosity: 0,
                     load_mode: LoadMode::Com,
                     keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-                    pending_input: None,
+                    bios_pending_read: false,
                     pc_keyboard: PcKeyboard::new(),
                     bios_keyboard: BiosKeyboard::new(),
                     synthetic_int09_pending: false,
@@ -158,7 +158,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        pending_input: None,
+        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
         synthetic_int09_pending: false,
@@ -247,7 +247,7 @@ fn write_service_clears_only_carry() {
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        pending_input: None,
+        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
         synthetic_int09_pending: false,
@@ -293,7 +293,7 @@ fn dos_termination_returns_al_as_exit_code() {
             verbosity: 0,
             load_mode: LoadMode::Com,
             keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-            pending_input: None,
+            bios_pending_read: false,
             pc_keyboard: PcKeyboard::new(),
             synthetic_int09_pending: false,
             pic: Pic::new(),
@@ -330,7 +330,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        pending_input: None,
+        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         synthetic_int09_pending: false,
         pic: Pic::new(),
@@ -373,18 +373,29 @@ fn dos_handle_read_normalizes_the_buffer_before_crossing_the_original_offset_bou
         expected[0x2000F..0x20012].copy_from_slice(b"A\r\n");
 
         assert!(matches!(
-            machine.read_service().unwrap(),
+            machine
+                .dos
+                .read_service(&mut machine.cpu, &mut machine.memory)
+                .unwrap(),
             InterruptResult::WaitingForInput
         ));
         assert!(matches!(
-            machine.handle_pending_input().unwrap(),
+            machine
+                .dos
+                .handle_pending_input(
+                    &mut machine.cpu,
+                    &mut machine.memory,
+                    &mut machine.bios_keyboard,
+                    &mut machine.text_video
+                )
+                .unwrap(),
             MachineStepResult::Continue
         ));
 
         assert_eq!(machine.cpu.ax, 3);
         assert_eq!(machine.cpu.flags, 0x0242);
         assert_eq!((machine.cpu.ds, machine.cpu.dx), (ds, dx));
-        assert!(machine.pending_input.is_none());
+        assert!(!machine.dos.has_pending_input());
         assert!(machine.dos.console_read_buffer.is_empty());
         assert!(
             machine.memory == expected,
@@ -491,11 +502,22 @@ fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment
         expected_memory[start..start + expected_count as usize].fill(b'R');
 
         assert!(matches!(
-            machine.read_service().unwrap(),
+            machine
+                .dos
+                .read_service(&mut machine.cpu, &mut machine.memory)
+                .unwrap(),
             InterruptResult::WaitingForInput
         ));
         assert!(matches!(
-            machine.handle_pending_input().unwrap(),
+            machine
+                .dos
+                .handle_pending_input(
+                    &mut machine.cpu,
+                    &mut machine.memory,
+                    &mut machine.bios_keyboard,
+                    &mut machine.text_video
+                )
+                .unwrap(),
             MachineStepResult::Continue
         ));
 
@@ -510,7 +532,7 @@ fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment
             machine.dos.console_read_buffer.len(),
             (requested - expected_count) as usize
         );
-        assert!(machine.pending_input.is_none());
+        assert!(!machine.dos.has_pending_input());
         assert!(
             machine.memory == expected_memory,
             "write the final allowed byte without wrapping"
@@ -587,11 +609,110 @@ fn dos_read_waits_without_advancing_the_cpu_or_modifying_memory() {
         assert_eq!(machine.cpu.ax, 0x3F00, "no result until the read completes");
         assert_eq!(machine.cpu.flags, 0x0243);
         assert!(machine.memory == original_memory);
-        assert!(matches!(
-            machine.pending_input,
-            Some(super::PendingInput::DosRead(_))
-        ));
+        assert!(machine.dos.has_pending_input());
+        assert!(!machine.bios_pending_read);
     }
+}
+
+#[test]
+fn bios_read_key_waits_without_dos_and_completes_before_the_next_instruction() {
+    let mut machine = machine_for_pending_read(0);
+    machine.load_mode = LoadMode::Boot;
+    machine.memory[0x10101] = 0x16; // INT 16h; MOV BX,BEEFh.
+    machine.cpu.ax = 0; // AH=00h: read a key.
+    machine.cpu.bx = 0x1234;
+    // Keep synthetic INT 09h out of this service-completion test.
+    machine.cpu.flags = 0x0043;
+    let original_memory = machine.memory.clone();
+
+    for _ in 0..3 {
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::WaitingForInput
+        ));
+        assert!(machine.bios_pending_read);
+        assert!(!machine.dos.has_pending_input());
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+        assert_eq!((machine.cpu.ax, machine.cpu.bx), (0, 0x1234));
+        assert_eq!(machine.cpu.flags, 0x0043);
+        assert!(machine.memory == original_memory);
+    }
+
+    // A key without ASCII must still complete a BIOS read and return its scan code.
+    machine.enqueue_bios_keystroke(BiosKeyStroke {
+        ascii: None,
+        scan_code: 0x3B,
+    });
+    machine.enqueue_bios_keystroke(ascii_key(b'q'));
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert!(!machine.bios_pending_read);
+    assert!(!machine.dos.has_pending_input());
+    assert_eq!(machine.cpu.ax, 0x3B00);
+    assert_eq!(machine.cpu.flags, 0x0043);
+    assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+    assert_eq!(machine.cpu.bx, 0x1234, "the following MOV must wait");
+    assert!(machine.memory == original_memory, "BIOS reads do not echo");
+    assert_eq!(machine.bios_keyboard.pop().unwrap().ascii, Some(b'q'));
+    assert!(machine.bios_keyboard.peek().is_none());
+
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert_eq!((machine.cpu.ip, machine.cpu.bx), (0x0105, 0xBEEF));
+}
+
+#[test]
+fn dos_read_char_with_echo_completes_before_the_next_instruction() {
+    let mut machine = machine_for_pending_read(0);
+    machine.cpu.ax = 0x0100; // INT 21h, AH=01h: read one character with echo.
+    machine.cpu.bx = 0x1234;
+    // Keep synthetic INT 09h out of this service-completion test.
+    machine.cpu.flags = 0x0043;
+    let mut expected_memory = machine.memory.clone();
+
+    for _ in 0..3 {
+        assert!(matches!(
+            machine.step().unwrap(),
+            MachineStepResult::WaitingForInput
+        ));
+        assert!(machine.dos.has_pending_input());
+        assert!(!machine.bios_pending_read);
+        assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+        assert_eq!((machine.cpu.ax, machine.cpu.bx), (0x0100, 0x1234));
+        assert_eq!(machine.cpu.flags, 0x0043);
+        assert!(machine.memory == expected_memory);
+    }
+
+    machine.enqueue_bios_keystroke(ascii_key(b'k'));
+    machine.enqueue_bios_keystroke(ascii_key(b'z'));
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert!(!machine.dos.has_pending_input());
+    assert!(!machine.bios_pending_read);
+    assert_eq!(machine.cpu.ax as u8, b'k');
+    assert_eq!(machine.cpu.flags, 0x0043);
+    assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
+    assert_eq!(machine.cpu.bx, 0x1234, "the following MOV must wait");
+    expected_memory[0xB8000] = b'k';
+    assert!(
+        machine.memory == expected_memory,
+        "echo exactly one character"
+    );
+    assert_eq!(machine.bios_keyboard.pop().unwrap().ascii, Some(b'z'));
+    assert!(machine.bios_keyboard.peek().is_none());
+
+    assert!(matches!(
+        machine.step().unwrap(),
+        MachineStepResult::Continue
+    ));
+    assert_eq!((machine.cpu.ip, machine.cpu.bx), (0x0105, 0xBEEF));
+    assert!(machine.memory == expected_memory, "do not echo again");
 }
 
 #[test]
@@ -603,7 +724,7 @@ fn zero_length_dos_read_completes_without_waiting() {
         machine.step().unwrap(),
         MachineStepResult::Continue
     ));
-    assert!(machine.pending_input.is_none());
+    assert!(!machine.dos.has_pending_input());
     assert_eq!(machine.cpu.ax, 0);
     assert_eq!(machine.cpu.flags, 0x0242, "only carry should be cleared");
     assert!(machine.memory == original_memory);
@@ -641,7 +762,7 @@ fn dos_read_submits_one_line_and_preserves_following_keystrokes() {
             machine.step().unwrap(),
             MachineStepResult::Continue
         ));
-        assert!(machine.pending_input.is_none());
+        assert!(!machine.dos.has_pending_input());
         assert_eq!(machine.cpu.ax, 4);
         assert_eq!(machine.cpu.flags, 0x0242, "clear only carry on success");
         assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
@@ -679,7 +800,10 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
             machine.cpu.ax = 0x3F00;
             machine.cpu.flags = 0x0243;
             machine.cpu.dx = 0x1234 + consumed as u16;
-            machine.read_service().unwrap();
+            machine
+                .dos
+                .read_service(&mut machine.cpu, &mut machine.memory)
+                .unwrap();
             assert!(matches!(
                 machine.step().unwrap(),
                 MachineStepResult::Continue
@@ -687,7 +811,7 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
             let count = usize::from(max_bytes).min(line.len() - consumed);
             assert_eq!(usize::from(machine.cpu.ax), count);
             assert_eq!(machine.cpu.flags, 0x0242);
-            assert!(machine.pending_input.is_none());
+            assert!(!machine.dos.has_pending_input());
             consumed += count;
             assert_eq!(
                 &machine.memory[0x21234..0x21234 + consumed],
@@ -718,7 +842,10 @@ fn dos_small_reads_preserve_the_submitted_line_until_fully_consumed() {
         // not just the first key observed by peek(), survived the small reads.
         machine.cpu.cx = 64;
         machine.cpu.dx = 0x1240;
-        machine.read_service().unwrap();
+        machine
+            .dos
+            .read_service(&mut machine.cpu, &mut machine.memory)
+            .unwrap();
         assert!(matches!(
             machine.step().unwrap(),
             MachineStepResult::Continue
@@ -799,7 +926,7 @@ fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
         assert_eq!(machine.cpu.flags, 0x0242);
         assert_eq!(&machine.memory[0x21234..0x2123B], b"hello\r\n");
         assert_eq!(machine.memory[0x2123B], 0xCC);
-        assert!(machine.pending_input.is_none());
+        assert!(!machine.dos.has_pending_input());
         for (index, byte) in b"hello".iter().enumerate() {
             let address = 0xB8000 + 2 * (start_column + index);
             assert_eq!(&machine.memory[address..address + 2], &[*byte, 7]);

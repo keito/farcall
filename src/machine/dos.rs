@@ -2,11 +2,8 @@ use std::collections::VecDeque;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{
-        InterruptResult, Machine, MachineError, TextVideo,
-        console::{PendingInput, PendingRead},
-    },
-    memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer},
+    machine::{BiosKeyboard, InterruptResult, MachineError, MachineStepResult, TextVideo},
+    memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer, write_buffer},
     registers::{Reg8, Reg16},
 };
 
@@ -15,12 +12,15 @@ pub(super) struct Dos {
     pub(crate) console_read_buffer: VecDeque<u8>,
     /// Resource handles
     handles: Vec<Option<Resource>>,
+    /// What kind of input we're pending
+    pending_input: Option<PendingInput>,
 }
 
 impl Dos {
     pub(super) fn new() -> Self {
         let mut dos = Self {
             console_read_buffer: VecDeque::new(),
+            pending_input: None,
             handles: vec![
                 Some(Resource::Stdin),
                 Some(Resource::Stdout),
@@ -29,6 +29,101 @@ impl Dos {
         };
         dos.handles.resize(20, None);
         dos
+    }
+
+    pub(super) fn has_pending_input(&self) -> bool {
+        self.pending_input.is_some()
+    }
+
+    pub(super) fn handle_pending_input(
+        &mut self,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+        bios_keyboard: &mut BiosKeyboard,
+        video: &mut TextVideo,
+    ) -> Result<MachineStepResult, MachineError> {
+        let Some(pending_input) = &mut self.pending_input else {
+            return Ok(MachineStepResult::Continue);
+        };
+        match pending_input {
+            PendingInput::DosRead(read) => {
+                if self.console_read_buffer.is_empty() {
+                    // Consume keystrokes until Enter. Move completed line into buffer.
+                    while let Some(key) = bios_keyboard.pop() {
+                        if key.ascii == Some(b'\r') {
+                            // We finished the line
+                            read.bytes.push(b'\r');
+                            read.bytes.push(b'\n');
+                            video.write_char(memory, b'\r')?;
+                            video.write_char(memory, b'\n')?;
+
+                            // Write those bytes to the console read buffer
+                            self.console_read_buffer.extend(read.bytes.drain(..));
+                            break;
+                        } else if key.ascii == Some(0x08) {
+                            // Backspace
+                            if read.bytes.pop().is_some() {
+                                video.backspace(memory)?;
+                            }
+                        } else if let Some(char) = key.ascii {
+                            // TODO: ignore non-ASCII characters for now
+                            read.bytes.push(char);
+                            video.write_char(memory, char)?;
+                        }
+                    }
+                }
+
+                // If it's still empty, wait for more input/an Enter.
+                if self.console_read_buffer.is_empty() {
+                    return Ok(MachineStepResult::WaitingForInput);
+                }
+
+                // Dequeue at most max_bytes bytes from the read buffer to guest mem
+                let num_bytes = self.console_read_buffer.len().min(read.max_bytes);
+                let buffer = validate_buffer(memory, read.destination.to_physical(), num_bytes)?;
+                write_buffer(
+                    buffer,
+                    &self.console_read_buffer.make_contiguous()[..num_bytes],
+                )?;
+                self.console_read_buffer.drain(..num_bytes);
+
+                // Write actual bytes read to AX and clear CF on success
+                cpu.ax = num_bytes as u16;
+                cpu.set_flag(Flag::Carry, false);
+
+                self.pending_input = None;
+                return Ok(MachineStepResult::Continue);
+            }
+            PendingInput::DosReadCharWithEcho => {
+                if let Some(key) = bios_keyboard.pop() {
+                    if let Some(char) = key.ascii {
+                        video.write_char(memory, char)?;
+                        cpu.set_reg(Reg8::Al, char);
+                        self.pending_input = None;
+                        return Ok(MachineStepResult::Continue);
+                    }
+                }
+                return Ok(MachineStepResult::WaitingForInput);
+            }
+        }
+    }
+
+    /// INT 21h, AH=01h: Emulates the read one character with echo service
+    pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let Some(Some(resource)) = self.handles.get(0) else {
+            return Err(MachineError::ReadServiceError(
+                "Handle 0 is not set".to_string(),
+            ));
+        };
+        match *resource {
+            Resource::Stdin | Resource::Console => {
+                self.pending_input = Some(PendingInput::DosReadCharWithEcho);
+                Ok(InterruptResult::WaitingForInput)
+            }
+            _ => Err(MachineError::ReadServiceError(
+                "Unsupported resource in handle 0".to_string(),
+            )),
+        }
     }
 
     /// INT 21h, AH=02h: Emulates the DOS output char service
@@ -91,6 +186,34 @@ impl Dos {
         return Ok(InterruptResult::ResumeExecution);
     }
 
+    /// Emulates the DOS flush and read service (INT 21h, AH=0Ch)
+    pub(super) fn flush_and_read_service(
+        &mut self,
+        cpu: &mut Cpu,
+        bios_keyboard: &mut BiosKeyboard,
+    ) -> Result<InterruptResult, MachineError> {
+        // Flush input if handle 0 is a console
+        let Some(Some(resource)) = self.handles.get(0) else {
+            return Err(MachineError::ReadServiceError(
+                "Handle 0 is not set".to_string(),
+            ));
+        };
+        match *resource {
+            Resource::Stdin | Resource::Console => {
+                bios_keyboard.clear();
+            }
+            _ => {}
+        };
+
+        let al = cpu.get_reg(Reg8::Al);
+        return match al {
+            0x01 => self.read_char_with_echo_service(),
+            _ => Err(MachineError::ReadServiceError(
+                "Unsupported mode in 0Ch service".to_string(),
+            )),
+        };
+    }
+
     /// INT21h, AH=30h: Emulates the DOS version service
     pub(super) fn dos_version_service(
         &self,
@@ -120,6 +243,44 @@ impl Dos {
         self.handles[handle_num as usize] = None;
         cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=3Fh: Emulates the DOS read service
+    pub(super) fn read_service(
+        &mut self,
+        cpu: &mut Cpu,
+        memory: &mut [u8],
+    ) -> Result<InterruptResult, MachineError> {
+        let dest = cpu.bx as usize;
+        let Some(Some(resource)) = self.handles.get(dest) else {
+            // Unknown handle
+            cpu.ax = 6;
+            cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        if *resource != Resource::Stdin {
+            return Err(MachineError::ReadServiceError(
+                "Unsupported resource".to_string(),
+            ));
+        }
+        let dest_buffer = normalize_addr(SegmentedAddr::new(cpu.ds, cpu.dx));
+        // Limit size of write to 0x10000 - offset
+        let max_bytes = (cpu.cx as usize).min(0x10000 - dest_buffer.offset as usize);
+        validate_buffer(memory, dest_buffer.to_physical(), max_bytes)?;
+
+        if max_bytes == 0 {
+            // Nothing to read
+            cpu.ax = 0;
+            cpu.set_flag(Flag::Carry, false);
+            return Ok(InterruptResult::ResumeExecution);
+        }
+
+        self.pending_input = Some(PendingInput::DosRead(PendingRead {
+            destination: dest_buffer,
+            max_bytes,
+            bytes: Vec::new(),
+        }));
+        Ok(InterruptResult::WaitingForInput)
     }
 
     /// Emulates the DOS write service (INT 21h, AH=40h)
@@ -188,82 +349,15 @@ pub(super) enum Resource {
     Console,
 }
 
-impl Machine {
-    /// Emulates the read one character with echo service (INT 21h, AH=01h)
-    pub(super) fn read_char_with_echo_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let Some(Some(resource)) = self.dos.handles.get(0) else {
-            return Err(MachineError::ReadServiceError(
-                "Handle 0 is not set".to_string(),
-            ));
-        };
-        match *resource {
-            Resource::Stdin | Resource::Console => {
-                self.pending_input = Some(PendingInput::DosReadCharWithEcho);
-                Ok(InterruptResult::WaitingForInput)
-            }
-            _ => Err(MachineError::ReadServiceError(
-                "Unsupported resource in handle 0".to_string(),
-            )),
-        }
-    }
+enum PendingInput {
+    DosRead(PendingRead),
+    DosReadCharWithEcho,
+}
 
-    /// Emulates the DOS read service (INT21h, AH=3Fh)
-    pub(super) fn read_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let dest = self.cpu.bx as usize;
-        let Some(Some(resource)) = self.dos.handles.get(dest) else {
-            // Unknown handle
-            self.cpu.ax = 6;
-            self.cpu.set_flag(Flag::Carry, true);
-            return Ok(InterruptResult::ResumeExecution);
-        };
-        if *resource != Resource::Stdin {
-            return Err(MachineError::ReadServiceError(
-                "Unsupported resource".to_string(),
-            ));
-        }
-        let dest_buffer = normalize_addr(SegmentedAddr::new(self.cpu.ds, self.cpu.dx));
-        // Limit size of write to 0x10000 - offset
-        let max_bytes = (self.cpu.cx as usize).min(0x10000 - dest_buffer.offset as usize);
-        validate_buffer(&mut self.memory, dest_buffer.to_physical(), max_bytes)?;
-
-        if max_bytes == 0 {
-            // Nothing to read
-            self.cpu.ax = 0;
-            self.cpu.set_flag(Flag::Carry, false);
-            return Ok(InterruptResult::ResumeExecution);
-        }
-
-        self.pending_input = Some(PendingInput::DosRead(PendingRead {
-            destination: dest_buffer,
-            max_bytes,
-            bytes: Vec::new(),
-        }));
-        Ok(InterruptResult::WaitingForInput)
-    }
-
-    /// Emulates the DOS flush and read service (INT 21h, AH=0Ch)
-    pub(super) fn flush_and_read_service(&mut self) -> Result<InterruptResult, MachineError> {
-        // Flush input if handle 0 is a console
-        let Some(Some(resource)) = self.dos.handles.get(0) else {
-            return Err(MachineError::ReadServiceError(
-                "Handle 0 is not set".to_string(),
-            ));
-        };
-        match *resource {
-            Resource::Stdin | Resource::Console => {
-                self.bios_keyboard.clear();
-            }
-            _ => {}
-        };
-
-        let al = self.cpu.get_reg(Reg8::Al);
-        return match al {
-            0x01 => self.read_char_with_echo_service(),
-            _ => Err(MachineError::ReadServiceError(
-                "Unsupported mode in 0Ch service".to_string(),
-            )),
-        };
-    }
+struct PendingRead {
+    pub(super) destination: SegmentedAddr,
+    pub(super) max_bytes: usize,
+    pub(super) bytes: Vec<u8>,
 }
 
 /// Normalize a segmented address, similar to what DOS 2.0 does, by moving
