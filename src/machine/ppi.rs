@@ -1,4 +1,5 @@
 pub(super) struct Ppi {
+    keyboard_scan_code: Option<u8>,
     port_b: u8,
     sw1: u8,
     sw2: u8,
@@ -7,6 +8,7 @@ pub(super) struct Ppi {
 impl Ppi {
     pub(super) fn new() -> Self {
         Self {
+            keyboard_scan_code: None,
             port_b: 0,
             // 1 floppy, 80 cols CGA, no coprocessor, 64KB motherboard memory
             sw1: 0b0010_1101,
@@ -21,8 +23,7 @@ impl Ppi {
                 if self.port_b & 0x80 != 0 {
                     self.sw1
                 } else {
-                    // TODO: keyboard data
-                    0
+                    self.keyboard_scan_code.unwrap_or(0)
                 }
             }
             0x61 => self.port_b,
@@ -39,9 +40,28 @@ impl Ppi {
 
     pub(super) fn write(&mut self, port: u16, value: u8) {
         match port {
-            0x61 => self.port_b = value,
+            0x61 => {
+                self.port_b = value;
+                if value & 0x80 != 0 {
+                    self.keyboard_scan_code = None;
+                }
+            }
             0x63 => (), // Recognize the BIOS's 99h init command
             _ => (),
         }
+    }
+
+    pub(super) fn try_receive_scan_code(&mut self, scan_code: u8) -> bool {
+        // Make sure we can accept a scan code
+        if self.keyboard_scan_code.is_some() || self.port_b & 0x80 != 0 || self.port_b & 0x40 == 0 {
+            return false;
+        }
+
+        self.keyboard_scan_code = Some(scan_code);
+        true
+    }
+
+    pub(super) fn irq_output(&self) -> bool {
+        self.keyboard_scan_code.is_some()
     }
 }

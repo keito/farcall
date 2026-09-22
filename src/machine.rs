@@ -538,14 +538,27 @@ impl Machine {
         // Advance non-CPU devices
         self.advance_devices();
 
+        if self.load_mode == LoadMode::Rom {
+            if let Some(scan_code) = self.keyboard_buffer.front() {
+                if self.ppi.try_receive_scan_code(scan_code.scan_code) {
+                    self.keyboard_buffer.pop_front();
+                }
+                // Synchronize PIC with PPI
+                self.pic.set_irq_line(1, self.ppi.irq_output());
+            }
+        }
+
         // Check PIC for pending interrupts
         if self.pic.interrupt_pending() && self.cpu.get_flag(Flag::InterruptEnable) {
             let vector = self.pic.acknowledge()?;
             self.cpu.enter_interrupt(&mut self.memory, vector)?;
         }
 
-        // Deliver keyboard IRQ
-        if self.keyboard_irq_pending && self.cpu.get_flag(Flag::InterruptEnable) {
+        // Deliver keyboard IRQ if not in ROM mode
+        if self.load_mode != LoadMode::Rom
+            && self.keyboard_irq_pending
+            && self.cpu.get_flag(Flag::InterruptEnable)
+        {
             self.keyboard_irq_pending = false;
             self.cpu.enter_interrupt(&mut self.memory, 0x09)?;
         }
@@ -613,6 +626,7 @@ impl Machine {
                     }
                     0x60..=0x63 => {
                         self.ppi.write(port, value);
+                        self.pic.set_irq_line(1, self.ppi.irq_output());
                     }
                     0x3F2 | 0x3F5 => {
                         self.fdc.write(port, value);
