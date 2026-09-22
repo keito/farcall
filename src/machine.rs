@@ -651,8 +651,10 @@ impl Machine {
             return Err(MachineError::DiskError("Unsupported disk".to_string()));
         }
 
-        // Require DMA to be unmasked, mode 0x46, and correct remaining bytes
-        if self.dma.is_masked() || self.dma.mode() != 0x46 || self.dma.count_bytes() != 512 {
+        let count_bytes = self.dma.count_bytes();
+
+        // Require DMA to be unmasked, mode 0x46
+        if self.dma.is_masked() || self.dma.mode() != 0x46 || count_bytes % 512 != 0 {
             return Err(MachineError::DiskError(
                 "Unsupported DMA parameters".to_string(),
             ));
@@ -661,7 +663,7 @@ impl Machine {
         let dest_addr = self.dma.physical_address();
         let dma_offset = (dest_addr & 0xFFFF) as usize;
 
-        if dma_offset + 512 > 0x10000 {
+        if dma_offset + count_bytes > 0x10000 {
             return Err(MachineError::DiskError(
                 "DMA transfer crosses 64 KiB boundary".to_string(),
             ));
@@ -678,15 +680,23 @@ impl Machine {
             .byte_offset(cylinder as usize, head as usize, sector as usize)
             .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
 
-        let Some(bytes) = floppy_image.bytes.get(offset..offset + 512) else {
+        let Some(bytes) = floppy_image.bytes.get(offset..offset + count_bytes) else {
             return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
         };
 
+        let sectors_read = count_bytes / 512;
+        let last_sector = (usize::from(sector) + sectors_read - 1) as u8;
+        if last_sector > end_sector || last_sector > floppy_image.geometry.sectors_per_track as u8 {
+            return Err(MachineError::DiskError(
+                "Disk read attempted beyond end of disk".to_string(),
+            ));
+        }
+
         let validated_buffer =
-            validate_buffer(&mut self.memory, PhysAddr::from_u32(dest_addr), 512)?;
+            validate_buffer(&mut self.memory, PhysAddr::from_u32(dest_addr), count_bytes)?;
         write_buffer(validated_buffer, bytes)?;
 
-        self.dma.complete_transfer(512);
+        self.dma.complete_transfer(count_bytes as u16);
 
         // Normal completion, drive A, head 0
         // No errors
@@ -696,20 +706,24 @@ impl Machine {
         // R
         // N: 2 means 512-byte sectors
         let mt = read_request.command & 0x80 != 0;
-        let cylinder_result = if sector == end_sector && (!mt || head == 1) {
+        let cylinder_result = if end_sector == last_sector && (!mt || head == 1) {
             cylinder + 1
         } else {
             cylinder
         };
-        let head_result = if sector == end_sector && mt && (head == 0) {
+        let head_result = if end_sector == last_sector && mt && (head == 0) {
             1
-        } else if sector == end_sector && mt && (head == 1) {
+        } else if end_sector == last_sector && mt && (head == 1) {
             0
         } else {
             head
         };
         let st0 = drive | (head_result << 2);
-        let r_result = if sector < end_sector { sector + 1 } else { 1 };
+        let r_result = if last_sector < end_sector {
+            last_sector + 1
+        } else {
+            1
+        };
         let results = [st0, 00, 00, cylinder_result, head_result, r_result, 2];
         self.fdc.complete_read(results);
 
