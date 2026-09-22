@@ -1,5 +1,8 @@
 use crate::memory::MemoryError;
 
+#[cfg(test)]
+mod tests;
+
 const NUM_COLUMNS: usize = 80;
 const NUM_ROWS: usize = 25;
 const VIDEO_ADDR_BASE: usize = 0xB8000;
@@ -8,14 +11,19 @@ const GLYPH_HEIGHT: usize = 8;
 const BYTES_PER_PIXEL: usize = 4;
 
 pub(super) struct TextVideo {
+    /// Hardware cursor address
+    cursor_address: u16,
+    /// BIOS emulation cursor position: column
     cursor_column: usize,
+    /// BIOS emulation cursor position: row
     cursor_row: usize,
-    start_scan_line: usize,
-    end_scan_line: usize,
-    status: u8,
+    /// Which register will be written to with port 0x3D4 writes
     cursor_write_selector: Option<CursorRegister>,
-    cursor_addr_high: u8,
-    cursor_addr_low: u8,
+    /// Cursor end scan line
+    end_scan_line: usize,
+    /// Cursor start scan line
+    start_scan_line: usize,
+    status: u8,
 }
 
 enum CursorRegister {
@@ -30,14 +38,13 @@ const GLYPH_BYTES: &[u8; 2048] = include_bytes!("cga_8x8.dat");
 impl TextVideo {
     pub(super) fn new() -> Self {
         Self {
-            cursor_addr_high: 0,
-            cursor_addr_low: 0,
+            cursor_address: 0,
             cursor_column: 0,
             cursor_row: 0,
-            start_scan_line: 6,
-            end_scan_line: 7,
-            status: 0,
             cursor_write_selector: None,
+            end_scan_line: 7,
+            start_scan_line: 6,
+            status: 0,
         }
     }
 
@@ -53,8 +60,12 @@ impl TextVideo {
             0x3D5 => match self.cursor_write_selector {
                 Some(CursorRegister::CursorStartScanLine) => self.start_scan_line = value as usize,
                 Some(CursorRegister::CursorEndScanLine) => self.end_scan_line = value as usize,
-                Some(CursorRegister::CursorAddressHigh) => self.cursor_addr_high = value as u8,
-                Some(CursorRegister::CursorAddressLow) => self.cursor_addr_low = value as u8,
+                Some(CursorRegister::CursorAddressHigh) => {
+                    self.cursor_address = ((value as u16) << 8) | (self.cursor_address & 0x00FF);
+                }
+                Some(CursorRegister::CursorAddressLow) => {
+                    self.cursor_address = (self.cursor_address & 0xFF00) | (value as u16);
+                }
                 None => (),
             },
             _ => (),
@@ -74,6 +85,12 @@ impl TextVideo {
         (self.cursor_column, self.cursor_row)
     }
 
+    /// Call to sync cursor_address with cursor column/row
+    fn sync_cursor_address(&mut self) {
+        self.cursor_address = (self.cursor_row * NUM_COLUMNS + self.cursor_column) as u16;
+    }
+
+    /// Used by BIOS emulation to clear video memory
     pub(super) fn clear(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
         // fill all 2000 cells with a space and attribute 0x07 (light grey on black)
         for i in 0..NUM_COLUMNS * NUM_ROWS {
@@ -84,12 +101,15 @@ impl TextVideo {
         // reset the cursor
         self.cursor_column = 0;
         self.cursor_row = 0;
+        self.sync_cursor_address();
         Ok(())
     }
 
+    /// Used by BIOS emulation to write a charcater to video memory
     pub(super) fn write_char(&mut self, memory: &mut [u8], byte: u8) -> Result<(), MemoryError> {
         if byte == b'\r' {
             self.cursor_column = 0;
+            self.sync_cursor_address();
             return Ok(());
         } else if byte == b'\n' {
             self.cursor_row = self.cursor_row + 1;
@@ -126,10 +146,11 @@ impl TextVideo {
             self.cursor_row = NUM_ROWS - 1;
         }
 
+        self.sync_cursor_address();
         Ok(())
     }
 
-    /// Used by DOS emulation only
+    /// Used by DOS emulation to emulate a backspace
     pub(super) fn backspace(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
         if self.cursor_column == 0 {
             // Go back one row, to the end unless we're at the top
@@ -145,13 +166,12 @@ impl TextVideo {
         let addr = VIDEO_ADDR_BASE + 2 * (self.cursor_row * NUM_COLUMNS + self.cursor_column);
         memory[addr] = b' ';
         memory[addr + 1] = 0x07;
+        self.sync_cursor_address();
         Ok(())
     }
 
     /// Renders video memory to the framebuffer
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
-        let cursor_addr =
-            ((u16::from(self.cursor_addr_high) << 8) | u16::from(self.cursor_addr_low)) as usize;
         for row in 0..NUM_ROWS {
             for column in 0..NUM_COLUMNS {
                 let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
@@ -164,7 +184,7 @@ impl TextVideo {
                 let (bg_red, bg_green, bg_blue) = attribute_color_to_rgb((attributes >> 4) & 0x07);
 
                 // Maybe draw cursor
-                let cursor_cell = row * NUM_COLUMNS + column == cursor_addr;
+                let cursor_cell = row * NUM_COLUMNS + column == self.cursor_address as usize;
                 let cursor_enabled = (self.start_scan_line & 0x60) != 0x20;
                 let cursor_start = self.start_scan_line & 0x1F;
                 let cursor_end = self.end_scan_line & 0x1F;
