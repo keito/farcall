@@ -15,6 +15,7 @@ use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
 use dos::Resource;
 use fdc::{Fdc, FdcReadData};
+use keyboard::Keyboard;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
@@ -27,6 +28,7 @@ mod disk;
 mod dma;
 mod dos;
 mod fdc;
+mod keyboard;
 mod pic;
 mod pit;
 mod ppi;
@@ -46,6 +48,7 @@ pub struct Machine {
     floppy_image: Option<FloppyDisk>,
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
+    keyboard: Keyboard,
     keyboard_buffer: VecDeque<KeyPress>,
     keyboard_irq_pending: bool,
     load_mode: LoadMode,
@@ -142,6 +145,7 @@ impl Machine {
             ],
             fdc: Fdc::new(),
             floppy_image: None,
+            keyboard: Keyboard::new(),
             keyboard_buffer: VecDeque::new(),
             keyboard_irq_pending: false,
             load_mode: load_mode.clone(),
@@ -188,9 +192,15 @@ impl Machine {
         self.text_video.render(&self.memory, frame);
     }
 
+    /// Used for COM and Boot modes
     pub fn enqueue_input_character(&mut self, key: KeyPress) {
         self.keyboard_buffer.push_back(key);
         self.keyboard_irq_pending = true;
+    }
+
+    /// Used for ROM mode
+    pub fn enqueue_raw_key_event(&mut self, scan_code: u8, pressed: bool) {
+        self.keyboard.enqueue(scan_code, pressed);
     }
 
     /// Emulates the DOS termination service
@@ -539,9 +549,9 @@ impl Machine {
         self.advance_devices();
 
         if self.load_mode == LoadMode::Rom {
-            if let Some(scan_code) = self.keyboard_buffer.front() {
-                if self.ppi.try_receive_scan_code(scan_code.scan_code) {
-                    self.keyboard_buffer.pop_front();
+            if let Some(scan_code) = self.keyboard.peek() {
+                if self.ppi.try_receive_scan_code(scan_code) {
+                    self.keyboard.pop_front();
                 }
                 // Synchronize PIC with PPI
                 self.pic.set_irq_line(1, self.ppi.irq_output());
@@ -852,9 +862,13 @@ impl Machine {
 
         Ok(())
     }
+
+    pub(crate) fn load_mode(&self) -> LoadMode {
+        self.load_mode
+    }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 pub(crate) enum LoadMode {
     Com,
     Boot,

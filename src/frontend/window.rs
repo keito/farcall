@@ -13,13 +13,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::{
-    frontend::{
-        cga_renderer::CgaRenderer,
-        keyboard::{ModifierState, translate_winit_key},
-    },
-    machine::{Machine, MachineStepResult},
-};
+use crate::frontend::cga_renderer::CgaRenderer;
+use crate::frontend::keyboard::{ModifierState, translate_raw_key, translate_winit_key};
+use crate::machine::{LoadMode, Machine, MachineStepResult};
 
 pub struct App {
     machine: Machine,
@@ -139,6 +135,19 @@ impl ApplicationHandler for App {
                 event,
                 is_synthetic,
             } => {
+                if self.machine.load_mode() == LoadMode::Rom {
+                    if let PhysicalKey::Code(code) = event.physical_key {
+                        if let Some(scan_code) = translate_raw_key(code) {
+                            // Directly send the raw key to the machine
+                            self.machine.enqueue_raw_key_event(
+                                scan_code,
+                                event.state == ElementState::Pressed,
+                            );
+                        }
+                    }
+                    return;
+                }
+
                 if is_synthetic || event.state != ElementState::Pressed {
                     return;
                 }

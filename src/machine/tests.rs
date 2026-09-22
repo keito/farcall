@@ -1,4 +1,4 @@
-use crate::machine::{Dma, Fdc, Pic, Pit, Ppi};
+use crate::machine::{Dma, Fdc, Keyboard, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
 use std::time::Instant;
@@ -32,6 +32,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     verbosity: 0,
                     load_mode: LoadMode::Com,
                     pending_input: None,
+                    keyboard: Keyboard::new(),
                     keyboard_buffer: Default::default(),
                     keyboard_irq_pending: false,
                     pic: Pic::new(),
@@ -155,6 +156,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         verbosity: 0,
         load_mode: LoadMode::Com,
         pending_input: None,
+        keyboard: Keyboard::new(),
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
@@ -243,6 +245,7 @@ fn write_service_clears_only_carry() {
         verbosity: 0,
         load_mode: LoadMode::Com,
         pending_input: None,
+        keyboard: Keyboard::new(),
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
@@ -282,6 +285,7 @@ fn dos_termination_returns_al_as_exit_code() {
             verbosity: 0,
             load_mode: LoadMode::Com,
             pending_input: None,
+            keyboard: Keyboard::new(),
             keyboard_buffer: Default::default(),
             keyboard_irq_pending: false,
             pic: Pic::new(),
@@ -318,6 +322,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         verbosity: 0,
         load_mode: LoadMode::Com,
         pending_input: None,
+        keyboard: Keyboard::new(),
         keyboard_buffer: Default::default(),
         keyboard_irq_pending: false,
         pic: Pic::new(),
