@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+mod disk;
+
 use crate::{
     cpu::{Cpu, Flag},
     machine::{BiosKeyboard, InterruptResult, MachineStepResult, TextVideo},

@@ -221,7 +221,11 @@ impl Machine {
                 .as_ref()
                 .expect("Must")
                 .amount_conventional_ram_service(&mut self.cpu)?),
-            0x13 => self.disk_service(),
+            0x13 => Ok(self.bios.as_ref().expect("Must").disk_service(
+                &mut self.cpu,
+                &mut self.memory,
+                &self.floppy_image,
+            )?),
             0x14 => Ok(self
                 .bios
                 .as_ref()

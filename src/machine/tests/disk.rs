@@ -1,5 +1,5 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
-use crate::machine::bios::Bios;
+use crate::machine::bios::{Bios, BiosError};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
 use crate::machine::{
     BiosKeyboard, Dma, Fdc, KeyboardInputMode, LoadMode, MachineError, PcKeyboard, Pic, Pit, Ppi,
@@ -499,7 +499,9 @@ fn int13_validates_the_entire_destination_before_writing_to_undersized_memory() 
 
         assert!(matches!(
             machine.handle_interrupt(0x13),
-            Err(MachineError::MemoryError(MemoryError::OutOfBoundsAccess(_)))
+            Err(MachineError::Bios(BiosError::Memory(
+                MemoryError::OutOfBoundsAccess(_)
+            )))
         ));
 
         assert_eq!(registers(&machine.cpu), original_registers);
