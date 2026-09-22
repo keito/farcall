@@ -76,7 +76,6 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         verbosity: 0,
         load_mode: LoadMode::Boot,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         synthetic_int09_pending: false,
         pic: Pic::new(),

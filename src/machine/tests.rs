@@ -35,7 +35,6 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     verbosity: 0,
                     load_mode: LoadMode::Com,
                     keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-                    bios_pending_read: false,
                     pc_keyboard: PcKeyboard::new(),
                     bios_keyboard: BiosKeyboard::new(),
                     synthetic_int09_pending: false,
@@ -159,7 +158,6 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
         synthetic_int09_pending: false,
@@ -248,7 +246,6 @@ fn write_service_clears_only_carry() {
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         bios_keyboard: BiosKeyboard::new(),
         synthetic_int09_pending: false,
@@ -296,7 +293,6 @@ fn dos_termination_returns_al_as_exit_code() {
             verbosity: 0,
             load_mode: LoadMode::Com,
             keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-            bios_pending_read: false,
             pc_keyboard: PcKeyboard::new(),
             synthetic_int09_pending: false,
             pic: Pic::new(),
@@ -333,7 +329,6 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
-        bios_pending_read: false,
         pc_keyboard: PcKeyboard::new(),
         synthetic_int09_pending: false,
         pic: Pic::new(),
@@ -634,7 +629,7 @@ fn dos_read_waits_without_advancing_the_cpu_or_modifying_memory() {
         assert_eq!(machine.cpu.flags, 0x0243);
         assert!(machine.memory == original_memory);
         assert!(machine.dos.as_ref().unwrap().has_pending_input());
-        assert!(!machine.bios_pending_read);
+        assert!(!machine.bios.as_ref().unwrap().pending_keyboard_read());
     }
 }
 
@@ -655,7 +650,7 @@ fn bios_read_key_waits_without_dos_and_completes_before_the_next_instruction() {
             machine.step().unwrap(),
             MachineStepResult::WaitingForInput
         ));
-        assert!(machine.bios_pending_read);
+        assert!(machine.bios.as_ref().unwrap().pending_keyboard_read());
         assert!(machine.dos.is_none());
         assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
         assert_eq!((machine.cpu.ax, machine.cpu.bx), (0, 0x1234));
@@ -673,7 +668,7 @@ fn bios_read_key_waits_without_dos_and_completes_before_the_next_instruction() {
         machine.step().unwrap(),
         MachineStepResult::Continue
     ));
-    assert!(!machine.bios_pending_read);
+    assert!(!machine.bios.as_ref().unwrap().pending_keyboard_read());
     assert!(machine.dos.is_none());
     assert_eq!(machine.cpu.ax, 0x3B00);
     assert_eq!(machine.cpu.flags, 0x0043);
@@ -705,7 +700,7 @@ fn dos_read_char_with_echo_completes_before_the_next_instruction() {
             MachineStepResult::WaitingForInput
         ));
         assert!(machine.dos.as_ref().unwrap().has_pending_input());
-        assert!(!machine.bios_pending_read);
+        assert!(!machine.bios.as_ref().unwrap().pending_keyboard_read());
         assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));
         assert_eq!((machine.cpu.ax, machine.cpu.bx), (0x0100, 0x1234));
         assert_eq!(machine.cpu.flags, 0x0043);
@@ -719,7 +714,7 @@ fn dos_read_char_with_echo_completes_before_the_next_instruction() {
         MachineStepResult::Continue
     ));
     assert!(!machine.dos.as_ref().unwrap().has_pending_input());
-    assert!(!machine.bios_pending_read);
+    assert!(!machine.bios.as_ref().unwrap().pending_keyboard_read());
     assert_eq!(machine.cpu.ax as u8, b'k');
     assert_eq!(machine.cpu.flags, 0x0043);
     assert_eq!((machine.cpu.cs, machine.cpu.ip), (0x1000, 0x0102));

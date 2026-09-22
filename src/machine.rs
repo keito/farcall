@@ -44,7 +44,6 @@ mod video;
 pub struct Machine {
     bios: Option<Bios>,
     bios_keyboard: BiosKeyboard,
-    bios_pending_read: bool,
     cpu: Cpu,
     dma: Dma,
     dos: Option<Dos>,
@@ -80,8 +79,6 @@ pub enum MachineError {
     Dos(#[from] DosError),
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
-    #[error("Keyboard Service error: {0}")]
-    KeyboardServiceError(String),
     #[error("Not enough memory; offset {0} exceeds {1} bytes")]
     NotEnoughMemory(usize, usize),
     #[error("Memory Error: {0}")]
@@ -129,7 +126,6 @@ impl Machine {
                 _ => Some(Bios::new()),
             },
             bios_keyboard: BiosKeyboard::new(),
-            bios_pending_read: false,
             last_step_time: Instant::now(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
@@ -198,45 +194,6 @@ impl Machine {
         self.pc_keyboard.enqueue(scan_code, pressed);
     }
 
-    // Keyboard Service (INT 16h)
-    fn keyboard_service(&mut self) -> Result<InterruptResult, MachineError> {
-        let operation = self.cpu.get_reg(Reg8::Ah);
-        if self.verbosity > 0 {
-            eprintln!("\x1b[1;93mKeyboard Service op {:X}h\x1b[0m", operation);
-        }
-        match operation {
-            0x00 => {
-                // Read key
-                if let Some(first_key) = self.bios_keyboard.pop() {
-                    self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
-                    self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
-                    Ok(InterruptResult::ResumeExecution)
-                } else {
-                    self.bios_pending_read = true;
-                    Ok(InterruptResult::WaitingForInput)
-                }
-            }
-            0x01 => {
-                // Check key
-                if let Some(first_key) = self.bios_keyboard.peek() {
-                    self.cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
-                    self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
-                    self.cpu.set_flag(Flag::Zero, false);
-                } else {
-                    self.cpu.set_flag(Flag::Zero, true);
-                }
-                Ok(InterruptResult::ResumeExecution)
-            }
-            // 0x02 => {
-            //     // Read shift status
-            //     Ok(InterruptResult::ResumeExecution)
-            // }
-            _ => Err(MachineError::KeyboardServiceError(
-                "Unsupported operation".to_string(),
-            )),
-        }
-    }
-
     fn handle_guest_interrupt(&mut self, interrupt: u8) -> Result<InterruptResult, MachineError> {
         self.cpu.enter_interrupt(&mut self.memory, interrupt)?;
         Ok(InterruptResult::ResumeExecution)
@@ -275,7 +232,11 @@ impl Machine {
                 .as_ref()
                 .expect("Must")
                 .bios_system_services(&mut self.cpu)?),
-            0x16 => self.keyboard_service(),
+            0x16 => Ok(self.bios.as_mut().expect("Must").keyboard_service(
+                &mut self.cpu,
+                &mut self.bios_keyboard,
+                self.verbosity,
+            )?),
             0x17 => Ok(self
                 .bios
                 .as_ref()
@@ -320,14 +281,10 @@ impl Machine {
     }
 
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
-        if self.bios_pending_read {
-            if let Some(key) = self.bios_keyboard.pop() {
-                self.cpu.set_reg(Reg8::Al, key.ascii.unwrap_or(0x0));
-                self.cpu.set_reg(Reg8::Ah, key.scan_code);
-                self.bios_pending_read = false;
-                return Ok(MachineStepResult::Continue);
-            }
-            return Ok(MachineStepResult::WaitingForInput);
+        if let Some(bios) = self.bios.as_mut()
+            && bios.pending_keyboard_read()
+        {
+            return Ok(bios.handle_pending_keyboard_read(&mut self.cpu, &mut self.bios_keyboard)?);
         }
 
         if let Some(dos) = self.dos.as_mut()

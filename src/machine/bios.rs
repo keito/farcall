@@ -2,19 +2,21 @@ use std::time::Instant;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{InterruptResult, TextVideo},
+    machine::{BiosKeyboard, InterruptResult, MachineStepResult, TextVideo},
     memory::MemoryError,
     registers::Reg8,
 };
 
 pub(super) struct Bios {
     boot_time: Instant,
+    pending_keyboard_read: bool,
 }
 
 impl Bios {
     pub(super) fn new() -> Self {
         Self {
             boot_time: Instant::now(),
+            pending_keyboard_read: false,
         }
     }
 
@@ -160,6 +162,68 @@ impl Bios {
         Ok(InterruptResult::ResumeExecution)
     }
 
+    /// INT 16h: Keyboard Service
+    pub(super) fn keyboard_service(
+        &mut self,
+        cpu: &mut Cpu,
+        bios_keyboard: &mut BiosKeyboard,
+        verbosity: u8,
+    ) -> Result<InterruptResult, BiosError> {
+        let operation = cpu.get_reg(Reg8::Ah);
+        if verbosity > 0 {
+            eprintln!("\x1b[1;93mKeyboard Service op {:X}h\x1b[0m", operation);
+        }
+        match operation {
+            0x00 => {
+                // Read key
+                if let Some(first_key) = bios_keyboard.pop() {
+                    cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
+                    cpu.set_reg(Reg8::Ah, first_key.scan_code);
+                    Ok(InterruptResult::ResumeExecution)
+                } else {
+                    self.pending_keyboard_read = true;
+                    Ok(InterruptResult::WaitingForInput)
+                }
+            }
+            0x01 => {
+                // Check key
+                if let Some(first_key) = bios_keyboard.peek() {
+                    cpu.set_reg(Reg8::Al, first_key.ascii.unwrap_or(0x0));
+                    cpu.set_reg(Reg8::Ah, first_key.scan_code);
+                    cpu.set_flag(Flag::Zero, false);
+                } else {
+                    cpu.set_flag(Flag::Zero, true);
+                }
+                Ok(InterruptResult::ResumeExecution)
+            }
+            // 0x02 => {
+            //     // Read shift status
+            //     Ok(InterruptResult::ResumeExecution)
+            // }
+            _ => Err(BiosError::KeyboardServiceError(
+                "Unsupported operation".to_string(),
+            )),
+        }
+    }
+
+    pub(super) fn pending_keyboard_read(&self) -> bool {
+        self.pending_keyboard_read
+    }
+
+    pub(super) fn handle_pending_keyboard_read(
+        &mut self,
+        cpu: &mut Cpu,
+        bios_keyboard: &mut BiosKeyboard,
+    ) -> Result<MachineStepResult, BiosError> {
+        if let Some(key) = bios_keyboard.pop() {
+            cpu.set_reg(Reg8::Al, key.ascii.unwrap_or(0x0));
+            cpu.set_reg(Reg8::Ah, key.scan_code);
+            self.pending_keyboard_read = false;
+            return Ok(MachineStepResult::Continue);
+        }
+        Ok(MachineStepResult::WaitingForInput)
+    }
+
     /// INT 17h: Emulates the Printer Service
     pub(super) fn printer_service(&self, cpu: &mut Cpu) -> Result<InterruptResult, BiosError> {
         // Unavailable or timed-out hardware
@@ -193,12 +257,14 @@ impl Bios {
 
 #[derive(Debug, thiserror::Error)]
 pub enum BiosError {
+    #[error("BIOS Keyboard Service error: {0}")]
+    KeyboardServiceError(String),
     #[error(transparent)]
     Memory(#[from] MemoryError),
     #[error("BIOS System Service error: {0}")]
     SystemServiceError(String),
-    #[error("Time of Day Service error: {0}")]
+    #[error("BIOS Time of Day Service error: {0}")]
     TimeOfDayServiceError(String),
-    #[error("Video Service error: {0}")]
+    #[error("BIOS Video Service error: {0}")]
     VideoServiceError(String),
 }
