@@ -5,7 +5,7 @@ use crate::{
         console::{PendingInput, PendingRead},
     },
     memory::{SegmentedAddr, read_buffer, read_byte, validate_buffer},
-    registers::Reg8,
+    registers::{Reg8, Reg16},
 };
 
 #[derive(Clone, PartialEq)]
@@ -163,6 +163,59 @@ impl Machine {
         self.cpu.ax = num_bytes as u16;
         self.cpu.set_flag(Flag::Carry, false);
 
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=4Ch: Emulates the DOS termination service
+    pub(super) fn termination_service(&mut self) -> Result<InterruptResult, MachineError> {
+        Ok(InterruptResult::Exit((self.cpu.ax & 0xFF) as u8))
+    }
+
+    /// INT21h, AH=30h: Emulates the DOS version service
+    pub(super) fn dos_version_service(&mut self) -> Result<InterruptResult, MachineError> {
+        // Report DOS version 2.0
+        self.cpu.set_reg(Reg8::Al, 2);
+        self.cpu.set_reg(Reg8::Ah, 0);
+        self.cpu.bx = 0;
+        self.cpu.cx = 0;
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=45h: Emulates the Duplicate File Handle Service
+    pub(super) fn duplicate_file_handle_service(
+        &mut self,
+    ) -> Result<InterruptResult, MachineError> {
+        let handle_num = self.cpu.get_reg(Reg16::Bx);
+        let Some(Some(resource)) = self.handles.get(handle_num as usize) else {
+            // Unknown handle number
+            self.cpu.ax = 6;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        let Some(pos) = self.handles.iter().position(|h| h.is_none()) else {
+            // No open positions in table
+            self.cpu.ax = 4;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+        self.handles[pos] = Some(resource.clone());
+        self.cpu.ax = pos as u16;
+        self.cpu.set_flag(Flag::Carry, false);
+        Ok(InterruptResult::ResumeExecution)
+    }
+
+    /// INT21h, AH=3Eh: Emulates the Close Handle Service
+    pub(super) fn close_handle_service(&mut self) -> Result<InterruptResult, MachineError> {
+        let handle_num = self.cpu.get_reg(Reg16::Bx);
+        if !matches!(self.handles.get(handle_num as usize), Some(Some(_))) {
+            // Handle is already closed or nonexistent
+            self.cpu.ax = 6;
+            self.cpu.set_flag(Flag::Carry, true);
+            return Ok(InterruptResult::ResumeExecution);
+        };
+
+        self.handles[handle_num as usize] = None;
+        self.cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
     }
 }
