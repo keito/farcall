@@ -1,5 +1,3 @@
-use font8x8::{BASIC_FONTS, UnicodeFonts};
-
 use crate::memory::MemoryError;
 
 const NUM_COLUMNS: usize = 80;
@@ -26,6 +24,8 @@ enum CursorRegister {
     CursorAddressHigh,
     CursorAddressLow,
 }
+
+const GLYPH_BYTES: &[u8; 2048] = include_bytes!("cga_8x8.dat");
 
 impl TextVideo {
     pub(super) fn new() -> Self {
@@ -156,7 +156,8 @@ impl TextVideo {
             for column in 0..NUM_COLUMNS {
                 let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
                 let attributes = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column) + 1];
-                let glyph = BASIC_FONTS.get(char::from(text_byte)).unwrap_or([0; 8]);
+                let offset = usize::from(text_byte) * 8;
+                let glyph = GLYPH_BYTES.get(offset..offset + 8).unwrap_or(&[0; 8]);
 
                 let (fg_red, fg_green, fg_blue) = attribute_color_to_rgb(attributes & 0x0F);
                 // TODO: Support blinking, change to 0x0F for blink disabled
@@ -174,7 +175,7 @@ impl TextVideo {
                         cursor_cell && cursor_enabled && gy >= cursor_start && gy <= cursor_end;
 
                     for gx in 0..GLYPH_WIDTH {
-                        let glyph_pixel = glyph[gy] & (1u8 << gx) != 0;
+                        let glyph_pixel = glyph[gy] & (0x80u8 >> gx) != 0;
                         let lit = glyph_pixel || cursor_line;
                         let x = column * GLYPH_WIDTH + gx;
                         let y = row * GLYPH_HEIGHT + gy;
