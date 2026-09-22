@@ -652,6 +652,9 @@ impl Machine {
                 self.ppi.write(port, value);
                 self.pic.set_irq_line(1, self.ppi.irq_output());
             }
+            0x3D4 | 0x3D5 => {
+                self.text_video.write(port, value);
+            }
             0x3F2 | 0x3F5 => {
                 self.fdc.write(port, value);
                 if let Some(read_request) = self.fdc.take_read_request() {

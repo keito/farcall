@@ -15,16 +15,49 @@ pub(super) struct TextVideo {
     start_scan_line: usize,
     end_scan_line: usize,
     status: u8,
+    cursor_write_selector: Option<CursorRegister>,
+    cursor_addr_high: u8,
+    cursor_addr_low: u8,
+}
+
+enum CursorRegister {
+    CursorStartScanLine,
+    CursorEndScanLine,
+    CursorAddressHigh,
+    CursorAddressLow,
 }
 
 impl TextVideo {
     pub(super) fn new() -> Self {
         Self {
+            cursor_addr_high: 0,
+            cursor_addr_low: 0,
             cursor_column: 0,
             cursor_row: 0,
             start_scan_line: 6,
             end_scan_line: 7,
             status: 0,
+            cursor_write_selector: None,
+        }
+    }
+
+    pub(super) fn write(&mut self, port: u16, value: u8) {
+        match port {
+            0x3D4 => match value {
+                0x0A => self.cursor_write_selector = Some(CursorRegister::CursorStartScanLine),
+                0x0B => self.cursor_write_selector = Some(CursorRegister::CursorEndScanLine),
+                0x0E => self.cursor_write_selector = Some(CursorRegister::CursorAddressHigh),
+                0x0F => self.cursor_write_selector = Some(CursorRegister::CursorAddressLow),
+                _ => self.cursor_write_selector = None,
+            },
+            0x3D5 => match self.cursor_write_selector {
+                Some(CursorRegister::CursorStartScanLine) => self.start_scan_line = value as usize,
+                Some(CursorRegister::CursorEndScanLine) => self.end_scan_line = value as usize,
+                Some(CursorRegister::CursorAddressHigh) => self.cursor_addr_high = value as u8,
+                Some(CursorRegister::CursorAddressLow) => self.cursor_addr_low = value as u8,
+                None => (),
+            },
+            _ => (),
         }
     }
 
@@ -117,6 +150,8 @@ impl TextVideo {
 
     /// Renders video memory to the framebuffer
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
+        let cursor_addr =
+            ((u16::from(self.cursor_addr_high) << 8) | u16::from(self.cursor_addr_low)) as usize;
         for row in 0..NUM_ROWS {
             for column in 0..NUM_COLUMNS {
                 let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * 80 + column)];
@@ -127,9 +162,20 @@ impl TextVideo {
                 // TODO: Support blinking, change to 0x0F for blink disabled
                 let (bg_red, bg_green, bg_blue) = attribute_color_to_rgb((attributes >> 4) & 0x07);
 
+                // Maybe draw cursor
+                let cursor_cell = row * NUM_COLUMNS + column == cursor_addr;
+                let cursor_enabled = (self.start_scan_line & 0x60) != 0x20;
+                let cursor_start = self.start_scan_line & 0x1F;
+                let cursor_end = self.end_scan_line & 0x1F;
+
                 for gy in 0..GLYPH_HEIGHT {
+                    // Is this a cursor line?
+                    let cursor_line =
+                        cursor_cell && cursor_enabled && gy >= cursor_start && gy <= cursor_end;
+
                     for gx in 0..GLYPH_WIDTH {
-                        let lit = glyph[gy] & (1u8 << gx) != 0;
+                        let glyph_pixel = glyph[gy] & (1u8 << gx) != 0;
+                        let lit = glyph_pixel || cursor_line;
                         let x = column * GLYPH_WIDTH + gx;
                         let y = row * GLYPH_HEIGHT + gy;
                         let offset = BYTES_PER_PIXEL * (y * NUM_COLUMNS * GLYPH_WIDTH + x);
