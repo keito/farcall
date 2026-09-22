@@ -17,7 +17,7 @@ enum KeyMap {
     Ignore,           // Ignores the key
 }
 
-pub(crate) fn translate_winit_key(
+pub(crate) fn winit_to_bios_key_stroke(
     key: KeyCode,
     text: Option<SmolStr>,
     modifiers: &ModifierState,
@@ -426,9 +426,9 @@ pub(crate) fn translate_winit_key(
     }
 }
 
-/// Returns the base BIOS scan code for the raw KeyCode, used for ROM mode when a BIOS
+/// Returns the make code for KeyCode, used for ROM mode when a guest BIOS
 /// is maintaining modifier keys.
-pub(super) fn translate_raw_key(key: KeyCode) -> Option<u8> {
+pub(super) fn winit_to_pc_scan_code(key: KeyCode) -> Option<u8> {
     let scan_code = match key {
         KeyCode::KeyA => 0x1E,
         KeyCode::KeyB => 0x30,

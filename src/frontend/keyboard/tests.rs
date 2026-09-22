@@ -1,6 +1,6 @@
 //! Representative US 83/84-key BIOS results; see docs/keyboard-bios-83-84.md.
 
-use super::{ModifierState, translate_winit_key};
+use super::{ModifierState, winit_to_bios_key_stroke};
 use winit::keyboard::KeyCode;
 
 const PLAIN: ModifierState = ModifierState {
@@ -23,7 +23,8 @@ fn translated(
     text: Option<&str>,
     modifiers: ModifierState,
 ) -> Option<(u8, Option<u8>)> {
-    translate_winit_key(key, text.map(Into::into), &modifiers).map(|key| (key.scan_code, key.ascii))
+    winit_to_bios_key_stroke(key, text.map(Into::into), &modifiers)
+        .map(|key| (key.scan_code, key.ascii))
 }
 
 #[test]

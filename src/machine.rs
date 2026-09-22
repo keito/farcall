@@ -53,7 +53,8 @@ pub struct Machine {
     /// Resource handles (DOS mode only)
     handles: Vec<Option<Resource>>,
     pc_keyboard: PcKeyboard,
-    keyboard_irq_pending: bool,
+    /// Used to directly raise INT 09h when emulating a BIOS
+    synthetic_int09_pending: bool,
     load_mode: LoadMode,
     memory: Vec<u8>,
     /// What kind of input we're pending
@@ -145,7 +146,7 @@ impl Machine {
             fdc: Fdc::new(),
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
-            keyboard_irq_pending: false,
+            synthetic_int09_pending: false,
             load_mode: load_mode.clone(),
             memory: vec![0; memory_size],
             pending_input: None,
@@ -193,11 +194,11 @@ impl Machine {
     /// Used for COM and Boot modes
     pub fn enqueue_bios_keystroke(&mut self, key: BiosKeyStroke) {
         self.bios_keyboard.enqueue(key);
-        self.keyboard_irq_pending = true;
+        self.synthetic_int09_pending = true;
     }
 
     /// Used for ROM mode
-    pub fn enqueue_raw_key_event(&mut self, scan_code: u8, pressed: bool) {
+    pub fn enqueue_pc_keyboard_event(&mut self, scan_code: u8, pressed: bool) {
         self.pc_keyboard.enqueue(scan_code, pressed);
     }
 
@@ -359,7 +360,7 @@ impl Machine {
                     self.cpu.set_reg(Reg8::Ah, first_key.scan_code);
                     Ok(InterruptResult::ResumeExecution)
                 } else {
-                    self.pending_input = Some(PendingInput::KeyboardService);
+                    self.pending_input = Some(PendingInput::BiosReadKey);
                     Ok(InterruptResult::WaitingForInput)
                 }
             }
@@ -564,10 +565,10 @@ impl Machine {
 
         // Deliver keyboard IRQ if not in ROM mode
         if self.load_mode != LoadMode::Rom
-            && self.keyboard_irq_pending
+            && self.synthetic_int09_pending
             && self.cpu.get_flag(Flag::InterruptEnable)
         {
-            self.keyboard_irq_pending = false;
+            self.synthetic_int09_pending = false;
             self.cpu.enter_interrupt(&mut self.memory, 0x09)?;
         }
 

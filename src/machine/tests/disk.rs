@@ -75,7 +75,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         load_mode: LoadMode::Boot,
         pending_input: None,
         pc_keyboard: PcKeyboard::new(),
-        keyboard_irq_pending: false,
+        synthetic_int09_pending: false,
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),

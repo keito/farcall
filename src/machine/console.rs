@@ -9,7 +9,7 @@ use super::MachineError;
 pub(super) enum PendingInput {
     DosRead(PendingRead),
     DosReadCharWithEcho,
-    KeyboardService,
+    BiosReadKey,
 }
 
 pub(super) struct PendingRead {
@@ -84,7 +84,7 @@ impl Machine {
                 }
                 return Ok(MachineStepResult::WaitingForInput);
             }
-            PendingInput::KeyboardService => {
+            PendingInput::BiosReadKey => {
                 if let Some(key) = self.bios_keyboard.pop() {
                     self.cpu.set_reg(Reg8::Al, key.ascii.unwrap_or(0x0));
                     self.cpu.set_reg(Reg8::Ah, key.scan_code);
