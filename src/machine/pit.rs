@@ -1,3 +1,5 @@
+use super::BytePhase;
+
 #[cfg(test)]
 mod tests;
 
@@ -140,11 +142,6 @@ enum AccessMode {
     LowOnly,
     HighOnly,
     LowThenHigh,
-}
-
-enum BytePhase {
-    Low,
-    High,
 }
 
 impl Pit {

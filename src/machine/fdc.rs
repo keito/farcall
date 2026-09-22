@@ -8,13 +8,14 @@ pub(super) struct Fdc {
     /// Digital Output Register
     dor: u8,
     interrupt_request: Option<PendingInterrupt>,
+    read_irq_pending: bool,
     result_bytes: VecDeque<u8>,
     command_state: CommandState,
     step_rate: u8,
     head_unload_time: u8,
     head_load_time: u8,
     non_dma: bool,
-    read_data: Option<ReadData>,
+    read_data: Option<FdcReadData>,
 }
 
 enum PendingInterrupt {
@@ -28,11 +29,12 @@ enum CommandState {
     SpecifySecond,
     RecalibrateDrive,
     ReadData,
+    ExecutingRead,
 }
 
-struct ReadData {
-    command: u8,
-    parameters: [u8; 8],
+pub(super) struct FdcReadData {
+    pub(super) command: u8,
+    pub(super) parameters: [u8; 8],
     next: usize,
 }
 
@@ -41,6 +43,7 @@ impl Fdc {
         Self {
             dor: 0,
             interrupt_request: None,
+            read_irq_pending: false,
             result_bytes: VecDeque::new(),
             command_state: CommandState::Idle,
             step_rate: 0,
@@ -56,6 +59,9 @@ impl Fdc {
             // Idle vs result bytes available status
             0x3F4 => {
                 if !matches!(self.command_state, CommandState::Idle) {
+                    if matches!(self.command_state, CommandState::ExecutingRead) {
+                        return 0x10;
+                    }
                     // Command busy bit set
                     0x90
                 } else if self.result_bytes.is_empty() {
@@ -65,7 +71,10 @@ impl Fdc {
                 }
             }
             // Result bytes from commands
-            0x3F5 => self.result_bytes.pop_front().unwrap_or(0),
+            0x3F5 => {
+                self.read_irq_pending = false;
+                self.result_bytes.pop_front().unwrap_or(0)
+            }
             _ => unreachable!(),
         }
     }
@@ -90,13 +99,11 @@ impl Fdc {
         }
     }
 
-    fn read_data(&mut self) {
-        let read_data = self.read_data.as_ref().expect("expectorant");
-        todo!(
-            "read_data not impled. command: {}, parameters: {:?}",
-            read_data.command,
-            read_data.parameters
-        );
+    pub(super) fn take_read_request(&mut self) -> Option<FdcReadData> {
+        if matches!(self.command_state, CommandState::ExecutingRead) {
+            return self.read_data.take();
+        }
+        None
     }
 
     pub(super) fn write(&mut self, port: u16, value: u8) {
@@ -111,6 +118,7 @@ impl Fdc {
                     self.command_state = CommandState::Idle;
                     self.interrupt_request = None;
                     self.read_data = None;
+                    self.read_irq_pending = false;
                 }
                 self.dor = value;
             }
@@ -127,7 +135,7 @@ impl Fdc {
                             0x07 => self.command_state = CommandState::RecalibrateDrive,
                             0x08 => self.sense_interrupt_status(),
                             _ if value & 0x1F == 0x06 => {
-                                self.read_data = Some(ReadData {
+                                self.read_data = Some(FdcReadData {
                                     command: value,
                                     parameters: [0; 8],
                                     next: 0,
@@ -163,11 +171,14 @@ impl Fdc {
                         };
                         read_data.parameters[read_data.next] = value;
                         if read_data.next == 7 {
-                            self.command_state = CommandState::Idle;
-                            self.read_data();
+                            self.command_state = CommandState::ExecutingRead;
+                            return;
                         } else {
                             read_data.next += 1;
                         }
+                    }
+                    CommandState::ExecutingRead => {
+                        // TODO
                     }
                 };
             }
@@ -175,9 +186,17 @@ impl Fdc {
         }
     }
 
+    pub(super) fn complete_read(&mut self, results: [u8; 7]) {
+        // queue the supplied bytes
+        self.result_bytes.extend(results.iter().cloned());
+        self.read_irq_pending = true;
+        self.command_state = CommandState::Idle;
+    }
+
     /// The FDC's interrupt output pin
     pub(super) fn irq_output(&self) -> bool {
         // If we have an interrupt request and the DOR bit 3 (interrupt/DMA interface) is set
-        self.interrupt_request.is_some() && (self.dor & 0x08 != 0)
+        // or a read IRQ is pending
+        (self.interrupt_request.is_some() || self.read_irq_pending) && (self.dor & 0x08 != 0)
     }
 }

@@ -12,8 +12,9 @@ use crate::memory::{
 };
 use crate::registers::{Reg8, Reg16};
 use disk::{DiskGeometry, FloppyDisk};
+use dma::Dma;
 use dos::Resource;
-use fdc::Fdc;
+use fdc::{Fdc, FdcReadData};
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
@@ -23,6 +24,7 @@ pub use disk::DiskType;
 
 mod console;
 mod disk;
+mod dma;
 mod dos;
 mod fdc;
 mod pic;
@@ -39,6 +41,7 @@ pub struct Machine {
     /// Read line buffer (DOS mode only)
     console_read_buffer: VecDeque<u8>,
     cpu: Cpu,
+    dma: Dma,
     fdc: Fdc,
     floppy_image: Option<FloppyDisk>,
     /// Resource handles (DOS mode only)
@@ -90,6 +93,8 @@ pub enum MachineError {
     BiosSystemServiceError(String),
     #[error("PIC error: {0}")]
     PicError(String),
+    #[error("Disk error: {0}")]
+    DiskError(String),
 }
 
 enum InterruptResult {
@@ -109,6 +114,11 @@ pub struct KeyPress {
     pub scan_code: u8,
 }
 
+enum BytePhase {
+    Low,
+    High,
+}
+
 impl Machine {
     pub fn new(
         file_path: &str,
@@ -124,6 +134,7 @@ impl Machine {
             last_step_time: Instant::now(),
             console_read_buffer: VecDeque::new(),
             cpu: Cpu::new(verbosity),
+            dma: Dma::new(),
             handles: vec![
                 Some(Resource::Stdin),
                 Some(Resource::Stdout),
@@ -570,6 +581,8 @@ impl Machine {
                     0x3F4 | 0x3F5 => {
                         let result = self.fdc.read(port);
                         self.cpu.set_reg(Reg8::Al, result);
+                        // Synchronize the PIC
+                        self.pic.set_irq_line(6, self.fdc.irq_output());
                     }
                     0x60..=0x63 => {
                         let result = self.ppi.read(port);
@@ -587,6 +600,9 @@ impl Machine {
             }
             CpuStepResult::PortWrite8 { port, value } => {
                 match port {
+                    0x04 | 0x05 | 0x81 | 0x0A | 0x0B | 0x0C | 0x0D => {
+                        self.dma.write(port, value);
+                    }
                     0x20 | 0x21 => {
                         self.pic.write(port, value);
                     }
@@ -600,6 +616,9 @@ impl Machine {
                     }
                     0x3F2 | 0x3F5 => {
                         self.fdc.write(port, value);
+                        if let Some(read_request) = self.fdc.take_read_request() {
+                            self.handle_floppy_read(read_request)?;
+                        }
                         // Synchronize PIC's IRQ line with the FDC's output
                         self.pic.set_irq_line(6, self.fdc.irq_output());
                     }
@@ -611,6 +630,90 @@ impl Machine {
         };
         self.cpu.trace();
         outcome
+    }
+
+    fn handle_floppy_read(&mut self, read_request: FdcReadData) -> Result<(), MachineError> {
+        let [
+            drive_head,
+            cylinder,
+            head,
+            sector,
+            size_code,
+            end_sector,
+            _gap,
+            _data_length,
+        ] = read_request.parameters;
+
+        let drive = drive_head & 0x03;
+        let physical_head = (drive_head >> 2) & 1;
+
+        if drive != 0 || size_code != 2 || physical_head != head {
+            return Err(MachineError::DiskError("Unsupported disk".to_string()));
+        }
+
+        // Require DMA to be unmasked, mode 0x46, and correct remaining bytes
+        if self.dma.is_masked() || self.dma.mode() != 0x46 || self.dma.count_bytes() != 512 {
+            return Err(MachineError::DiskError(
+                "Unsupported DMA parameters".to_string(),
+            ));
+        }
+
+        let dest_addr = self.dma.physical_address();
+        let dma_offset = (dest_addr & 0xFFFF) as usize;
+
+        if dma_offset + 512 > 0x10000 {
+            return Err(MachineError::DiskError(
+                "DMA transfer crosses 64 KiB boundary".to_string(),
+            ));
+        }
+
+        let Some(floppy_image) = self.floppy_image.as_ref() else {
+            return Err(MachineError::DiskError(
+                "No floppy image inserted".to_string(),
+            ));
+        };
+
+        let offset = floppy_image
+            .geometry
+            .byte_offset(cylinder as usize, head as usize, sector as usize)
+            .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
+
+        let Some(bytes) = floppy_image.bytes.get(offset..offset + 512) else {
+            return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
+        };
+
+        let validated_buffer =
+            validate_buffer(&mut self.memory, PhysAddr::from_u32(dest_addr), 512)?;
+        write_buffer(validated_buffer, bytes)?;
+
+        self.dma.complete_transfer(512);
+
+        // Normal completion, drive A, head 0
+        // No errors
+        // No errors
+        // C
+        // H
+        // R
+        // N: 2 means 512-byte sectors
+        let mt = read_request.command & 0x80 != 0;
+        let cylinder_result = if sector == end_sector && (!mt || head == 1) {
+            cylinder + 1
+        } else {
+            cylinder
+        };
+        let head_result = if sector == end_sector && mt && (head == 0) {
+            1
+        } else if sector == end_sector && mt && (head == 1) {
+            0
+        } else {
+            head
+        };
+        let st0 = drive | (head_result << 2);
+        let r_result = if sector < end_sector { sector + 1 } else { 1 };
+        let results = [st0, 00, 00, cylinder_result, head_result, r_result, 2];
+        self.fdc.complete_read(results);
+
+        Ok(())
     }
 
     fn load_com(&mut self, bytes: &[u8]) -> Result<(), MachineError> {

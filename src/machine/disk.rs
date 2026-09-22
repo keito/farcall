@@ -24,7 +24,7 @@ pub(super) struct DiskGeometry {
 }
 
 impl DiskGeometry {
-    fn byte_offset(&self, cylinder: usize, head: usize, sector: usize) -> Option<usize> {
+    pub(super) fn byte_offset(&self, cylinder: usize, head: usize, sector: usize) -> Option<usize> {
         if cylinder >= self.cylinders
             || head >= self.heads
             || sector == 0

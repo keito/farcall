@@ -30,6 +30,10 @@ impl PhysAddr {
     pub(crate) fn wrapping_add(&self, rhs: u16) -> Self {
         Self((self.0 + (rhs as u32)) & 0xFFFFF)
     }
+
+    pub(crate) fn from_u32(value: u32) -> Self {
+        Self(value & 0xFFFFF)
+    }
 }
 
 impl std::fmt::UpperHex for PhysAddr {

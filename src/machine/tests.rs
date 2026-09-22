@@ -1,4 +1,4 @@
-use crate::machine::{Fdc, Pic, Pit, Ppi};
+use crate::machine::{Dma, Fdc, Pic, Pit, Ppi};
 
 use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
 use std::time::Instant;
@@ -22,6 +22,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                 let mut machine = Machine {
                     cpu: Cpu::new(0),
                     memory: vec![0xCC; 0x50000],
+                    dma: Dma::new(),
                     handles: vec![],
                     fdc: Fdc::new(),
                     floppy_image: None,
@@ -144,6 +145,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
     let mut machine = Machine {
         cpu: Cpu::new(0),
         memory: vec![0xCC; 0x40000],
+        dma: Dma::new(),
         handles: vec![],
         fdc: Fdc::new(),
         floppy_image: None,
@@ -230,6 +232,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
 fn write_service_clears_only_carry() {
     let mut machine = Machine {
         cpu: Cpu::new(0),
+        dma: Dma::new(),
         memory: vec![0; 16],
         handles: vec![],
         fdc: Fdc::new(),
@@ -268,6 +271,7 @@ fn dos_termination_returns_al_as_exit_code() {
     for (ax, expected_code) in [(0x4C00, 0), (0x4C01, 1), (0x4CFF, 255)] {
         let mut machine = Machine {
             cpu: Cpu::new(0),
+            dma: Dma::new(),
             memory: vec![],
             handles: vec![],
             fdc: Fdc::new(),
@@ -303,6 +307,7 @@ fn dos_termination_returns_al_as_exit_code() {
 fn machine_for_pending_read(max_bytes: u16) -> Machine {
     let mut machine = Machine {
         cpu: Cpu::new(0),
+        dma: Dma::new(),
         memory: vec![0xCC; 0x100000],
         handles: vec![Some(super::Resource::Stdin)],
         fdc: Fdc::new(),
