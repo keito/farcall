@@ -1,6 +1,5 @@
 use super::{Cpu, InterruptResult, Machine, MachineStepResult};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
-use crate::machine::dos::Dos;
 use crate::machine::{
     BiosKeyboard, Dma, Fdc, KeyboardInputMode, LoadMode, MachineError, PcKeyboard, Pic, Pit, Ppi,
     TextVideo,
@@ -67,7 +66,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         cpu,
         dma: Dma::new(),
         memory: vec![0xCC; 0x40000],
-        dos: Dos::new(),
+        dos: None,
         fdc: Fdc::new(),
         floppy_image: image.map(floppy_360kib),
         boot_time: Instant::now(),

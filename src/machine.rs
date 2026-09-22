@@ -44,7 +44,7 @@ pub struct Machine {
     boot_time: Instant,
     cpu: Cpu,
     dma: Dma,
-    dos: Dos,
+    dos: Option<Dos>,
     fdc: Fdc,
     floppy_image: Option<FloppyDisk>,
     keyboard_input_mode: KeyboardInputMode,
@@ -131,7 +131,10 @@ impl Machine {
             last_step_time: Instant::now(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
-            dos: Dos::new(),
+            dos: match load_mode {
+                LoadMode::Com => Some(Dos::new()),
+                _ => None,
+            },
             fdc: Fdc::new(),
             floppy_image: None,
             pc_keyboard: PcKeyboard::new(),
@@ -414,19 +417,18 @@ impl Machine {
             0x17 => self.printer_service(),
             0x1A => self.time_of_day_service(),
             0x20 | 0x21 | 0x28 | 0x29 => {
-                // DOS services
-                // In boot mode, send to the guest
-                if self.load_mode == LoadMode::Boot {
-                    return self.handle_guest_interrupt(interrupt);
+                // DOS services - in COM mode, send to our emulated DOS
+                if let Some(dos) = self.dos.as_mut() {
+                    Ok(dos.handle_interrupt(
+                        interrupt,
+                        &mut self.cpu,
+                        &mut self.memory,
+                        &mut self.bios_keyboard,
+                        &mut self.text_video,
+                    )?)
+                } else {
+                    self.handle_guest_interrupt(interrupt)
                 }
-                // In COM mode, send to our emulated DOS
-                Ok(self.dos.handle_interrupt(
-                    interrupt,
-                    &mut self.cpu,
-                    &mut self.memory,
-                    &mut self.bios_keyboard,
-                    &mut self.text_video,
-                )?)
             }
             // By default, send interrupts to the guest
             _ => self.handle_guest_interrupt(interrupt),
@@ -458,8 +460,10 @@ impl Machine {
             return Ok(MachineStepResult::WaitingForInput);
         }
 
-        if self.dos.has_pending_input() {
-            return Ok(self.dos.handle_pending_input(
+        if let Some(dos) = self.dos.as_mut()
+            && dos.has_pending_input()
+        {
+            return Ok(dos.handle_pending_input(
                 &mut self.cpu,
                 &mut self.memory,
                 &mut self.bios_keyboard,
