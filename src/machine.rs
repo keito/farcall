@@ -441,10 +441,13 @@ impl Machine {
             ));
         }
 
+        // Handle disk image not provided with a MA (Missing Address Mark) status
+        // TODO: more accurately simulate empty disk
         let Some(floppy_image) = self.floppy_images[drive as usize].as_ref() else {
-            return Err(MachineError::DiskError(
-                "No floppy image inserted".to_string(),
-            ));
+            let st0 = 0x40 | (physical_head << 2) | drive;
+            let results = [st0, 0x01, 0x00, cylinder, head, sector, size_code];
+            self.fdc.complete_read(results);
+            return Ok(());
         };
 
         let offset = floppy_image
