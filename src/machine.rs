@@ -476,33 +476,30 @@ impl Machine {
 
         self.dma.complete_transfer(count_bytes as u16);
 
-        // ST0: Normal Completion, Drive, Head
-        // No errors
-        // No errors
-        // C
-        // H
-        // R
-        // N: 2 means 512-byte sectors
-        let mt = read_request.command & 0x80 != 0;
-        let cylinder_result = if end_sector == last_sector && (!mt || head == 1) {
-            cylinder + 1
-        } else {
-            cylinder
-        };
-        let head_result = if end_sector == last_sector && mt && (head == 0) {
-            1
-        } else if end_sector == last_sector && mt && (head == 1) {
-            0
-        } else {
-            head
-        };
-        let st0 = drive | (head_result << 2);
-        let r_result = if last_sector < end_sector {
-            last_sector + 1
-        } else {
-            1
-        };
-        let results = [st0, 00, 00, cylinder_result, head_result, r_result, 2];
+        // Construct position after transfer
+        let multi_track = read_request.command & 0x80 != 0;
+        let reached_end_of_track = last_sector == end_sector;
+        let (result_cylinder, result_head, result_sector) =
+            match (reached_end_of_track, multi_track, head) {
+                // Continue within current track
+                (false, _, _) => (cylinder, head, last_sector + 1),
+                // Continue onto head 1 of this cylinder
+                (true, true, 0) => (cylinder, 1, 1),
+                // Finished the last head
+                (true, true, _) => (cylinder + 1, 0, 1),
+                // Single-track mode: go to next cylinder on current head
+                (true, false, _) => (cylinder + 1, head, 1),
+            };
+
+        let results = [
+            drive | (result_head << 2), // ST0: Normal completion,
+            00,                         // ST1: no errors
+            00,                         // ST2: no errors
+            result_cylinder,
+            result_head,
+            result_sector,
+            size_code,
+        ];
         self.fdc.complete_read(results);
 
         Ok(())
