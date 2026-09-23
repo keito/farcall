@@ -33,16 +33,18 @@ fn floppy_360kib(bytes: Vec<u8>) -> FloppyDisk {
     }
 }
 
-fn disk_snapshot(machine: &Machine) -> Option<(Vec<u8>, [usize; 3])> {
-    machine.floppy_image.as_ref().map(|disk| {
-        (
-            disk.bytes.clone(),
-            [
-                disk.geometry.cylinders,
-                disk.geometry.heads,
-                disk.geometry.sectors_per_track,
-            ],
-        )
+fn disk_snapshot(machine: &Machine) -> [Option<(Vec<u8>, [usize; 3])>; 2] {
+    machine.floppy_images.each_ref().map(|image| {
+        image.as_ref().map(|disk| {
+            (
+                disk.bytes.clone(),
+                [
+                    disk.geometry.cylinders,
+                    disk.geometry.heads,
+                    disk.geometry.sectors_per_track,
+                ],
+            )
+        })
     })
 }
 
@@ -70,7 +72,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         memory: vec![0xCC; 0x40000],
         dos: None,
         fdc: Fdc::new(),
-        floppy_image: image.map(floppy_360kib),
+        floppy_images: [image.map(floppy_360kib), None],
         last_step_time: Instant::now(),
         tick_remainder: 0,
         verbosity: 0,
@@ -119,7 +121,7 @@ fn int13_read_uses_physical_contiguity_when_the_buffer_offset_crosses_ffff() {
                 machine.memory[address], expected_memory[address]
             );
         }
-        assert_eq!(machine.floppy_image.as_ref().unwrap().bytes, image);
+        assert_eq!(machine.floppy_images[0].as_ref().unwrap().bytes, image);
     }
 }
 
@@ -184,8 +186,74 @@ fn int13_reads_exactly_one_sector_and_sets_success_status() {
                 machine.memory == expected_memory,
                 "sector={sector}, image_len={image_len}: exactly 512 destination bytes change"
             );
-            assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+            assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
         }
+    }
+}
+
+#[test]
+fn int13_selects_each_drives_contents_and_geometry() {
+    for drive in [0usize, 1] {
+        for heads in [1, 2] {
+            for flags in [0xF002, 0xFFD7] {
+                let mut machine = machine_with_image(Some(disk_image(360 * 1024)));
+                let second_image = disk_image(360 * 1024)
+                    .into_iter()
+                    .map(|byte| byte ^ 0xFF)
+                    .collect();
+                machine.floppy_images[1] = Some(floppy_360kib(second_image));
+                machine.floppy_images[drive]
+                    .as_mut()
+                    .unwrap()
+                    .geometry
+                    .heads = heads;
+                machine.floppy_images[1 - drive]
+                    .as_mut()
+                    .unwrap()
+                    .geometry
+                    .heads = 3 - heads;
+                machine.cpu.cx = 0x0101; // Cylinder 1, head 0, sector 1.
+                machine.cpu.dx = drive as u16;
+                machine.cpu.flags = flags;
+                let original_disks = disk_snapshot(&machine);
+                let mut expected_registers = registers(&machine.cpu);
+                expected_registers[0] = 1;
+                let mut expected_memory = machine.memory.clone();
+                // Cylinder 1 starts at 4608 on a single-sided disk, 9216 on two-sided.
+                let offset = if heads == 1 { 4608 } else { 9216 };
+                expected_memory[0x17E00..0x18000].copy_from_slice(
+                    &machine.floppy_images[drive].as_ref().unwrap().bytes[offset..offset + 512],
+                );
+
+                assert!(matches!(
+                    machine.handle_interrupt(0x13).unwrap(),
+                    InterruptResult::ResumeExecution
+                ));
+
+                assert_eq!(registers(&machine.cpu), expected_registers);
+                assert_eq!(machine.cpu.flags, flags & !1);
+                assert!(
+                    machine.memory == expected_memory,
+                    "drive={drive}, heads={heads}"
+                );
+                assert_eq!(disk_snapshot(&machine), original_disks);
+            }
+        }
+    }
+}
+
+#[test]
+fn int13_rejects_a_head_missing_from_the_selected_drive() {
+    for drive in [0usize, 1] {
+        let mut machine = machine_with_image(Some(disk_image(360 * 1024)));
+        machine.floppy_images[1] = Some(floppy_360kib(disk_image(360 * 1024)));
+        machine.floppy_images[drive]
+            .as_mut()
+            .unwrap()
+            .geometry
+            .heads = 1;
+        machine.cpu.dx = 0x0100 | drive as u16; // Head 1 exists only on the other disk.
+        assert_guest_error(&mut machine, 0x04, "selected disk has only one head");
     }
 }
 
@@ -226,7 +294,7 @@ fn int13_reads_multiple_sectors_within_a_track() {
                     machine.memory == expected_memory,
                     "CX={cx:04X}, DX={dx:04X}, count={count}, extra_bytes={extra_bytes}"
                 );
-                assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+                assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
             }
         }
     }
@@ -283,7 +351,7 @@ fn int13_uses_es_bx_including_nonzero_and_aliasing_segments() {
             machine.memory == expected_memory,
             "destination={es:04X}:{bx:04X}"
         );
-        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+        assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
     }
 }
 
@@ -296,7 +364,8 @@ fn int13_rejects_parameters_outside_the_current_supported_subset() {
         ("unknown operation", 0xFF01, 0x0002, 0x0000),
         ("zero sectors", 0x0200, 0x0002, 0x0000),
         ("large count", 0x02FF, 0x0002, 0x0000),
-        ("second floppy", 0x0201, 0x0002, 0x0001),
+        ("third floppy", 0x0201, 0x0002, 0x0002),
+        ("invalid drive", 0x0201, 0x0002, 0x00FF),
         ("hard disk", 0x0201, 0x0002, 0x0080),
     ] {
         for flags in [0xF002, 0xFFD7] {
@@ -315,8 +384,16 @@ fn int13_reset_succeeds_without_read_parameters_and_preserves_state() {
     for image in [None, Some(disk_image(1024))] {
         for flags in [0xF002, 0xF003, 0xFFD6, 0xFFD7] {
             // Reset ignores AL and CHS, including values invalid for a read.
-            for (al, cx, dx) in [(0, 0, 0), (1, 2, 0), (0xFF, 0xFFFF, 0xFF00)] {
+            for (al, cx, dx) in [
+                (0, 0, 0),
+                (1, 2, 0),
+                (0xFF, 0xFFFF, 0xFF00),
+                (0, 0, 1),
+                (1, 2, 1),
+                (0xFF, 0xFFFF, 0xFF01),
+            ] {
                 let mut machine = machine_with_image(image.clone());
+                machine.floppy_images[1] = image.clone().map(floppy_360kib);
                 machine.cpu.ax = al; // AH=00h: reset.
                 machine.cpu.cx = cx;
                 machine.cpu.dx = dx;
@@ -353,7 +430,7 @@ fn int13_reset_succeeds_without_read_parameters_and_preserves_state() {
 fn int13_reset_rejects_unsupported_drives_without_changing_memory() {
     for image in [None, Some(disk_image(1024))] {
         for flags in [0xF002, 0xFFD7] {
-            for drive in [1, 0x80, 0xFF] {
+            for drive in [2, 3, 0x80, 0xFF] {
                 let mut machine = machine_with_image(image.clone());
                 machine.cpu.ax = 0x00A5; // Reset, with an unrelated AL to preserve.
                 machine.cpu.dx = drive;
@@ -379,7 +456,7 @@ fn int13_single_sided_geometry_rejects_a_second_head_and_track_crossing() {
     ] {
         // Extra bytes ensure that geometry, not image length, rejects the read.
         let mut machine = machine_with_image(Some(disk_image(360 * 1024)));
-        machine.floppy_image.as_mut().unwrap().geometry.heads = 1;
+        machine.floppy_images[0].as_mut().unwrap().geometry.heads = 1;
         machine.cpu.ax = ax;
         machine.cpu.cx = cx;
         machine.cpu.dx = dx;
@@ -419,7 +496,7 @@ fn int13_reads_across_heads_and_cylinders_through_the_last_sector() {
                 machine.memory == expected_memory,
                 "CX={cx:04X}, DX={dx:04X}"
             );
-            assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+            assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
         }
     }
 }
@@ -447,12 +524,18 @@ fn int13_invalid_chs_returns_sector_not_found_without_copying() {
 
 #[test]
 fn int13_without_an_inserted_floppy_returns_not_ready() {
-    for sector in [1, 2] {
-        for flags in [0xF002, 0xFFD7] {
-            let mut machine = machine_with_image(None);
-            machine.cpu.cx = sector;
-            machine.cpu.flags = flags;
-            assert_guest_error(&mut machine, 0x80, "no floppy image");
+    for drive in [0usize, 1] {
+        for other_image in [None, Some(disk_image(1024))] {
+            for sector in [1, 2] {
+                for flags in [0xF002, 0xFFD7] {
+                    let mut machine = machine_with_image(None);
+                    machine.floppy_images[1 - drive] = other_image.clone().map(floppy_360kib);
+                    machine.cpu.dx = drive as u16;
+                    machine.cpu.cx = sector;
+                    machine.cpu.flags = flags;
+                    assert_guest_error(&mut machine, 0x80, "selected drive has no floppy image");
+                }
+            }
         }
     }
 }
@@ -507,7 +590,7 @@ fn int13_validates_the_entire_destination_before_writing_to_undersized_memory() 
         assert_eq!(registers(&machine.cpu), original_registers);
         assert_eq!(machine.cpu.flags, 0xFFD7);
         assert!(machine.memory == original_memory);
-        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+        assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
     }
 }
 
@@ -518,7 +601,7 @@ fn int13_success_clears_previous_error_status_and_carry() {
     assert_guest_error(&mut machine, 0x04, "sector 2 is missing");
 
     let image = disk_image(1024);
-    machine.floppy_image = Some(floppy_360kib(image.clone()));
+    machine.floppy_images[0] = Some(floppy_360kib(image.clone()));
     machine.cpu.ax = 0x0201; // Retry the request, preserving the previous CF.
     assert!(matches!(
         machine.handle_interrupt(0x13).unwrap(),
@@ -530,7 +613,7 @@ fn int13_success_clears_previous_error_status_and_carry() {
 
     // A later failure must set carry again after success cleared it.
     machine.cpu.ax = 0x0201;
-    machine.floppy_image = None;
+    machine.floppy_images[0] = None;
     assert_guest_error(&mut machine, 0x80, "disk removed after successful read");
 }
 
@@ -613,6 +696,6 @@ fn boot_code_reads_a_sector_through_int13_then_executes_it() {
         ));
         assert_eq!(machine.cpu.ax, 0xBEEF);
         assert_eq!(machine.cpu.ip, 0x7E03);
-        assert_eq!(&machine.floppy_image.as_ref().unwrap().bytes, &image);
+        assert_eq!(&machine.floppy_images[0].as_ref().unwrap().bytes, &image);
     }
 }

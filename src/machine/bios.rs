@@ -262,7 +262,7 @@ impl Bios {
         cpu: &mut Cpu,
         memory: &mut [u8],
         bios_keyboard: &mut BiosKeyboard,
-        floppy_image: &Option<FloppyDisk>,
+        floppy_images: &[Option<FloppyDisk>; 2],
         video: &mut TextVideo,
         verbosity: u8,
     ) -> Result<InterruptResult, BiosError> {
@@ -270,7 +270,7 @@ impl Bios {
             0x10 => self.video_service(cpu, memory, video),
             0x11 => self.equipment_list_service(cpu),
             0x12 => self.amount_conventional_ram_service(cpu),
-            0x13 => self.disk_service(cpu, memory, floppy_image),
+            0x13 => self.disk_service(cpu, memory, floppy_images),
             0x14 => self.serial_port_service(cpu),
             0x15 => self.bios_system_services(cpu),
             0x16 => self.keyboard_service(cpu, bios_keyboard, verbosity),

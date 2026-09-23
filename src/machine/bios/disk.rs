@@ -13,11 +13,10 @@ impl Bios {
         &self,
         cpu: &mut Cpu,
         memory: &mut [u8],
-        floppy_image: &Option<FloppyDisk>,
+        floppy_images: &[Option<FloppyDisk>; 2],
     ) -> Result<InterruptResult, BiosError> {
-        // TODO: Support more drives
         let drive = cpu.get_reg(Reg8::Dl);
-        if drive != 0 {
+        if drive > 1 {
             cpu.set_reg(Reg8::Ah, 0x01);
             cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);
@@ -25,8 +24,8 @@ impl Bios {
 
         let operation = cpu.get_reg(Reg8::Ah);
         match operation {
-            0x00 => self.operation_reset(cpu),
-            0x02 => self.operation_read(cpu, memory, floppy_image),
+            0x00 => self.operation_reset(drive, cpu),
+            0x02 => self.operation_read(drive, cpu, memory, floppy_images),
             _ => {
                 cpu.set_reg(Reg8::Ah, 0x01);
                 cpu.set_flag(Flag::Carry, true);
@@ -35,7 +34,7 @@ impl Bios {
         }
     }
 
-    fn operation_reset(&self, cpu: &mut Cpu) -> Result<InterruptResult, BiosError> {
+    fn operation_reset(&self, _drive: u8, cpu: &mut Cpu) -> Result<InterruptResult, BiosError> {
         cpu.set_reg(Reg8::Ah, 0);
         cpu.set_flag(Flag::Carry, false);
         Ok(InterruptResult::ResumeExecution)
@@ -43,9 +42,10 @@ impl Bios {
 
     fn operation_read(
         &self,
+        drive: u8,
         cpu: &mut Cpu,
         memory: &mut [u8],
-        floppy_image: &Option<FloppyDisk>,
+        floppy_images: &[Option<FloppyDisk>; 2],
     ) -> Result<InterruptResult, BiosError> {
         let sector_count = cpu.get_reg(Reg8::Al) as usize;
         let cylinder = cpu.get_reg(Reg8::Ch) as usize;
@@ -54,7 +54,7 @@ impl Bios {
         let dest = SegmentedAddr::new(cpu.get_segment_reg(SegmentReg::Es), cpu.get_reg(Reg16::Bx))
             .to_physical();
 
-        let Some(disk) = floppy_image else {
+        let Some(disk) = &floppy_images[drive as usize] else {
             cpu.set_reg(Reg8::Ah, 0x80);
             cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);

@@ -48,7 +48,7 @@ pub struct Machine {
     dma: Dma,
     dos: Option<Dos>,
     fdc: Fdc,
-    floppy_image: Option<FloppyDisk>,
+    floppy_images: [Option<FloppyDisk>; 2],
     keyboard_input_mode: KeyboardInputMode,
     last_step_time: Instant,
     load_mode: LoadMode,
@@ -134,7 +134,7 @@ impl Machine {
                 _ => None,
             },
             fdc: Fdc::new(),
-            floppy_image: None,
+            floppy_images: [None, None],
             pc_keyboard: PcKeyboard::new(),
             synthetic_int09_pending: false,
             keyboard_input_mode: match load_mode {
@@ -214,7 +214,7 @@ impl Machine {
                         &mut self.cpu,
                         &mut self.memory,
                         &mut self.bios_keyboard,
-                        &self.floppy_image,
+                        &self.floppy_images,
                         &mut self.text_video,
                         self.verbosity,
                     )?)
@@ -433,7 +433,7 @@ impl Machine {
             ));
         }
 
-        let Some(floppy_image) = self.floppy_image.as_ref() else {
+        let Some(floppy_image) = self.floppy_images[0].as_ref() else {
             return Err(MachineError::DiskError(
                 "No floppy image inserted".to_string(),
             ));
@@ -567,6 +567,13 @@ impl Machine {
         self.cpu.set_reg(Reg8::Dl, 0);
 
         // Keep the floppy image in machine
+        self.load_floppy_image(0, bytes, image_type);
+
+        Ok(())
+    }
+
+    /// Loads the bytes/geometry of the given floppy image into the given slot
+    fn load_floppy_image(&mut self, drive: u8, bytes: Vec<u8>, image_type: Option<DiskType>) {
         let geometry = match image_type {
             Some(DiskType::Floppy360) => DiskGeometry {
                 cylinders: 40,
@@ -579,12 +586,10 @@ impl Machine {
                 sectors_per_track: 9,
             },
         };
-        self.floppy_image = Some(FloppyDisk {
+        self.floppy_images[drive as usize] = Some(FloppyDisk {
             bytes: bytes,
             geometry: geometry,
         });
-
-        Ok(())
     }
 
     fn load_rom(&mut self, path: PathBuf) -> Result<(), MachineError> {
