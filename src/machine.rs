@@ -410,22 +410,24 @@ impl Machine {
             cylinder,
             head,
             sector,
-            size_code,
-            end_sector,
+            size_code,  // sector size code (bytes = 128 << size_code except 0)
+            end_sector, // EOT: final sector ID on a track for this command
             _gap,
             _data_length,
         ] = read_request.parameters;
 
-        let drive = drive_head & 0x03;
-        let physical_head = (drive_head >> 2) & 1;
+        let drive = drive_head & 0x03; // Extract Unit Select bits
+        let physical_head = (drive_head >> 2) & 1; // Extract HD bit
 
+        // Ensure drive A or B and sectors are 512 bytes, and physical head agrees with head ID.
         if (drive != 0 && drive != 1) || size_code != 2 || physical_head != head {
             return Err(MachineError::DiskError("Unsupported disk".to_string()));
         }
 
+        // See how many bytes DMA is configured to receive
         let count_bytes = self.dma.count_bytes();
 
-        // Require DMA to be unmasked, mode 0x46
+        // Require DMA to be unmasked, mode 0x46, and byte count divisible by 512
         if self.dma.is_masked() || self.dma.mode() != 0x46 || count_bytes % 512 != 0 {
             return Err(MachineError::DiskError(
                 "Unsupported DMA parameters".to_string(),
@@ -459,6 +461,7 @@ impl Machine {
             return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
         };
 
+        // TODO: Support multi-track reads from head 0 to head 1
         let sectors_read = count_bytes / 512;
         let last_sector = (usize::from(sector) + sectors_read - 1) as u8;
         if last_sector > end_sector || last_sector > floppy_image.geometry.sectors_per_track as u8 {
