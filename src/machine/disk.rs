@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 #[cfg(test)]
 mod tests;
 
@@ -32,4 +34,9 @@ impl DiskGeometry {
 pub(super) struct FloppyDisk {
     pub(super) bytes: Vec<u8>,
     pub(super) geometry: DiskGeometry,
+}
+
+pub struct DiskImageConfig {
+    pub path: PathBuf,
+    pub disk_type: DiskType,
 }

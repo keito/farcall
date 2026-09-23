@@ -621,11 +621,9 @@ fn int13_success_clears_previous_error_status_and_carry() {
 fn boot_code_reads_a_sector_through_int13_then_executes_it() {
     // Explicit offsets distinguish one-head and two-head layouts at cylinder 1.
     for (image_type, image_len, cx, dx, sector_offset) in [
-        (None, 180 * 1024, 0x0002u16, 0x0000u16, 512usize),
-        (None, 180 * 1024, 0x0101, 0x0000, 4608),
-        (Some(DiskType::Floppy180), 180 * 1024, 0x0101, 0x0000, 4608),
-        (Some(DiskType::Floppy360), 360 * 1024, 0x0001, 0x0100, 4608),
-        (Some(DiskType::Floppy360), 360 * 1024, 0x0101, 0x0000, 9216),
+        (DiskType::Floppy180, 180 * 1024, 0x0101, 0x0000, 4608),
+        (DiskType::Floppy360, 360 * 1024, 0x0001, 0x0100, 4608),
+        (DiskType::Floppy360, 360 * 1024, 0x0101, 0x0000, 9216),
     ] {
         let mut image = vec![0; image_len];
         // MOV AX,0; MOV ES,AX; MOV BX,7E00h; MOV AX,0201h;

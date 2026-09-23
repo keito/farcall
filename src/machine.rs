@@ -1,22 +1,19 @@
 use core::fmt::Debug;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
-use crate::machine::bios::BiosError;
-use crate::machine::bios_keyboard::BiosKeyStroke;
-use crate::machine::dos::DosError;
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
 };
 use crate::registers::Reg8;
-use bios::Bios;
-use bios_keyboard::BiosKeyboard;
+use bios::{Bios, BiosError};
+use bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
-use dos::Dos;
+use dos::{Dos, DosError};
 use fdc::{Fdc, FdcReadData};
 use pc_keyboard::PcKeyboard;
 use pic::Pic;
@@ -24,7 +21,7 @@ use pit::Pit;
 use ppi::Ppi;
 use video::TextVideo;
 
-pub use disk::DiskType;
+pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
 pub mod bios_keyboard;
@@ -111,54 +108,60 @@ pub(crate) enum KeyboardInputMode {
 }
 
 impl Machine {
-    pub fn new(
-        file_path: &str,
-        load_mode: LoadMode,
-        image_type: Option<DiskType>,
-        verbosity: u8,
-        rom: Option<PathBuf>,
-    ) -> anyhow::Result<Self> {
+    pub fn new(boot_mode: BootMode, verbosity: u8) -> anyhow::Result<Self> {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
+        let load_mode = if boot_mode.is_rom() {
+            LoadMode::Rom
+        } else if boot_mode.is_com() {
+            LoadMode::Com
+        } else {
+            LoadMode::Boot
+        };
+
         let mut machine = Machine {
-            bios: match load_mode {
-                LoadMode::Rom => None,
-                _ => Some(Bios::new()),
-            },
+            bios: (!boot_mode.is_rom()).then(|| Bios::new()),
             bios_keyboard: BiosKeyboard::new(),
             last_step_time: Instant::now(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
-            dos: match load_mode {
-                LoadMode::Com => Some(Dos::new()),
-                _ => None,
-            },
+            dos: boot_mode.is_com().then(|| Dos::new()),
             fdc: Fdc::new(),
             floppy_images: [None, None],
-            pc_keyboard: PcKeyboard::new(),
-            synthetic_int09_pending: false,
-            keyboard_input_mode: match load_mode {
-                LoadMode::Rom => KeyboardInputMode::PcHardware,
-                _ => KeyboardInputMode::BiosKeystrokes,
+            keyboard_input_mode: if boot_mode.is_rom() {
+                KeyboardInputMode::PcHardware
+            } else {
+                KeyboardInputMode::BiosKeystrokes
             },
-            load_mode: load_mode.clone(),
+            load_mode,
             memory: vec![0; memory_size],
+            pc_keyboard: PcKeyboard::new(),
             pic: Pic::new(),
             pit: Pit::new(),
             ppi: Ppi::new(),
+            synthetic_int09_pending: false,
             text_video: TextVideo::new(),
             tick_remainder: 0,
             verbosity,
         };
         machine.text_video.clear(&mut machine.memory)?;
 
-        let data: Vec<u8> = fs::read(file_path)?;
-        match load_mode {
-            LoadMode::Com => machine.load_com(&data)?,
-            LoadMode::Boot => machine.load_boot_sector(data, image_type)?,
-            LoadMode::Rom => {
-                machine.load_boot_sector(data, image_type)?;
-                machine.load_rom(rom.unwrap())?;
+        match boot_mode {
+            BootMode::Com { program } => {
+                let data = fs::read(program)?;
+                machine.load_com(&data)?;
+            }
+            BootMode::Floppy {
+                drive_a,
+                drive_b: _,
+                rom,
+            } => {
+                let data = fs::read(drive_a.path)?;
+                machine.load_boot_sector(data, drive_a.disk_type)?;
+
+                if let Some(rom_path) = rom {
+                    machine.load_rom(&rom_path)?;
+                }
             }
         }
 
@@ -551,7 +554,7 @@ impl Machine {
     fn load_boot_sector(
         &mut self,
         bytes: Vec<u8>,
-        image_type: Option<DiskType>,
+        image_type: DiskType,
     ) -> Result<(), MachineError> {
         if bytes.len() < 512 {
             return Err(MachineError::BootSectorError(
@@ -573,14 +576,14 @@ impl Machine {
     }
 
     /// Loads the bytes/geometry of the given floppy image into the given slot
-    fn load_floppy_image(&mut self, drive: u8, bytes: Vec<u8>, image_type: Option<DiskType>) {
+    fn load_floppy_image(&mut self, drive: u8, bytes: Vec<u8>, image_type: DiskType) {
         let geometry = match image_type {
-            Some(DiskType::Floppy360) => DiskGeometry {
+            DiskType::Floppy360 => DiskGeometry {
                 cylinders: 40,
                 heads: 2,
                 sectors_per_track: 9,
             },
-            None | Some(DiskType::Floppy180) => DiskGeometry {
+            DiskType::Floppy180 => DiskGeometry {
                 cylinders: 40,
                 heads: 1,
                 sectors_per_track: 9,
@@ -592,7 +595,7 @@ impl Machine {
         });
     }
 
-    fn load_rom(&mut self, path: PathBuf) -> Result<(), MachineError> {
+    fn load_rom(&mut self, path: &Path) -> Result<(), MachineError> {
         let bytes: Vec<u8> = fs::read(path)?;
         if bytes.len() != 8192 {
             return Err(MachineError::BootSectorError(
@@ -614,8 +617,36 @@ impl Machine {
 }
 
 #[derive(Copy, Clone, PartialEq)]
-pub(crate) enum LoadMode {
+enum LoadMode {
     Com,
     Boot,
     Rom,
+}
+
+pub(crate) enum BootMode {
+    Com {
+        program: PathBuf,
+    },
+    Floppy {
+        drive_a: DiskImageConfig,
+        drive_b: Option<DiskImageConfig>,
+        rom: Option<PathBuf>,
+    },
+}
+
+impl BootMode {
+    pub fn is_com(&self) -> bool {
+        matches!(self, BootMode::Com { .. })
+    }
+
+    pub fn is_rom(&self) -> bool {
+        match self {
+            BootMode::Com { .. } => false,
+            BootMode::Floppy {
+                drive_a: _,
+                drive_b: _,
+                rom,
+            } => rom.is_some(),
+        }
+    }
 }
