@@ -153,7 +153,7 @@ impl Machine {
             }
             BootMode::Floppy {
                 drive_a,
-                drive_b: _,
+                drive_b,
                 rom,
             } => {
                 let data = fs::read(drive_a.path)?;
@@ -161,6 +161,11 @@ impl Machine {
 
                 if let Some(rom_path) = rom {
                     machine.load_rom(&rom_path)?;
+                }
+
+                if let Some(drive_b) = drive_b {
+                    let data = fs::read(drive_b.path)?;
+                    machine.load_floppy_image(1, data, drive_b.disk_type);
                 }
             }
         }
@@ -414,7 +419,7 @@ impl Machine {
         let drive = drive_head & 0x03;
         let physical_head = (drive_head >> 2) & 1;
 
-        if drive != 0 || size_code != 2 || physical_head != head {
+        if (drive != 0 && drive != 1) || size_code != 2 || physical_head != head {
             return Err(MachineError::DiskError("Unsupported disk".to_string()));
         }
 
@@ -436,7 +441,7 @@ impl Machine {
             ));
         }
 
-        let Some(floppy_image) = self.floppy_images[0].as_ref() else {
+        let Some(floppy_image) = self.floppy_images[drive as usize].as_ref() else {
             return Err(MachineError::DiskError(
                 "No floppy image inserted".to_string(),
             ));
@@ -465,7 +470,7 @@ impl Machine {
 
         self.dma.complete_transfer(count_bytes as u16);
 
-        // Normal completion, drive A, head 0
+        // ST0: Normal Completion, Drive, Head
         // No errors
         // No errors
         // C

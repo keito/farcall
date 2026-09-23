@@ -112,8 +112,8 @@ impl Bios {
         &self,
         cpu: &mut Cpu,
     ) -> Result<InterruptResult, BiosError> {
-        // One floppy drive, 64 KiB motherboard RAM, 80x25 color, and nothing else
-        cpu.ax = 0b0000_0000_0010_1101;
+        // 2 floppy drives, 64 KiB motherboard RAM, 80x25 color, and nothing else
+        cpu.ax = 0b0000_0000_0110_1101;
         Ok(InterruptResult::ResumeExecution)
     }
 

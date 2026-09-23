@@ -10,8 +10,8 @@ impl Ppi {
         Self {
             keyboard_scan_code: None,
             port_b: 0,
-            // 1 floppy, 80 cols CGA, no coprocessor, 64KB motherboard memory
-            sw1: 0b0010_1101,
+            // 2 floppies, 80 cols CGA, no coprocessor, 64KB motherboard memory
+            sw1: 0b0110_1101,
             // 18 x 32 KB (576 KB) beyond the first 64 KB (i.e., 640 KB)
             sw2: 18,
         }

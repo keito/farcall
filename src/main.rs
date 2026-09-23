@@ -29,13 +29,21 @@ struct Cli {
     #[arg(long)]
     floppy_a: Option<PathBuf>,
 
-    /// Load a BIOS ROM image; turns off BIOS emulation. Requires --floppy-a
-    #[arg(long, requires = "floppy_a", conflicts_with = "com")]
-    rom: Option<PathBuf>,
-
     /// Floppy A image type; defaults to 180k
     #[arg(long, value_enum, requires = "floppy_a", conflicts_with = "com")]
     floppy_a_type: Option<DiskType>,
+
+    /// Image for floppy drive B
+    #[arg(long, conflicts_with = "com")]
+    floppy_b: Option<PathBuf>,
+
+    /// Floppy B image type; defaults to 180k
+    #[arg(long, value_enum, requires = "floppy_b", conflicts_with = "com")]
+    floppy_b_type: Option<DiskType>,
+
+    /// Load a BIOS ROM image; turns off BIOS emulation. Requires --floppy-a
+    #[arg(long, requires = "floppy_a", conflicts_with = "com")]
+    rom: Option<PathBuf>,
 
     /// How much verbose debug output to print
     #[arg(short, long, default_value = "0", action = ArgAction::Count)]
@@ -51,7 +59,10 @@ fn main() -> anyhow::Result<process::ExitCode> {
                 path: floppy_a,
                 disk_type: cli.floppy_a_type.unwrap_or(DiskType::Floppy180),
             },
-            drive_b: None,
+            drive_b: cli.floppy_b.map(|floppy_b| DiskImageConfig {
+                path: floppy_b,
+                disk_type: cli.floppy_b_type.unwrap_or(DiskType::Floppy180),
+            }),
             rom: cli.rom,
         }
     } else {
