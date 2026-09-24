@@ -4,7 +4,7 @@ mod disk;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{BiosKeyboard, FloppyDisk, InterruptResult, MachineStepResult, TextVideo},
+    machine::{BiosKeyboard, CgaVideo, FloppyDisk, InterruptResult, MachineStepResult},
     memory::MemoryError,
     registers::Reg8,
 };
@@ -27,7 +27,7 @@ impl Bios {
         &self,
         cpu: &mut Cpu,
         memory: &mut [u8],
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<InterruptResult, BiosError> {
         let op = cpu.get_reg(Reg8::Ah);
         match op {
@@ -36,7 +36,7 @@ impl Bios {
                 let mode = cpu.get_reg(Reg8::Al);
                 if mode != 0x03 {
                     return Err(BiosError::VideoServiceError(format!(
-                        "Terribly sorry, we only support 03h; you want {:#X}h",
+                        "Mode {:#02}h not supported",
                         mode
                     )));
                 }
@@ -263,7 +263,7 @@ impl Bios {
         memory: &mut [u8],
         bios_keyboard: &mut BiosKeyboard,
         floppy_images: &[Option<FloppyDisk>; 2],
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
         verbosity: u8,
     ) -> Result<InterruptResult, BiosError> {
         match interrupt {

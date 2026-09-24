@@ -3,7 +3,7 @@ use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use crate::machine::dos::Dos;
 use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 
-use super::{Cpu, InterruptResult, LoadMode, Machine, MachineStepResult, TextVideo};
+use super::{CgaVideo, Cpu, InterruptResult, LoadMode, Machine, MachineStepResult};
 use std::time::Instant;
 
 mod disk;
@@ -41,7 +41,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     pic: Pic::new(),
                     pit: Pit::new(),
                     ppi: Ppi::new(),
-                    text_video: TextVideo::new(),
+                    cga_video: CgaVideo::new(),
                 };
                 machine.cpu.cs = 0x1000;
                 machine.cpu.ip = ip;
@@ -164,7 +164,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        text_video: TextVideo::new(),
+        cga_video: CgaVideo::new(),
     };
     machine.cpu.cs = 0x1000;
     machine.cpu.ip = 0x0100;
@@ -252,7 +252,7 @@ fn write_service_clears_only_carry() {
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        text_video: TextVideo::new(),
+        cga_video: CgaVideo::new(),
     };
     machine.cpu.ax = 0x4000;
     machine.cpu.bx = 1;
@@ -267,7 +267,7 @@ fn write_service_clears_only_carry() {
         .write_service(
             &mut machine.cpu,
             &mut machine.memory,
-            &mut machine.text_video,
+            &mut machine.cga_video,
         )
         .expect("stdout write should succeed");
 
@@ -298,7 +298,7 @@ fn dos_termination_returns_al_as_exit_code() {
             pic: Pic::new(),
             pit: Pit::new(),
             ppi: Ppi::new(),
-            text_video: TextVideo::new(),
+            cga_video: CgaVideo::new(),
         };
         machine.cpu.ax = ax;
 
@@ -334,7 +334,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),
-        text_video: TextVideo::new(),
+        cga_video: CgaVideo::new(),
     };
     machine.cpu.cs = 0x1000;
     machine.cpu.ip = 0x0100;
@@ -346,7 +346,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     machine.cpu.flags = 0x0243;
     // INT 21h; MOV BX,BEEFh. The MOV must wait until the read finishes.
     machine.memory[0x10100..0x10105].copy_from_slice(&[0xCD, 0x21, 0xBB, 0xEF, 0xBE]);
-    machine.text_video.clear(&mut machine.memory).unwrap();
+    machine.cga_video.clear(&mut machine.memory).unwrap();
     machine
 }
 
@@ -393,7 +393,7 @@ fn dos_handle_read_normalizes_the_buffer_before_crossing_the_original_offset_bou
                     &mut machine.cpu,
                     &mut machine.memory,
                     &mut machine.bios_keyboard,
-                    &mut machine.text_video
+                    &mut machine.cga_video
                 )
                 .unwrap(),
             MachineStepResult::Continue
@@ -435,7 +435,7 @@ fn dos_handle_write_normalizes_the_buffer_before_crossing_the_original_offset_bo
                 .write_service(
                     &mut machine.cpu,
                     &mut machine.memory,
-                    &mut machine.text_video,
+                    &mut machine.cga_video,
                 )
                 .unwrap(),
             InterruptResult::ResumeExecution
@@ -474,7 +474,7 @@ fn dos_dollar_string_keeps_the_original_segment_when_its_offset_wraps() {
             .print_string_service(
                 &mut machine.cpu,
                 &mut machine.memory,
-                &mut machine.text_video,
+                &mut machine.cga_video,
             )
             .unwrap(),
         InterruptResult::ResumeExecution
@@ -532,7 +532,7 @@ fn dos_handle_read_length_limit_includes_the_last_byte_of_the_normalized_segment
                     &mut machine.cpu,
                     &mut machine.memory,
                     &mut machine.bios_keyboard,
-                    &mut machine.text_video
+                    &mut machine.cga_video
                 )
                 .unwrap(),
             MachineStepResult::Continue
@@ -592,7 +592,7 @@ fn dos_handle_write_length_limit_includes_the_last_byte_of_the_normalized_segmen
                 .write_service(
                     &mut machine.cpu,
                     &mut machine.memory,
-                    &mut machine.text_video,
+                    &mut machine.cga_video,
                 )
                 .unwrap(),
             InterruptResult::ResumeExecution
@@ -888,7 +888,7 @@ fn dos_backspace_on_empty_input_preserves_the_prompt() {
     let mut machine = machine_for_pending_read(64);
     for byte in b"> " {
         machine
-            .text_video
+            .cga_video
             .write_char(&mut machine.memory, *byte)
             .unwrap();
     }
@@ -922,7 +922,7 @@ fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
         let mut machine = machine_for_pending_read(64);
         for _ in 0..start_column {
             machine
-                .text_video
+                .cga_video
                 .write_char(&mut machine.memory, b'>')
                 .unwrap();
         }
@@ -960,7 +960,7 @@ fn dos_backspace_edits_input_and_enter_echoes_a_newline() {
 
         // Output after Enter must begin at column zero on the next row.
         machine
-            .text_video
+            .cga_video
             .write_char(&mut machine.memory, b'X')
             .unwrap();
         let next_row = (start_column + 5) / 80 + 1;

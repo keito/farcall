@@ -11,6 +11,7 @@ use crate::memory::{
 use crate::registers::Reg8;
 use bios::{Bios, BiosError};
 use bios_keyboard::{BiosKeyStroke, BiosKeyboard};
+use cga_video::CgaVideo;
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
 use dos::{Dos, DosError};
@@ -19,12 +20,12 @@ use pc_keyboard::PcKeyboard;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
-use video::TextVideo;
 
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
 pub mod bios_keyboard;
+mod cga_video;
 mod disk;
 mod dma;
 mod dos;
@@ -35,12 +36,12 @@ mod pit;
 mod ppi;
 #[cfg(test)]
 mod tests;
-mod video;
 
 // Owns everything
 pub struct Machine {
     bios: Option<Bios>,
     bios_keyboard: BiosKeyboard,
+    cga_video: CgaVideo,
     cpu: Cpu,
     dma: Dma,
     dos: Option<Dos>,
@@ -56,7 +57,6 @@ pub struct Machine {
     ppi: Ppi,
     /// Used to directly raise INT 09h when emulating a BIOS
     synthetic_int09_pending: bool,
-    text_video: TextVideo,
     /// Fraction of a PIT tick remaining after a step
     tick_remainder: u128,
     verbosity: u8,
@@ -122,7 +122,7 @@ impl Machine {
         let mut machine = Machine {
             bios: (!boot_mode.is_rom()).then(|| Bios::new()),
             bios_keyboard: BiosKeyboard::new(),
-            last_step_time: Instant::now(),
+            cga_video: CgaVideo::new(),
             cpu: Cpu::new(verbosity),
             dma: Dma::new(),
             dos: boot_mode.is_com().then(|| Dos::new()),
@@ -133,6 +133,7 @@ impl Machine {
             } else {
                 KeyboardInputMode::BiosKeystrokes
             },
+            last_step_time: Instant::now(),
             load_mode,
             memory: vec![0; memory_size],
             pc_keyboard: PcKeyboard::new(),
@@ -140,11 +141,10 @@ impl Machine {
             pit: Pit::new(),
             ppi: Ppi::new(),
             synthetic_int09_pending: false,
-            text_video: TextVideo::new(),
             tick_remainder: 0,
             verbosity,
         };
-        machine.text_video.clear(&mut machine.memory)?;
+        machine.cga_video.clear(&mut machine.memory)?;
 
         match boot_mode {
             BootMode::Com { program } => {
@@ -189,7 +189,7 @@ impl Machine {
     }
 
     pub fn render_video(&self, frame: &mut [u8]) {
-        self.text_video.render(&self.memory, frame);
+        self.cga_video.render(&self.memory, frame);
     }
 
     /// Used for COM and Boot modes
@@ -223,7 +223,7 @@ impl Machine {
                         &mut self.memory,
                         &mut self.bios_keyboard,
                         &self.floppy_images,
-                        &mut self.text_video,
+                        &mut self.cga_video,
                         self.verbosity,
                     )?)
                 } else {
@@ -238,7 +238,7 @@ impl Machine {
                         &mut self.cpu,
                         &mut self.memory,
                         &mut self.bios_keyboard,
-                        &mut self.text_video,
+                        &mut self.cga_video,
                     )?)
                 } else {
                     self.handle_guest_interrupt(interrupt)
@@ -277,7 +277,7 @@ impl Machine {
                 &mut self.cpu,
                 &mut self.memory,
                 &mut self.bios_keyboard,
-                &mut self.text_video,
+                &mut self.cga_video,
             )?);
         }
 
@@ -335,7 +335,7 @@ impl Machine {
                     }
                     0x3DA => {
                         // Video Service
-                        self.cpu.set_reg(Reg8::Al, self.text_video.read_status());
+                        self.cpu.set_reg(Reg8::Al, self.cga_video.read_status());
                     }
                     0x3F4 | 0x3F5 => {
                         let result = self.fdc.read(port);
@@ -389,7 +389,7 @@ impl Machine {
                 self.pic.set_irq_line(1, self.ppi.irq_output());
             }
             0x3D4 | 0x3D5 => {
-                self.text_video.write(port, value);
+                self.cga_video.write(port, value);
             }
             0x3F2 | 0x3F5 => {
                 self.fdc.write(port, value);

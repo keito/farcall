@@ -2,7 +2,7 @@ use std::collections::VecDeque;
 
 use crate::{
     cpu::{Cpu, Flag},
-    machine::{BiosKeyboard, InterruptResult, MachineStepResult, TextVideo},
+    machine::{BiosKeyboard, CgaVideo, InterruptResult, MachineStepResult},
     memory::{MemoryError, SegmentedAddr, read_buffer, read_byte, validate_buffer, write_buffer},
     registers::{Reg8, Reg16},
 };
@@ -40,7 +40,7 @@ impl Dos {
         cpu: &mut Cpu,
         memory: &mut [u8],
         bios_keyboard: &mut BiosKeyboard,
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<MachineStepResult, DosError> {
         let Some(pending_input) = &mut self.pending_input else {
             return Ok(MachineStepResult::Continue);
@@ -115,7 +115,7 @@ impl Dos {
         cpu: &mut Cpu,
         memory: &mut [u8],
         bios_keyboard: &mut BiosKeyboard,
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<InterruptResult, DosError> {
         match interrupt {
             // Terminate program service
@@ -169,7 +169,7 @@ impl Dos {
         &self,
         cpu: &Cpu,
         memory: &mut [u8],
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<InterruptResult, DosError> {
         let c = cpu.get_reg(Reg8::Dl);
         let Some(Some(resource)) = self.handles.get(1) else {
@@ -194,7 +194,7 @@ impl Dos {
         &self,
         cpu: &mut Cpu,
         memory: &mut [u8],
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<InterruptResult, DosError> {
         let mut segmented_addr = SegmentedAddr::new(cpu.ds, cpu.dx);
         let mut buf = vec![];
@@ -323,7 +323,7 @@ impl Dos {
         &self,
         cpu: &mut Cpu,
         memory: &mut [u8],
-        video: &mut TextVideo,
+        video: &mut CgaVideo,
     ) -> Result<InterruptResult, DosError> {
         let start_pos = normalize_addr(SegmentedAddr::new(cpu.ds, cpu.dx));
         // Limit size of write to 0x10000 - offset

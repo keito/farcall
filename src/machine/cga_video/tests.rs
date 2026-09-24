@@ -1,27 +1,27 @@
-use super::TextVideo;
+use super::CgaVideo;
 
 const VIDEO_BASE: usize = 0xB8000;
 
-fn setup() -> (TextVideo, Vec<u8>) {
-    let mut video = TextVideo::new();
+fn setup() -> (CgaVideo, Vec<u8>) {
+    let mut video = CgaVideo::new();
     let mut memory = vec![0; 0x100000];
     video.clear(&mut memory).unwrap();
     (video, memory)
 }
 
-fn write_register(video: &mut TextVideo, register: u8, value: u8) {
+fn write_register(video: &mut CgaVideo, register: u8, value: u8) {
     video.write(0x3D4, register);
     video.write(0x3D5, value);
 }
 
-fn write_spaces(video: &mut TextVideo, memory: &mut [u8], count: usize) {
+fn write_spaces(video: &mut CgaVideo, memory: &mut [u8], count: usize) {
     for _ in 0..count {
         video.write_char(memory, b' ').unwrap();
     }
 }
 
 // On a blank screen, only the default two-scan-line cursor should be lit.
-fn assert_rendered_cursor(video: &TextVideo, memory: &[u8], cell: Option<usize>) {
+fn assert_rendered_cursor(video: &CgaVideo, memory: &[u8], cell: Option<usize>) {
     let mut frame = vec![0; 640 * 200 * 4];
     video.render(memory, &mut frame);
     let lit_pixels: Vec<_> = frame
@@ -52,7 +52,7 @@ fn assert_rendered_cursor(video: &TextVideo, memory: &[u8], cell: Option<usize>)
 
 #[test]
 fn high_byte_writes_replace_old_bits_and_preserve_low_byte() {
-    let mut video = TextVideo::new();
+    let mut video = CgaVideo::new();
     write_register(&mut video, 0x0F, 0x34);
     video.write(0x3D4, 0x0E);
     for (value, expected) in [(1, 0x0134), (0, 0x0034), (1, 0x0134), (2, 0x0234)] {
@@ -63,7 +63,7 @@ fn high_byte_writes_replace_old_bits_and_preserve_low_byte() {
 
 #[test]
 fn low_byte_writes_replace_old_bits_and_preserve_high_byte() {
-    let mut video = TextVideo::new();
+    let mut video = CgaVideo::new();
     write_register(&mut video, 0x0E, 2);
     video.write(0x3D4, 0x0F);
     for (value, expected) in [(0xFF, 0x02FF), (0, 0x0200), (1, 0x0201), (2, 0x0202)] {

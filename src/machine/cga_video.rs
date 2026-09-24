@@ -10,7 +10,7 @@ const GLYPH_WIDTH: usize = 8;
 const GLYPH_HEIGHT: usize = 8;
 const BYTES_PER_PIXEL: usize = 4;
 
-pub(super) struct TextVideo {
+pub(super) struct CgaVideo {
     /// Hardware cursor address
     cursor_address: u16,
     /// BIOS emulation cursor position: column
@@ -35,7 +35,7 @@ enum CursorRegister {
 
 const GLYPH_BYTES: &[u8; 2048] = include_bytes!("cga_8x8.dat");
 
-impl TextVideo {
+impl CgaVideo {
     pub(super) fn new() -> Self {
         Self {
             cursor_address: 0,
