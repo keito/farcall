@@ -608,14 +608,19 @@ impl Machine {
     /// Loads the bytes/geometry of the given floppy image into the given slot
     fn load_floppy_image(&mut self, drive: u8, bytes: Vec<u8>, image_type: DiskType) {
         let geometry = match image_type {
+            DiskType::Floppy180 => DiskGeometry {
+                cylinders: 40,
+                heads: 1,
+                sectors_per_track: 9,
+            },
             DiskType::Floppy360 => DiskGeometry {
                 cylinders: 40,
                 heads: 2,
                 sectors_per_track: 9,
             },
-            DiskType::Floppy180 => DiskGeometry {
-                cylinders: 40,
-                heads: 1,
+            DiskType::Floppy720 => DiskGeometry {
+                cylinders: 80,
+                heads: 2,
                 sectors_per_track: 9,
             },
         };

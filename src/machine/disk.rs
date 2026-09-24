@@ -9,6 +9,8 @@ pub enum DiskType {
     Floppy180,
     #[value(name = "360k")]
     Floppy360,
+    #[value(name = "720k")]
+    Floppy720,
 }
 
 pub(super) struct DiskGeometry {
