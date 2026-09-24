@@ -8,6 +8,8 @@ use crate::machine::{
 use crate::memory::MemoryError;
 use std::time::Instant;
 
+mod floppy_read;
+
 fn registers(cpu: &Cpu) -> [u16; 13] {
     [
         cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.bp, cpu.sp, cpu.cs, cpu.ds, cpu.es,

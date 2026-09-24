@@ -452,49 +452,71 @@ impl Machine {
             return Ok(());
         };
 
-        let offset = floppy_image
-            .geometry
-            .byte_offset(cylinder as usize, head as usize, sector as usize)
-            .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
+        let multi_track = read_request.command & 0x80 != 0;
+        let mut current_head = head;
+        let mut current_sector = sector;
+        let mut buffer: Vec<u8> = Vec::with_capacity(count_bytes);
 
-        let Some(bytes) = floppy_image.bytes.get(offset..offset + count_bytes) else {
-            return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
-        };
+        // For each sector...
+        for _ in 0..count_bytes / 512 {
+            let offset = floppy_image
+                .geometry
+                .byte_offset(
+                    cylinder as usize,
+                    current_head as usize,
+                    current_sector as usize,
+                )
+                .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
 
-        // TODO: Support multi-track reads from head 0 to head 1
-        let sectors_read = count_bytes / 512;
-        let last_sector = (usize::from(sector) + sectors_read - 1) as u8;
-        if last_sector > end_sector || last_sector > floppy_image.geometry.sectors_per_track as u8 {
-            return Err(MachineError::DiskError(
-                "Disk read attempted beyond end of disk".to_string(),
-            ));
+            let Some(bytes) = floppy_image.bytes.get(offset..offset + 512) else {
+                return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
+            };
+
+            buffer.extend_from_slice(bytes);
+
+            if buffer.len() == count_bytes {
+                break;
+            }
+
+            if current_sector != end_sector {
+                // Not yet at end of track
+                current_sector = current_sector.wrapping_add(1);
+            } else if current_sector == end_sector && multi_track && current_head == 0 {
+                // At end of track, multi-track enabled, and we're on the first head
+                current_head = 1;
+                current_sector = 1;
+            } else if current_sector == end_sector {
+                return Err(MachineError::DiskError(
+                    "Cannot read past end of track without multi-track".to_string(),
+                ));
+            }
         }
 
+        // Write buffer to DMA-requested memory address
         let validated_buffer =
             validate_buffer(&mut self.memory, PhysAddr::from_u32(dest_addr), count_bytes)?;
-        write_buffer(validated_buffer, bytes)?;
+        write_buffer(validated_buffer, &buffer)?;
 
         self.dma.complete_transfer(count_bytes as u16);
 
         // Construct position after transfer
-        let multi_track = read_request.command & 0x80 != 0;
-        let reached_end_of_track = last_sector == end_sector;
+        let reached_end_of_track = current_sector == end_sector;
         let (result_cylinder, result_head, result_sector) =
-            match (reached_end_of_track, multi_track, head) {
+            match (reached_end_of_track, multi_track, current_head) {
                 // Continue within current track
-                (false, _, _) => (cylinder, head, last_sector + 1),
+                (false, _, _) => (cylinder, current_head, current_sector + 1),
                 // Continue onto head 1 of this cylinder
                 (true, true, 0) => (cylinder, 1, 1),
                 // Finished the last head
                 (true, true, _) => (cylinder + 1, 0, 1),
                 // Single-track mode: go to next cylinder on current head
-                (true, false, _) => (cylinder + 1, head, 1),
+                (true, false, _) => (cylinder + 1, current_head, 1),
             };
 
         let results = [
-            drive | (result_head << 2), // ST0: Normal completion,
-            00,                         // ST1: no errors
-            00,                         // ST2: no errors
+            drive | (current_head << 2), // ST0: Normal completion,
+            00,                          // ST1: no errors
+            00,                          // ST2: no errors
             result_cylinder,
             result_head,
             result_sector,
