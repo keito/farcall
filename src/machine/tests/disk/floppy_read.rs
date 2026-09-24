@@ -134,6 +134,22 @@ fn result_coordinates_follow_terminal_count_and_eot_on_either_head() {
 }
 
 #[test]
+fn starting_above_eot_reads_consecutive_sectors_until_dma_finishes() {
+    // EOT=5 is never encountered when reading sectors 6 and 7. DMA ends
+    // the transfer; neither repeating sector 6 nor switching heads is correct.
+    for multi_track in [false, true] {
+        expect_read(
+            multi_track,
+            [5, 0, 6],
+            5,
+            &[95, 96],
+            [5, 0, 8, 2],
+            DESTINATION,
+        );
+    }
+}
+
+#[test]
 fn selected_drive_supplies_the_data_and_result_unit() {
     let image_a = disk_image(360 * 1024);
     let image_b: Vec<u8> = image_a.iter().map(|byte| byte ^ 0xFF).collect();
