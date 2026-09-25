@@ -144,7 +144,10 @@ impl Machine {
             tick_remainder: 0,
             verbosity,
         };
-        machine.cga_video.clear(&mut machine.memory)?;
+
+        if let Some(bios) = machine.bios.as_mut() {
+            bios.initialize(&mut machine.memory, &mut machine.cga_video)?;
+        }
 
         match boot_mode {
             BootMode::Com { program } => {

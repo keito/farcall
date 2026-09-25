@@ -48,7 +48,7 @@ impl CgaVideo {
             cursor_row: 0,
             cursor_write_selector: None,
             end_scan_line: 7,
-            mode: 0x29, // Default to 80-column text, video enabled, blinking
+            mode: 0,
             start_scan_line: 6,
             status: 0,
         }
@@ -98,12 +98,26 @@ impl CgaVideo {
         self.cursor_address = (self.cursor_row * NUM_COLUMNS + self.cursor_column) as u16;
     }
 
-    /// Used by BIOS emulation to clear video memory
-    pub(super) fn clear(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
+    /// Used by BIOS emulation to clear video memory in text mode
+    pub(super) fn clear_text(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
         // fill all 2000 cells with a space and attribute 0x07 (light grey on black)
         for i in 0..NUM_COLUMNS * NUM_ROWS {
             memory[VIDEO_ADDR_BASE + 2 * i] = 0x20;
             memory[VIDEO_ADDR_BASE + 2 * i + 1] = 0x07;
+        }
+
+        // reset the cursor
+        self.cursor_column = 0;
+        self.cursor_row = 0;
+        self.sync_cursor_address();
+        Ok(())
+    }
+
+    /// Used by BIOS emulation to clear video memory in graphics mode
+    pub(super) fn clear_graphics(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
+        // fill all of video memory with 0s
+        for i in 0..16384 {
+            memory[VIDEO_ADDR_BASE + i] = 0;
         }
 
         // reset the cursor

@@ -11,6 +11,7 @@ use crate::{
 
 pub(super) struct Bios {
     boot_time: Instant,
+    graphics_mode: u8,
     pending_keyboard_read: bool,
 }
 
@@ -18,13 +19,60 @@ impl Bios {
     pub(super) fn new() -> Self {
         Self {
             boot_time: Instant::now(),
+            graphics_mode: 0x3,
             pending_keyboard_read: false,
         }
     }
 
+    pub(super) fn initialize(
+        &mut self,
+        memory: &mut [u8],
+        video: &mut CgaVideo,
+    ) -> Result<(), BiosError> {
+        self.set_video_mode(memory, video, 0x03)?;
+        Ok(())
+    }
+
+    fn set_video_mode(
+        &mut self,
+        memory: &mut [u8],
+        video: &mut CgaVideo,
+        mode: u8,
+    ) -> Result<(), BiosError> {
+        self.graphics_mode = mode;
+        match mode {
+            0x03 => {
+                // 80-column color text
+                video.write(0x3D8, 0x29); // Mode
+                video.write(0x3D9, 0x0); // Color Control
+                video.clear_text(memory)?;
+                video.set_scan_lines(6, 7);
+            }
+            0x04 => {
+                // 320x200 graphics
+                video.write(0x3D8, 0x2A); // Mode
+                video.write(0x3D9, 0x30); // Color Control
+                video.clear_graphics(memory)?;
+            }
+            0x05 => {
+                // 320x200 graphics, alternate palette
+                video.write(0x3D8, 0x2E); // Mode
+                video.write(0x3D9, 0x30); // Color Control
+                video.clear_graphics(memory)?;
+            }
+            _ => {
+                return Err(BiosError::VideoServiceError(format!(
+                    "Mode {:#02}h not supported",
+                    self.graphics_mode
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Emulates the Video Service (INT 10h)
     pub(super) fn video_service(
-        &self,
+        &mut self,
         cpu: &mut Cpu,
         memory: &mut [u8],
         video: &mut CgaVideo,
@@ -33,15 +81,7 @@ impl Bios {
         match op {
             // Set video mode
             0x00 => {
-                let mode = cpu.get_reg(Reg8::Al);
-                if mode != 0x03 {
-                    return Err(BiosError::VideoServiceError(format!(
-                        "Mode {:#02}h not supported",
-                        mode
-                    )));
-                }
-                video.clear(memory)?;
-                video.set_scan_lines(6, 7);
+                self.set_video_mode(memory, video, cpu.get_reg(Reg8::Al))?;
                 Ok(InterruptResult::ResumeExecution)
             }
             // Set text cursor shape
@@ -91,8 +131,16 @@ impl Bios {
             }
             // Get current video mode
             0x0F => {
-                cpu.set_reg(Reg8::Al, 0x3); // 80x25 color text mode
-                cpu.set_reg(Reg8::Ah, 80); // 80 columns in decimal
+                cpu.set_reg(Reg8::Al, self.graphics_mode);
+                // Number of columns in characters
+                cpu.set_reg(
+                    Reg8::Ah,
+                    match self.graphics_mode {
+                        0x03 => 80,
+                        0x04 | 0x05 => 40, // 320 / 8 (because 8 pixel wide chars
+                        _ => unreachable!("Mode not supported"),
+                    },
+                );
                 cpu.set_reg(Reg8::Bh, 0); // active display page
                 Ok(InterruptResult::ResumeExecution)
             }

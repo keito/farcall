@@ -4,8 +4,10 @@ const VIDEO_BASE: usize = 0xB8000;
 
 fn setup() -> (CgaVideo, Vec<u8>) {
     let mut video = CgaVideo::new();
+    // These tests bypass BIOS initialization, so enable 80-column text mode.
+    video.write(0x3D8, 0x29);
     let mut memory = vec![0; 0x100000];
-    video.clear(&mut memory).unwrap();
+    video.clear_text(&mut memory).unwrap();
     (video, memory)
 }
 
@@ -172,7 +174,7 @@ fn clear_resets_both_cursor_positions_and_screen() {
     video.write_char(&mut memory, b'A').unwrap();
     write_register(&mut video, 0x0E, 1);
     write_register(&mut video, 0x0F, 0x34);
-    video.clear(&mut memory).unwrap();
+    video.clear_text(&mut memory).unwrap();
     assert_eq!(video.get_cursor(), (0, 0));
     assert_eq!(video.cursor_address, 0);
     for cell in memory[VIDEO_BASE..VIDEO_BASE + 4000].chunks_exact(2) {

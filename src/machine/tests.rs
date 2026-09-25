@@ -346,7 +346,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     machine.cpu.flags = 0x0243;
     // INT 21h; MOV BX,BEEFh. The MOV must wait until the read finishes.
     machine.memory[0x10100..0x10105].copy_from_slice(&[0xCD, 0x21, 0xBB, 0xEF, 0xBE]);
-    machine.cga_video.clear(&mut machine.memory).unwrap();
+    machine.cga_video.clear_text(&mut machine.memory).unwrap();
     machine
 }
 
