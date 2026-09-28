@@ -14,9 +14,7 @@ pub(crate) fn encode_image(
             let source_x = x * width / display_width;
             let source_y = y * height / display_height;
             let source_offset = (source_y * width + source_x) * 3;
-            new_pixels.push(pixels[source_offset]);
-            new_pixels.push(pixels[source_offset + 1]);
-            new_pixels.push(pixels[source_offset + 2]);
+            new_pixels.extend_from_slice(&pixels[source_offset..source_offset + 3]);
         }
     }
 

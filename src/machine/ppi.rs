@@ -51,9 +51,13 @@ impl Ppi {
         }
     }
 
+    pub(super) fn can_receive_scan_code(&self) -> bool {
+        self.keyboard_scan_code.is_none() && self.port_b & 0x80 == 0 && self.port_b & 0x40 != 0
+    }
+
     pub(super) fn try_receive_scan_code(&mut self, scan_code: u8) -> bool {
         // Make sure we can accept a scan code
-        if self.keyboard_scan_code.is_some() || self.port_b & 0x80 != 0 || self.port_b & 0x40 == 0 {
+        if !self.can_receive_scan_code() {
             return false;
         }
 

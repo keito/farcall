@@ -288,12 +288,33 @@ impl Machine {
         self.advance_devices();
 
         if self.keyboard_input_mode == KeyboardInputMode::PcHardware {
-            if let Some(scan_code) = self.pc_keyboard.peek() {
-                if self.ppi.try_receive_scan_code(scan_code) {
-                    self.pc_keyboard.pop_front();
+            let ppi_ready = self.ppi.can_receive_scan_code();
+            let scan_code = self.pc_keyboard.peek();
+
+            // Very roughly models transfer speed for the keyboard
+            if !ppi_ready {
+                // PPI is not ready; reset any transfer countdown in progress
+                self.pc_keyboard.reset_transfer_countdown();
+            } else {
+                // PPI is ready; could accept a transfer.
+                // Do we already have a transfer to go?
+                if let Some(scan_code) = scan_code {
+                    // Advance the countdown
+                    self.pc_keyboard.advance_countdown();
+
+                    // Is the transfer ready?
+                    if self.pc_keyboard.is_transfer_ready() {
+                        if self.ppi.try_receive_scan_code(scan_code) {
+                            self.pc_keyboard.pop_front();
+                            self.pc_keyboard.reset_transfer_countdown();
+                        }
+                        // Synchronize PIC with PPI
+                        self.pic.set_irq_line(1, self.ppi.irq_output());
+                    }
+                } else {
+                    // There is no transfer to go, so reset the transfer countdown
+                    self.pc_keyboard.reset_transfer_countdown();
                 }
-                // Synchronize PIC with PPI
-                self.pic.set_irq_line(1, self.ppi.irq_output());
             }
         }
 
