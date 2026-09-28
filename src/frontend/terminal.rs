@@ -20,7 +20,7 @@ mod guard;
 mod keyboard;
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
-const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
+const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
