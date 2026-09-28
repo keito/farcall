@@ -1,13 +1,5 @@
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-pub(crate) fn image_testings() -> Vec<String> {
-    let pixels: Vec<u8> = [
-        0xFF, 0x55, 0x00, 0x00, 0xAA, 0x00, 0x00, 0x55, 0xFF, 0xAA, 0x00, 0x00,
-    ]
-    .repeat(512);
-    encode_image(&pixels, 64, 32, 128, 32)
-}
-
 /// Encodes the given image pixels into a Vec of Kitty commands
 pub(crate) fn encode_image(
     pixels: &[u8],
@@ -29,8 +21,10 @@ pub(crate) fn encode_image(
                 // f is bits per pixel (3x8), s is width, v is height
                 // c is display columns, r is display rows
                 // m is whether there is more
+                // C=1 specifies no cursor movement
+                // i=86 is the image ID
                 format!(
-                    "\x1b_Ga=T,f=24,s={width},v={height},c={display_columns},r={display_rows},m={m};{chunk}\x1b\\"
+                    "\x1b_Gi=86,q=1,C=1,a=T,f=24,s={width},v={height},c={display_columns},r={display_rows},m={m};{chunk}\x1b\\"
                 )
             } else {
                 format!("\x1b_Gm={m};{chunk}\x1b\\")
