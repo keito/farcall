@@ -1,5 +1,4 @@
 use std::{
-    fs::File,
     io::{Write, stdout},
     time::{Duration, Instant},
 };
@@ -14,7 +13,9 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
-    let mut frame = [0u8; 640 * 200 * 3];
+    let mut current_frame = [0u8; 640 * 200 * 3];
+    let mut previous_frame = [0u8; 640 * 200 * 3];
+    let mut previous_size: (usize, usize) = (0, 0);
 
     let Ok(tty) = std::fs::File::open("/dev/tty") else {
         return Err(anyhow::anyhow!(
@@ -53,7 +54,23 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
             }
         }
 
-        render_frame(machine, &mut frame, &tty)?;
+        machine.render_video(&mut current_frame);
+
+        let winsize = tcgetwinsize(&tty)?;
+        let (display_columns, display_rows) = calc_display_size(winsize);
+
+        // Send new frame if different from previous frame
+        if current_frame != previous_frame || previous_size != (display_columns, display_rows) {
+            let data =
+                graphics::encode_image(&current_frame, 640, 200, display_columns, display_rows);
+            for line in data {
+                stdout().write_all(&line.as_bytes())?;
+            }
+            stdout().flush()?;
+
+            std::mem::swap(&mut current_frame, &mut previous_frame);
+            previous_size = (display_columns, display_rows);
+        }
 
         if let Some(code) = exit_code {
             return Ok(code);
@@ -62,22 +79,6 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
         let remaining = (frame_start + FRAME_INTERVAL).saturating_duration_since(Instant::now());
         std::thread::sleep(remaining);
     }
-}
-
-fn render_frame(machine: &Machine, frame: &mut [u8], tty: &File) -> anyhow::Result<()> {
-    machine.render_video(frame);
-
-    let winsize = tcgetwinsize(&tty)?;
-    let (display_columns, display_rows) = calc_display_size(winsize);
-
-    let data = graphics::encode_image(&frame, 640, 200, display_columns, display_rows);
-    for line in data {
-        stdout().write_all(&line.as_bytes())?;
-    }
-
-    stdout().flush()?;
-
-    Ok(())
 }
 
 fn calc_display_size(winsize: Winsize) -> (usize, usize) {
