@@ -1,81 +1,14 @@
-use std::fs::File;
+use super::TerminalGuard;
 
-use rustix::termios::{LocalModes, SpecialCodeIndex, Termios};
-use rustix::termios::{OptionalActions, tcgetattr, tcsetattr};
+use std::io::Read;
 
-pub(super) fn read_console_byte(&mut self, buf: &mut [u8]) -> Result<(), MachineError> {
-    let Some(ref mut terminal) = self.terminal else {
-        return Err(MachineError::TerminalError(
-            "Terminal not initialized".to_string(),
-        ));
-    };
-    let mut attrs = tcgetattr(&terminal.terminal).map_err(std::io::Error::from)?;
-    // Wait for at least one byte
-    attrs.special_codes[SpecialCodeIndex::VMIN] = 1;
-    tcsetattr(&terminal.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
-
-    terminal.terminal.read_exact(buf)?;
-    Ok(())
-}
-
-pub(super) fn try_read_console_byte(&mut self) -> Result<Option<u8>, MachineError> {
-    let Some(ref mut terminal) = self.terminal else {
-        return Err(MachineError::TerminalError(
-            "Terminal not initialized".to_string(),
-        ));
-    };
-    let mut attrs = tcgetattr(&terminal.terminal).map_err(std::io::Error::from)?;
-    // Don't wait for bytes
-    attrs.special_codes[SpecialCodeIndex::VMIN] = 0;
-    tcsetattr(&terminal.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
-
+pub(super) fn read_input_byte(guard: &mut TerminalGuard) -> Result<Option<u8>, anyhow::Error> {
     let mut buf = [0u8; 1];
-    let result = terminal.terminal.read(&mut buf)?;
+    let result = guard.terminal.read(&mut buf)?;
     if result == 0 {
         Ok(None)
     } else {
         Ok(Some(buf[0]))
-    }
-}
-
-pub(super) struct TerminalGuard {
-    terminal: File,
-    original_settings: Option<Termios>,
-}
-
-impl TerminalGuard {
-    pub(super) fn new() -> Result<Self, MachineError> {
-        // TODO: Add support for Windows
-        let mut guard = Self {
-            terminal: std::fs::File::open("/dev/tty")?,
-            original_settings: None,
-        };
-        let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
-        guard.original_settings = Some(attrs.clone());
-
-        // Deliver input without waiting for Enter
-        attrs.local_modes.remove(LocalModes::ICANON);
-        // DOS service handles echoing
-        attrs.local_modes.remove(LocalModes::ECHO);
-        attrs.local_modes.remove(LocalModes::ECHONL);
-
-        attrs.special_codes[SpecialCodeIndex::VTIME] = 0;
-
-        tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
-        Ok(guard)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        // Restore saved terminal settings on drop
-        if let Some(settings) = &self.original_settings {
-            let result = tcsetattr(&self.terminal, OptionalActions::Now, settings)
-                .map_err(std::io::Error::from);
-            if let Err(err) = result {
-                eprintln!("Failed to restore terminal settings: {}", err);
-            }
-        }
     }
 }
 

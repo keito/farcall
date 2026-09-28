@@ -5,23 +5,23 @@ use std::{
 
 use rustix::termios::{Winsize, tcgetwinsize};
 
-use crate::machine::{Machine, MachineStepResult};
+use crate::machine::{Machine, MachineStepResult, bios_keyboard::BiosKeyStroke};
+use guard::TerminalGuard;
+use keyboard::{read_input_byte, translate_key};
 
 mod graphics;
+mod guard;
+mod keyboard;
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
+    let mut guard = TerminalGuard::new()?;
+
     let mut current_frame = [0u8; 640 * 200 * 3];
     let mut previous_frame = [0u8; 640 * 200 * 3];
     let mut previous_size: (usize, usize) = (0, 0);
-
-    let Ok(tty) = std::fs::File::open("/dev/tty") else {
-        return Err(anyhow::anyhow!(
-            "This program requires an interactive terminal."
-        ));
-    };
 
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
@@ -33,16 +33,31 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
         let frame_start = Instant::now();
         let execution_deadline = frame_start + EXECUTION_BUDGET;
 
+        for _ in 0..16 {
+            if let Some(byte) = read_input_byte(&mut guard)? {
+                if byte == 0x03 {
+                    // Ctrl-C was pressed
+                    return Ok(255);
+                }
+                if let Some((ascii, scan_code)) = translate_key(byte) {
+                    let keystroke = BiosKeyStroke {
+                        ascii: Some(ascii),
+                        scan_code,
+                    };
+                    machine.enqueue_bios_keystroke(keystroke);
+                }
+            } else {
+                // Break out of input loop if no keys to read
+                break;
+            }
+        }
+
         // Step until exit or execution deadline is reached
         loop {
             let result = machine.step()?;
             match result {
-                MachineStepResult::Continue => {}
-                MachineStepResult::WaitingForInput => {
-                    return Err(anyhow::anyhow!(
-                        "Waiting for input is not supported in terminal mode"
-                    ));
-                }
+                MachineStepResult::Continue => (),
+                MachineStepResult::WaitingForInput => break,
                 MachineStepResult::Exit(code) => {
                     exit_code = Some(code);
                     break;
@@ -56,7 +71,7 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
 
         machine.render_video(&mut current_frame);
 
-        let winsize = tcgetwinsize(&tty)?;
+        let winsize = tcgetwinsize(&guard.terminal)?;
         let (display_columns, display_rows) = calc_display_size(winsize);
 
         // Send new frame if different from previous frame
