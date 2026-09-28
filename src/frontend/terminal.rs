@@ -1,10 +1,17 @@
-use std::io::{Write, stdout};
+use std::{
+    fs::File,
+    io::{Write, stdout},
+    time::{Duration, Instant},
+};
 
 use rustix::termios::{Winsize, tcgetwinsize};
 
 use crate::machine::{Machine, MachineStepResult};
 
 mod graphics;
+
+const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
+const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     let mut frame = [0u8; 640 * 200 * 3];
@@ -18,32 +25,59 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
 
+    let mut exit_code: Option<u8> = None;
+
+    // Render each frame, at FRAME_INTERVAL
     loop {
-        let result = machine.step()?;
-        match result {
-            MachineStepResult::Continue => {}
-            MachineStepResult::WaitingForInput => {
-                return Err(anyhow::anyhow!(
-                    "Waiting for input is not supported in terminal mode"
-                ));
+        let frame_start = Instant::now();
+        let execution_deadline = frame_start + EXECUTION_BUDGET;
+
+        // Step until exit or execution deadline is reached
+        loop {
+            let result = machine.step()?;
+            match result {
+                MachineStepResult::Continue => {}
+                MachineStepResult::WaitingForInput => {
+                    return Err(anyhow::anyhow!(
+                        "Waiting for input is not supported in terminal mode"
+                    ));
+                }
+                MachineStepResult::Exit(code) => {
+                    exit_code = Some(code);
+                    break;
+                }
             }
-            MachineStepResult::Exit(code) => {
-                return Ok(code);
+
+            if execution_deadline < Instant::now() {
+                break;
             }
         }
 
-        machine.render_video(&mut frame);
+        render_frame(machine, &mut frame, &tty)?;
 
-        let winsize = tcgetwinsize(&tty)?;
-        let (display_columns, display_rows) = calc_display_size(winsize);
-
-        let data = graphics::encode_image(&frame, 640, 200, display_columns, display_rows);
-        for line in data {
-            stdout().write_all(&line.as_bytes())?;
+        if let Some(code) = exit_code {
+            return Ok(code);
         }
 
-        stdout().flush()?;
+        let remaining = (frame_start + FRAME_INTERVAL).saturating_duration_since(Instant::now());
+        std::thread::sleep(remaining);
     }
+}
+
+fn render_frame(machine: &Machine, frame: &mut [u8], tty: &File) -> anyhow::Result<()> {
+    machine.render_video(frame);
+
+    let winsize = tcgetwinsize(&tty)?;
+    let (display_columns, display_rows) = calc_display_size(winsize);
+
+    let data = graphics::encode_image(&frame, 640, 200, display_columns, display_rows);
+    for line in data {
+        stdout().write_all(&line.as_bytes())?;
+    }
+
+    stdout().flush()?;
+
+    Ok(())
 }
 
 fn calc_display_size(winsize: Winsize) -> (usize, usize) {
