@@ -3,11 +3,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crossterm::event::{self, KeyCode, KeyModifiers};
 use rustix::termios::{Winsize, tcgetwinsize};
 
-use crate::machine::{Machine, MachineStepResult, bios_keyboard::BiosKeyStroke};
+use crate::{
+    frontend::terminal::keyboard::{crossterm_to_bios_keystroke, crossterm_to_pc_scan_code},
+    machine::{
+        KeyboardInputMode::{BiosKeystrokes, PcHardware},
+        Machine, MachineStepResult,
+    },
+};
 use guard::TerminalGuard;
-use keyboard::{read_input_byte, translate_key};
 
 mod graphics;
 mod guard;
@@ -17,7 +23,7 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
-    let mut guard = TerminalGuard::new()?;
+    let guard = TerminalGuard::new()?;
 
     let mut current_frame = [0u8; 640 * 200 * 3];
     let mut previous_frame = [0u8; 640 * 200 * 3];
@@ -34,20 +40,34 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
         let execution_deadline = frame_start + EXECUTION_BUDGET;
 
         for _ in 0..16 {
-            if let Some(byte) = read_input_byte(&mut guard)? {
-                if byte == 0x03 {
-                    // Ctrl-C was pressed
-                    return Ok(255);
-                }
-                if let Some((ascii, scan_code)) = translate_key(byte) {
-                    let keystroke = BiosKeyStroke {
-                        ascii: Some(ascii),
-                        scan_code,
-                    };
-                    machine.enqueue_bios_keystroke(keystroke);
+            if event::poll(Duration::ZERO)? {
+                let event = event::read()?;
+                if let event::Event::Key(key_event) = event {
+                    // Handle Ctrl-C
+                    if key_event.code == KeyCode::Char('c')
+                        && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                        && key_event.is_press()
+                    {
+                        return Ok(255);
+                    }
+
+                    match machine.keyboard_input_mode() {
+                        BiosKeystrokes => {
+                            if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
+                                machine.enqueue_bios_keystroke(keystroke);
+                            }
+                        }
+                        PcHardware => {
+                            if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
+                                machine.enqueue_pc_keyboard_event(
+                                    scan_code,
+                                    key_event.is_press() || key_event.is_repeat(),
+                                );
+                            }
+                        }
+                    }
                 }
             } else {
-                // Break out of input loop if no keys to read
                 break;
             }
         }

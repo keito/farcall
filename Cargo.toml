@@ -7,6 +7,7 @@ edition = "2024"
 anyhow = "1.0.104"
 base64 = { version = "0.23.1", optional = true }
 clap = { version = "4.6.7", features = ["derive"] }
+crossterm = { version = "0.29", optional = true, default-features = false, features = ["events"] }
 pixels = { version = "0.17.2", optional = true }
 rustix = { version = "1.1.4", optional = true, features = ["termios"] }
 thiserror = "2.0.20"
@@ -14,5 +15,5 @@ winit = { version = "0.30", optional = true }
 
 [features]
 default = ["window"]
-terminal = ["dep:base64", "dep:rustix",]
-window = ["dep:pixels", "dep:winit",]
+terminal = ["dep:base64", "dep:rustix", "dep:crossterm"]
+window = ["dep:pixels", "dep:winit"]

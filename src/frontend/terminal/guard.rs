@@ -1,5 +1,8 @@
 use std::fs::File;
 
+use crossterm::event::{
+    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use rustix::termios::{OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
 
 pub(super) struct TerminalGuard {
@@ -31,6 +34,17 @@ impl TerminalGuard {
         attrs.special_codes[SpecialCodeIndex::VMIN] = 0;
 
         tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
+
+        // Enable Kitty keyboard input
+        crossterm::execute!(
+            std::io::stdout(),
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+            )
+        )?;
+
         Ok(guard)
     }
 }
@@ -44,6 +58,11 @@ impl Drop for TerminalGuard {
             if let Err(err) = result {
                 eprintln!("Failed to restore terminal settings: {}", err);
             }
+        }
+
+        // Pop Kitty keyboard input flags
+        if let Err(err) = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags) {
+            eprintln!("Failed to restore keyboard enhancement flags: {}", err);
         }
     }
 }
