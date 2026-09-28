@@ -92,19 +92,23 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
         machine.render_video(&mut current_frame);
 
         let winsize = tcgetwinsize(&guard.terminal)?;
-        let (display_columns, display_rows) = calc_display_size(winsize);
+        let (display_width, display_height) = calc_display_size(winsize);
 
         // Send new frame if different from previous frame
-        if current_frame != previous_frame || previous_size != (display_columns, display_rows) {
+        if current_frame != previous_frame || previous_size != (display_width, display_height) {
+            if display_width == 0 || display_height == 0 {
+                anyhow::bail!("Terminal reports zero dimensions");
+            }
+
             let data =
-                graphics::encode_image(&current_frame, 640, 200, display_columns, display_rows);
+                graphics::encode_image(&current_frame, 640, 200, display_width, display_height)?;
             for line in data {
                 stdout().write_all(&line.as_bytes())?;
             }
             stdout().flush()?;
 
             std::mem::swap(&mut current_frame, &mut previous_frame);
-            previous_size = (display_columns, display_rows);
+            previous_size = (display_width, display_height);
         }
 
         if let Some(code) = exit_code {
@@ -117,19 +121,11 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
 }
 
 fn calc_display_size(winsize: Winsize) -> (usize, usize) {
-    let columns = f64::from(winsize.ws_col);
-    let rows = f64::from(winsize.ws_row);
     let width_px = f64::from(winsize.ws_xpixel);
     let height_px = f64::from(winsize.ws_ypixel);
-
-    let cell_width = width_px / columns;
-    let cell_height = height_px / rows;
 
     let image_width = width_px.min(height_px * (4.0 / 3.0));
     let image_height = image_width * (3.0 / 4.0);
 
-    let columns = (image_width / cell_width) as usize;
-    let rows = (image_height / cell_height) as usize;
-
-    (columns, rows)
+    (image_width as usize, image_height as usize)
 }
