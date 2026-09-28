@@ -42,35 +42,34 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
 
         // Poll input
         for _ in 0..16 {
-            if event::poll(Duration::ZERO)? {
-                let event = event::read()?;
-                if let event::Event::Key(key_event) = event {
-                    // Handle Ctrl-]
-                    if key_event.code == KeyCode::Char(']')
-                        && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                        && key_event.is_press()
-                    {
-                        return Ok(0);
-                    }
+            if !event::poll(Duration::ZERO)? {
+                break;
+            }
+            let event = event::read()?;
+            if let event::Event::Key(key_event) = event {
+                // Handle Ctrl-]
+                if key_event.code == KeyCode::Char(']')
+                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
+                    && key_event.is_press()
+                {
+                    return Ok(0);
+                }
 
-                    match machine.keyboard_input_mode() {
-                        BiosKeystrokes => {
-                            if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
-                                machine.enqueue_bios_keystroke(keystroke);
-                            }
+                match machine.keyboard_input_mode() {
+                    BiosKeystrokes => {
+                        if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
+                            machine.enqueue_bios_keystroke(keystroke);
                         }
-                        PcHardware => {
-                            if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
-                                machine.enqueue_pc_keyboard_event(
-                                    scan_code,
-                                    key_event.is_press() || key_event.is_repeat(),
-                                );
-                            }
+                    }
+                    PcHardware => {
+                        if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
+                            machine.enqueue_pc_keyboard_event(
+                                scan_code,
+                                key_event.is_press() || key_event.is_repeat(),
+                            );
                         }
                     }
                 }
-            } else {
-                break;
             }
         }
 
