@@ -33,12 +33,14 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     stdout().write_all(b"\x1b[H")?;
 
     let mut exit_code: Option<u8> = None;
+    let mut next_frame = Instant::now();
 
     // Render each frame, at FRAME_INTERVAL
     loop {
         let frame_start = Instant::now();
         let execution_deadline = frame_start + EXECUTION_BUDGET;
 
+        // Poll input
         for _ in 0..16 {
             if event::poll(Duration::ZERO)? {
                 let event = event::read()?;
@@ -89,34 +91,43 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
             }
         }
 
-        machine.render_video(&mut current_frame);
+        // Is the next frame due? (or is this our last frame)
+        if Instant::now() >= next_frame || exit_code.is_some() {
+            machine.render_video(&mut current_frame);
 
-        let winsize = tcgetwinsize(&guard.terminal)?;
-        let (display_width, display_height) = calc_display_size(winsize);
+            let winsize = tcgetwinsize(&guard.terminal)?;
+            let (display_width, display_height) = calc_display_size(winsize);
 
-        // Send new frame if different from previous frame
-        if current_frame != previous_frame || previous_size != (display_width, display_height) {
-            if display_width == 0 || display_height == 0 {
-                anyhow::bail!("Terminal reports zero dimensions");
+            // Send new frame if different from previous frame
+            if current_frame != previous_frame || previous_size != (display_width, display_height) {
+                if display_width == 0 || display_height == 0 {
+                    anyhow::bail!("Terminal reports zero dimensions");
+                }
+
+                let data = graphics::encode_image(
+                    &current_frame,
+                    640,
+                    200,
+                    display_width,
+                    display_height,
+                )?;
+                for line in data {
+                    stdout().write_all(&line.as_bytes())?;
+                }
+                stdout().flush()?;
+
+                std::mem::swap(&mut current_frame, &mut previous_frame);
+                previous_size = (display_width, display_height);
             }
 
-            let data =
-                graphics::encode_image(&current_frame, 640, 200, display_width, display_height)?;
-            for line in data {
-                stdout().write_all(&line.as_bytes())?;
-            }
-            stdout().flush()?;
-
-            std::mem::swap(&mut current_frame, &mut previous_frame);
-            previous_size = (display_width, display_height);
+            next_frame = Instant::now() + FRAME_INTERVAL;
         }
 
         if let Some(code) = exit_code {
             return Ok(code);
         }
 
-        let remaining = (frame_start + FRAME_INTERVAL).saturating_duration_since(Instant::now());
-        std::thread::sleep(remaining);
+        std::thread::sleep(Duration::from_millis(1));
     }
 }
 
