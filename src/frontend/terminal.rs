@@ -43,12 +43,12 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
             if event::poll(Duration::ZERO)? {
                 let event = event::read()?;
                 if let event::Event::Key(key_event) = event {
-                    // Handle Ctrl-C
-                    if key_event.code == KeyCode::Char('c')
+                    // Handle Ctrl-]
+                    if key_event.code == KeyCode::Char(']')
                         && key_event.modifiers.contains(KeyModifiers::CONTROL)
                         && key_event.is_press()
                     {
-                        return Ok(255);
+                        return Ok(0);
                     }
 
                     match machine.keyboard_input_mode() {

@@ -1,7 +1,9 @@
-use std::fs::File;
+use std::{fs::File, io::Write};
 
-use crossterm::event::{
-    KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+use crossterm::{
+    cursor,
+    event::{KeyboardEnhancementFlags, PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen},
 };
 use rustix::termios::{OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
 
@@ -38,6 +40,8 @@ impl TerminalGuard {
         // Enable Kitty keyboard input
         crossterm::execute!(
             std::io::stdout(),
+            EnterAlternateScreen,
+            cursor::Hide,
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
@@ -51,18 +55,27 @@ impl TerminalGuard {
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        // Restore saved terminal settings on drop
-        if let Some(settings) = &self.original_settings {
-            let result = tcsetattr(&self.terminal, OptionalActions::Now, settings)
-                .map_err(std::io::Error::from);
-            if let Err(err) = result {
-                eprintln!("Failed to restore terminal settings: {}", err);
-            }
+        // Delete Kitty image
+        let mut output = std::io::stdout();
+        if let Err(err) = output.write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
+            eprintln!("Failed to restore terminal: {}", err);
         }
 
         // Pop Kitty keyboard input flags
-        if let Err(err) = crossterm::execute!(std::io::stdout(), PopKeyboardEnhancementFlags) {
-            eprintln!("Failed to restore keyboard enhancement flags: {}", err);
+        if let Err(err) = crossterm::execute!(
+            std::io::stdout(),
+            PopKeyboardEnhancementFlags,
+            cursor::Show,
+            LeaveAlternateScreen
+        ) {
+            eprintln!("Failed to crossterm::execute!: {}", err);
+        }
+
+        // Restore saved terminal settings
+        if let Some(settings) = &self.original_settings {
+            if let Err(err) = tcsetattr(&self.terminal, OptionalActions::Now, settings) {
+                eprintln!("Failed to restore terminal settings: {}", err);
+            }
         }
     }
 }
