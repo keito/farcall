@@ -8,7 +8,7 @@ const NUM_ROWS: usize = 25;
 const VIDEO_ADDR_BASE: usize = 0xB8000;
 const GLYPH_WIDTH: usize = 8;
 const GLYPH_HEIGHT: usize = 8;
-const BYTES_PER_PIXEL: usize = 4;
+const BYTES_PER_PIXEL: usize = 3;
 
 pub(super) struct CgaVideo {
     /// Color Control Register
@@ -205,7 +205,7 @@ impl CgaVideo {
                 (0, 0, 0)
             };
             for pixel in frame.chunks_exact_mut(BYTES_PER_PIXEL) {
-                pixel.copy_from_slice(&[red, green, blue, 0xFF]);
+                pixel.copy_from_slice(&[red, green, blue]);
             }
             return;
         }
@@ -355,5 +355,4 @@ fn set_cell_color(frame: &mut [u8], offset: usize, red: u8, green: u8, blue: u8)
     frame[offset] = red;
     frame[offset + 1] = green;
     frame[offset + 2] = blue;
-    frame[offset + 3] = 0xFF;
 }

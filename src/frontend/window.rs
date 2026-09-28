@@ -21,14 +21,15 @@ mod cga_renderer;
 mod keyboard;
 
 pub struct App {
-    machine: Machine,
-    window: Option<Arc<Window>>,
-    pixels: Option<Pixels<'static>>,
-    error: Option<anyhow::Error>,
-    next_frame: Instant,
-    exit_code: Option<u8>,
-    modifier_state: ModifierState,
     cga_renderer: Option<CgaRenderer>,
+    error: Option<anyhow::Error>,
+    exit_code: Option<u8>,
+    machine: Machine,
+    modifier_state: ModifierState,
+    next_frame: Instant,
+    pixels: Option<Pixels<'static>>,
+    rgb_frame: Box<[u8]>,
+    window: Option<Arc<Window>>,
 }
 
 const WIDTH: u32 = 640;
@@ -119,7 +120,18 @@ impl ApplicationHandler for App {
                 }
                 window.pre_present_notify();
                 let pixels = self.pixels.as_mut().unwrap();
-                self.machine.render_video(pixels.frame_mut());
+
+                // Render temporarily into memory and convert RGB to RGBA
+                self.machine.render_video(&mut self.rgb_frame);
+                for (rgb, rgba) in self
+                    .rgb_frame
+                    .chunks_exact(3)
+                    .zip(pixels.frame_mut().chunks_exact_mut(4))
+                {
+                    rgba[..3].copy_from_slice(rgb);
+                    rgba[3] = 255;
+                }
+
                 if let Err(error) = pixels.render_with(|encoder, render_target, _context| {
                     let margin = (12.0 * window.scale_factor()) as f32;
                     self.cga_renderer.as_ref().unwrap().render(
@@ -200,6 +212,7 @@ pub(crate) fn run(machine: Machine) -> anyhow::Result<u8> {
             alt: false,
         },
         cga_renderer: None,
+        rgb_frame: vec![0; 640 * 200 * 3].into_boxed_slice(),
     };
     event_loop.run_app(&mut app)?;
     match app.error {
