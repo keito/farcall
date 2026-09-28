@@ -6,7 +6,12 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
-pixels = "0.17.2"
+pixels = { version = "0.17.2", optional = true }
 rustix = { version = "1.1.4", features = ["termios"] }
 thiserror = "2.0.20"
-winit = "0.30"
+winit = { version = "0.30", optional = true }
+
+[features]
+default = ["window"]
+terminal = []
+window = ["dep:pixels", "dep:winit",]

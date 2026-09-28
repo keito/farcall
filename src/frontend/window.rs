@@ -13,9 +13,12 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::frontend::keyboard::{ModifierState, winit_to_bios_key_stroke, winit_to_pc_scan_code};
-use crate::machine::{Machine, MachineStepResult};
-use crate::{frontend::cga_renderer::CgaRenderer, machine::KeyboardInputMode};
+use crate::machine::{KeyboardInputMode, Machine, MachineStepResult};
+use cga_renderer::CgaRenderer;
+use keyboard::{ModifierState, winit_to_bios_key_stroke, winit_to_pc_scan_code};
+
+mod cga_renderer;
+mod keyboard;
 
 pub struct App {
     machine: Machine,

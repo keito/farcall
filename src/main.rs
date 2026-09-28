@@ -3,6 +3,9 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::process;
 
+#[cfg(feature = "terminal")]
+use crate::frontend::terminal;
+#[cfg(feature = "window")]
 use crate::frontend::window;
 use crate::machine::DiskImageConfig;
 use crate::machine::{BootMode, DiskType, Machine};
@@ -12,6 +15,17 @@ mod frontend;
 mod machine;
 mod memory;
 mod registers;
+
+#[cfg(not(any(feature = "window", feature = "terminal")))]
+compile_error!("Enable at least one frontend feature: window or terminal");
+
+#[derive(Clone, clap::ValueEnum)]
+enum FrontendChoice {
+    #[cfg(feature = "terminal")]
+    Terminal,
+    #[cfg(feature = "window")]
+    Window,
+}
 
 #[derive(Parser)]
 #[command(group(
@@ -45,6 +59,10 @@ struct Cli {
     #[arg(long, requires = "floppy_a", conflicts_with = "com")]
     rom: Option<PathBuf>,
 
+    /// Which frontend to use
+    #[arg(long, value_enum)]
+    frontend: Option<FrontendChoice>,
+
     /// How much verbose debug output to print
     #[arg(short, long, default_value = "0", action = ArgAction::Count)]
     verbose: u8,
@@ -72,7 +90,22 @@ fn main() -> anyhow::Result<process::ExitCode> {
     };
 
     let machine = Machine::new(boot_mode, cli.verbose)?;
-    let exit_code = window::run(machine)?;
+
+    let exit_code = match &cli.frontend {
+        #[cfg(feature = "terminal")]
+        Some(FrontendChoice::Terminal) => terminal::run(machine)?,
+
+        #[cfg(feature = "window")]
+        Some(FrontendChoice::Window) => window::run(machine)?,
+
+        // Prioritize window if compiled in and not specified
+        #[cfg(feature = "window")]
+        None => window::run(machine)?,
+
+        // Fall back to terminal if window is not compiled in
+        #[cfg(all(feature = "terminal", not(feature = "window")))]
+        None => terminal::run(machine)?,
+    };
 
     Ok(exit_code.into())
 }
