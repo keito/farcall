@@ -89,11 +89,11 @@ fn main() -> anyhow::Result<process::ExitCode> {
         }
     };
 
-    let mut machine = Machine::new(boot_mode, cli.verbose)?;
+    let machine = Machine::new(boot_mode, cli.verbose)?;
 
     let exit_code = match &cli.frontend {
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::Terminal) => terminal::run(&mut machine)?,
+        Some(FrontendChoice::Terminal) => terminal::run(machine)?,
 
         #[cfg(feature = "window")]
         Some(FrontendChoice::Window) => window::run(machine)?,
@@ -104,7 +104,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
 
         // Fall back to terminal if window is not compiled in
         #[cfg(all(feature = "terminal", not(feature = "window")))]
-        None => terminal::run(&mut machine)?,
+        None => terminal::run(machine)?,
     };
 
     Ok(exit_code.into())

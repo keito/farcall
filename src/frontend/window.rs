@@ -30,14 +30,18 @@ pub struct App {
     pixels: Option<Pixels<'static>>,
     rgb_frame: Box<[u8]>,
     window: Option<Arc<Window>>,
+    pacing_start: Instant,
+    starting_cycles: u64,
 }
 
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 200;
 const CORRECTED_HEIGHT: u32 = 480;
 const WINDOW_TITLE: &str = "PC86";
+
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_700); // 60 Hz
-const EXECUTION_BUDGET: Duration = Duration::from_millis(2);
+const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
+const CPU_HZ: u64 = 4_772_727;
 
 impl App {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: anyhow::Error) {
@@ -71,6 +75,8 @@ impl ApplicationHandler for App {
                 self.window = Some(window.clone());
                 window.set_title(WINDOW_TITLE);
                 self.pixels = Some(pixels);
+                self.pacing_start = Instant::now();
+                self.starting_cycles = self.machine.total_elapsed_cycles();
             }
             Err(error) => {
                 self.fail(event_loop, error);
@@ -104,10 +110,23 @@ impl ApplicationHandler for App {
                     return;
                 }
                 let deadline = Instant::now() + EXECUTION_BUDGET;
-                while self.exit_code.is_none() && Instant::now() < deadline {
+
+                let target_cycles =
+                    self.pacing_start.elapsed().as_nanos() * u128::from(CPU_HZ) / 1_000_000_000;
+
+                // Step until exit, guest has caught up with real time, or execution deadline is reached
+                while self.exit_code.is_none()
+                    && u128::from(self.machine.total_elapsed_cycles() - self.starting_cycles)
+                        < target_cycles
+                    && Instant::now() < deadline
+                {
                     match self.machine.step() {
                         Ok(MachineStepResult::Continue) => {}
-                        Ok(MachineStepResult::WaitingForInput) => break,
+                        Ok(MachineStepResult::WaitingForInput) => {
+                            self.pacing_start = Instant::now();
+                            self.starting_cycles = self.machine.total_elapsed_cycles();
+                            break;
+                        }
                         Ok(MachineStepResult::Exit(exit_code)) => {
                             self.exit_code = Some(exit_code);
                             break;
@@ -213,6 +232,8 @@ pub(crate) fn run(machine: Machine) -> anyhow::Result<u8> {
         },
         cga_renderer: None,
         rgb_frame: vec![0; 640 * 200 * 3].into_boxed_slice(),
+        pacing_start: Instant::now(),
+        starting_cycles: 0,
     };
     event_loop.run_app(&mut app)?;
     match app.error {

@@ -23,7 +23,7 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
-pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
+pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
 
     let mut current_frame = [0u8; 640 * 200 * 3];
