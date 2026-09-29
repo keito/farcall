@@ -6,7 +6,6 @@ use crate::machine::{
     Pit, Ppi,
 };
 use crate::memory::MemoryError;
-use std::time::Instant;
 
 mod floppy_read;
 
@@ -75,8 +74,8 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         dos: None,
         fdc: Fdc::new(),
         floppy_images: [image.map(floppy_360kib), None],
-        last_step_time: Instant::now(),
-        tick_remainder: 0,
+        pit_cycle_remainder: 0,
+        total_elapsed_cycles: 0,
         verbosity: 0,
         load_mode: LoadMode::Boot,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,

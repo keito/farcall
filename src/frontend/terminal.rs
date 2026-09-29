@@ -21,6 +21,7 @@ mod keyboard;
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
+const CPU_HZ: u64 = 4_772_727;
 
 pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
@@ -34,6 +35,9 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
 
     let mut exit_code: Option<u8> = None;
     let mut next_frame = Instant::now();
+
+    let mut pacing_start = Instant::now();
+    let mut starting_cycles = machine.total_elapsed_cycles();
 
     // Render each frame, at FRAME_INTERVAL
     loop {
@@ -73,20 +77,24 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
             }
         }
 
-        // Step until exit or execution deadline is reached
-        loop {
+        let target_cycles = pacing_start.elapsed().as_nanos() * u128::from(CPU_HZ) / 1_000_000_000;
+
+        // Step until exit, guest has caught up with real time, or execution deadline is reached
+        while u128::from(machine.total_elapsed_cycles() - starting_cycles) < target_cycles
+            && Instant::now() < execution_deadline
+        {
             let result = machine.step()?;
             match result {
                 MachineStepResult::Continue => (),
-                MachineStepResult::WaitingForInput => break,
+                MachineStepResult::WaitingForInput => {
+                    pacing_start = Instant::now();
+                    starting_cycles = machine.total_elapsed_cycles();
+                    break;
+                }
                 MachineStepResult::Exit(code) => {
                     exit_code = Some(code);
                     break;
                 }
-            }
-
-            if execution_deadline < Instant::now() {
-                break;
             }
         }
 

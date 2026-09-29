@@ -4,7 +4,6 @@ use crate::machine::dos::Dos;
 use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 
 use super::{CgaVideo, Cpu, InterruptResult, LoadMode, Machine, MachineStepResult};
-use std::time::Instant;
 
 mod disk;
 
@@ -30,8 +29,8 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
                     dos: Some(Dos::new()),
                     fdc: Fdc::new(),
                     floppy_images: [None, None],
-                    last_step_time: Instant::now(),
-                    tick_remainder: 0,
+                    pit_cycle_remainder: 0,
+                    total_elapsed_cycles: 0,
                     verbosity: 0,
                     load_mode: LoadMode::Com,
                     keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
@@ -153,8 +152,8 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_images: [None, None],
-        last_step_time: Instant::now(),
-        tick_remainder: 0,
+        pit_cycle_remainder: 0,
+        total_elapsed_cycles: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
@@ -241,8 +240,8 @@ fn write_service_clears_only_carry() {
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_images: [None, None],
-        last_step_time: Instant::now(),
-        tick_remainder: 0,
+        pit_cycle_remainder: 0,
+        total_elapsed_cycles: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
@@ -288,8 +287,8 @@ fn dos_termination_returns_al_as_exit_code() {
             dos: Some(Dos::new()),
             fdc: Fdc::new(),
             floppy_images: [None, None],
-            last_step_time: Instant::now(),
-            tick_remainder: 0,
+            pit_cycle_remainder: 0,
+            total_elapsed_cycles: 0,
             verbosity: 0,
             load_mode: LoadMode::Com,
             keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
@@ -324,8 +323,8 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
         dos: Some(Dos::new()),
         fdc: Fdc::new(),
         floppy_images: [None, None],
-        last_step_time: Instant::now(),
-        tick_remainder: 0,
+        pit_cycle_remainder: 0,
+        total_elapsed_cycles: 0,
         verbosity: 0,
         load_mode: LoadMode::Com,
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,

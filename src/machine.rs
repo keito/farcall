@@ -1,7 +1,6 @@
 use core::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
@@ -48,17 +47,17 @@ pub struct Machine {
     fdc: Fdc,
     floppy_images: [Option<FloppyDisk>; 2],
     keyboard_input_mode: KeyboardInputMode,
-    last_step_time: Instant,
     load_mode: LoadMode,
     memory: Vec<u8>,
     pc_keyboard: PcKeyboard,
     pic: Pic,
     pit: Pit,
+    /// Fraction of a PIT tick remaining after a step
+    pit_cycle_remainder: u64,
     ppi: Ppi,
     /// Used to directly raise INT 09h when emulating a BIOS
     synthetic_int09_pending: bool,
-    /// Fraction of a PIT tick remaining after a step
-    tick_remainder: u128,
+    total_elapsed_cycles: u64,
     verbosity: u8,
 }
 
@@ -107,6 +106,8 @@ pub(crate) enum KeyboardInputMode {
     PcHardware,
 }
 
+const APPROXIMATE_CYCLES_PER_STEP: u32 = 4;
+
 impl Machine {
     pub fn new(boot_mode: BootMode, verbosity: u8) -> anyhow::Result<Self> {
         let memory_size = 0x100_000; // Physical memory: 1 MiB
@@ -133,15 +134,15 @@ impl Machine {
             } else {
                 KeyboardInputMode::BiosKeystrokes
             },
-            last_step_time: Instant::now(),
             load_mode,
             memory: vec![0; memory_size],
             pc_keyboard: PcKeyboard::new(),
             pic: Pic::new(),
             pit: Pit::new(),
+            pit_cycle_remainder: 0,
             ppi: Ppi::new(),
             synthetic_int09_pending: false,
-            tick_remainder: 0,
+            total_elapsed_cycles: 0,
             verbosity,
         };
 
@@ -252,18 +253,17 @@ impl Machine {
         }
     }
 
-    fn advance_devices(&mut self) {
-        let now = Instant::now();
-        let ns_elapsed = now.duration_since(self.last_step_time).as_nanos();
-        let scaled = ns_elapsed * 1_193_182 + self.tick_remainder;
-        let ticks = scaled / 1_000_000_000;
-        self.tick_remainder = scaled % 1_000_000_000;
-        self.last_step_time = now;
+    fn advance_devices(&mut self, cpu_cycles: u32) {
+        self.pit_cycle_remainder += u64::from(cpu_cycles);
+        let pit_ticks = self.pit_cycle_remainder / 4;
+        self.pit_cycle_remainder = self.pit_cycle_remainder % 4;
 
-        for _ in 0..ticks {
+        for _ in 0..pit_ticks {
             self.pit.advance(1);
             self.pic.set_irq_line(0, self.pit.output0());
         }
+
+        self.total_elapsed_cycles += u64::from(cpu_cycles);
     }
 
     pub fn step(&mut self) -> Result<MachineStepResult, MachineError> {
@@ -285,7 +285,7 @@ impl Machine {
         }
 
         // Advance non-CPU devices
-        self.advance_devices();
+        self.advance_devices(APPROXIMATE_CYCLES_PER_STEP);
 
         if self.keyboard_input_mode == KeyboardInputMode::PcHardware {
             let ppi_ready = self.ppi.can_receive_scan_code();
@@ -672,6 +672,10 @@ impl Machine {
 
     pub(crate) fn keyboard_input_mode(&self) -> KeyboardInputMode {
         self.keyboard_input_mode
+    }
+
+    pub(crate) fn total_elapsed_cycles(&self) -> u64 {
+        self.total_elapsed_cycles
     }
 }
 
