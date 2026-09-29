@@ -9,13 +9,25 @@ pub(crate) fn encode_image(
     display_height: usize,
 ) -> anyhow::Result<Vec<String>> {
     let mut new_pixels: Vec<u8> = Vec::with_capacity(display_width * display_height * 3);
+    let mut prev_source_y: Option<usize> = None;
     for y in 0..display_height {
+        let source_y = y * height / display_height;
+
+        // See if we can just copy the previous row
+        if prev_source_y == Some(source_y) {
+            let row_offset = (y - 1) * display_width * 3;
+            new_pixels.extend_from_within(row_offset..row_offset + 3 * display_width);
+            continue;
+        }
+
+        // Copy the row
         for x in 0..display_width {
             let source_x = x * width / display_width;
-            let source_y = y * height / display_height;
             let source_offset = (source_y * width + source_x) * 3;
             new_pixels.extend_from_slice(&pixels[source_offset..source_offset + 3]);
         }
+
+        prev_source_y = Some(source_y);
     }
 
     let mut png_bytes = Vec::new();

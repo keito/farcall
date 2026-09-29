@@ -19,7 +19,7 @@ mod graphics;
 mod guard;
 mod keyboard;
 
-const FRAME_INTERVAL: Duration = Duration::from_micros(66_667); // 15 Hz
+const FRAME_INTERVAL: Duration = Duration::from_micros(33_333); // 30 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
@@ -100,6 +100,7 @@ pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
 
         // Is the next frame due? (or is this our last frame)
         if Instant::now() >= next_frame || exit_code.is_some() {
+            next_frame = Instant::now() + FRAME_INTERVAL;
             machine.render_video(&mut current_frame);
 
             let winsize = tcgetwinsize(&guard.terminal)?;
@@ -126,8 +127,6 @@ pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
                 std::mem::swap(&mut current_frame, &mut previous_frame);
                 previous_size = (display_width, display_height);
             }
-
-            next_frame = Instant::now() + FRAME_INTERVAL;
         }
 
         if let Some(code) = exit_code {
