@@ -52,7 +52,6 @@ pub(crate) fn encode_image(
             let m = if count == i + 1 { 0 } else { 1 };
             if i == 0 {
                 // a=T displays the pixels immediately
-                // c is display columns, r is display rows
                 // m is whether there is more
                 // C=1 specifies no cursor movement
                 // i=86 is the image ID
