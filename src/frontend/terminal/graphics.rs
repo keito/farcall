@@ -55,9 +55,10 @@ pub(crate) fn encode_image(
                 // m is whether there is more
                 // C=1 specifies no cursor movement
                 // i=86 is the image ID
-                format!("\x1b_Gi=86,q=1,C=1,a=T,f=100,m={m};{chunk}\x1b\\")
+                // q=2 turns off responses
+                format!("\x1b_Gi=86,q=2,C=1,a=T,f=100,m={m};{chunk}\x1b\\")
             } else {
-                format!("\x1b_Gm={m};{chunk}\x1b\\")
+                format!("\x1b_Gq=2,m={m};{chunk}\x1b\\")
             }
         })
         .collect())
