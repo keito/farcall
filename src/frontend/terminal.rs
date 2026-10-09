@@ -26,6 +26,8 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(33_333); // 30 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
+const PADDING: usize = 8;
+
 pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
 
@@ -115,7 +117,7 @@ pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
             // Send new frame if different from previous frame
             if current_frame != previous_frame || previous_size != (display_width, display_height) {
                 if display_width == 0 || display_height == 0 {
-                    anyhow::bail!("Terminal reports zero dimensions");
+                    anyhow::bail!("Terminal is too small");
                 }
 
                 let data = graphics::encode_image(
@@ -144,8 +146,9 @@ pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
 }
 
 fn calc_display_size(winsize: Winsize) -> (usize, usize) {
-    let width_px = f64::from(winsize.ws_xpixel);
-    let height_px = f64::from(winsize.ws_ypixel);
+    // Reserve some margin
+    let width_px = f64::from(winsize.ws_xpixel.saturating_sub(PADDING as u16 * 2));
+    let height_px = f64::from(winsize.ws_ypixel.saturating_sub(PADDING as u16 * 2));
 
     let image_width = width_px.min(height_px * (4.0 / 3.0));
     let image_height = image_width * (3.0 / 4.0);
