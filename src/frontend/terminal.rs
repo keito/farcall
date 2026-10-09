@@ -3,7 +3,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crossterm::event::{self, KeyCode, KeyModifiers};
+use crossterm::{
+    event::{self, KeyCode, KeyModifiers},
+    terminal::SetTitle,
+};
 use rustix::termios::{Winsize, tcgetwinsize};
 
 use crate::{
@@ -25,6 +28,9 @@ const CPU_HZ: u64 = 4_772_727;
 
 pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
+
+    // Set title
+    crossterm::execute!(stdout(), SetTitle("pc86 - Press Ctrl-] to exit"))?;
 
     let mut current_frame = [0u8; 640 * 200 * 3];
     let mut previous_frame = [0u8; 640 * 200 * 3];
