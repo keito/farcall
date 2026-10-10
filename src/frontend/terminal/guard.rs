@@ -12,25 +12,20 @@ use crossterm::{
 use rustix::termios::{OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
 
 const UNSUPPORTED_HINT: &str =
-    "\n\npc86 requires a terminal emulator that supports both the Kitty keyboard and
-    graphics protocols. Supported emulators include:
-    - Kitty
-    - Ghostty
-    - iTerm2 (>= 3.6, with \"Apps can change how keys are reported\" enabled under Profiles -> Keys -> General)
-    - WezTerm (with Kitty graphics and keyboard enabled in the Lua config)
-    - Warp";
+    "\n\nGraphics Terminal mode requires a terminal emulator that supports the Kitty
+    graphics protocol.";
 
 pub(super) struct TerminalGuard {
     did_enable_enhanced_keyboard: bool,
     did_enter_alternate_screen: bool,
-    did_use_kitty_graphics: bool,
+    did_use_graphics: bool,
     pub(super) terminal: File,
     original_settings: Option<Termios>,
-    require_kitty_graphics: bool,
+    require_graphics: bool,
 }
 
 impl TerminalGuard {
-    pub(super) fn new(require_kitty_graphics: bool) -> Result<Self, anyhow::Error> {
+    pub(super) fn new(require_graphics: bool) -> Result<Self, anyhow::Error> {
         // TODO: Add support for Windows
         let Ok(tty) = std::fs::File::open("/dev/tty") else {
             return Err(anyhow::anyhow!(
@@ -41,10 +36,10 @@ impl TerminalGuard {
         let mut guard = Self {
             did_enable_enhanced_keyboard: false,
             did_enter_alternate_screen: false,
-            did_use_kitty_graphics: false,
+            did_use_graphics: false,
             terminal: tty,
             original_settings: None,
-            require_kitty_graphics,
+            require_graphics,
         };
         let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
         guard.original_settings = Some(attrs.clone());
@@ -62,32 +57,34 @@ impl TerminalGuard {
         crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
         guard.did_enter_alternate_screen = true;
 
-        // Check if we have Kitty graphics and keyboard
-        guard.check_capabilities()?;
+        guard.check_graphics_capabilities()?;
 
-        // Enable Kitty keyboard input
-        crossterm::execute!(
-            stdout(),
-            PushKeyboardEnhancementFlags(
-                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-            )
-        )?;
-        guard.did_enable_enhanced_keyboard = true;
+        // Could be Ok(false), or an Err condition could be that it timed out
+        if matches!(
+            crossterm::terminal::supports_keyboard_enhancement(),
+            Ok(true)
+        ) {
+            // Enable Kitty keyboard input
+            crossterm::execute!(
+                stdout(),
+                PushKeyboardEnhancementFlags(
+                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                        | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                        | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                )
+            )?;
+            guard.did_enable_enhanced_keyboard = true;
+        }
 
         Ok(guard)
     }
 
-    fn check_capabilities(&mut self) -> anyhow::Result<()> {
-        if !crossterm::terminal::supports_keyboard_enhancement()? {
-            return Err(anyhow::anyhow!(
-                "Your terminal does not support keyboard enhancements. {}",
-                UNSUPPORTED_HINT
-            ));
-        }
+    pub(super) fn keyboard_enhancement_enabled(&self) -> bool {
+        self.did_enable_enhanced_keyboard
+    }
 
-        if !self.require_kitty_graphics {
+    fn check_graphics_capabilities(&mut self) -> anyhow::Result<()> {
+        if !self.require_graphics {
             return Ok(());
         }
 
@@ -132,14 +129,14 @@ impl TerminalGuard {
             ));
         }
 
-        self.did_use_kitty_graphics = true;
+        self.did_use_graphics = true;
         Ok(())
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        if self.did_use_kitty_graphics {
+        if self.did_use_graphics {
             // Delete Kitty image
             if let Err(err) = stdout().write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
                 eprintln!("Failed to restore terminal: {}", err);
