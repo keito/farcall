@@ -79,13 +79,13 @@ fn hardware_cursor_moves_without_changing_bios_output_position() {
     video.write_char(&mut memory, b'A').unwrap();
     write_register(&mut video, 0x0E, 1);
     write_register(&mut video, 0x0F, 0x34);
-    assert_eq!(video.get_cursor(), (1, 0));
+    assert_eq!(video.get_bios_cursor(), (1, 0));
     assert_eq!(video.cursor_address, 0x0134);
 
     video.write_char(&mut memory, b'B').unwrap();
     assert_eq!(&memory[VIDEO_BASE..VIDEO_BASE + 4], b"A\x07B\x07");
     assert_eq!(memory[VIDEO_BASE + 2 * 0x0134], b' ');
-    assert_eq!(video.get_cursor(), (2, 0));
+    assert_eq!(video.get_bios_cursor(), (2, 0));
     assert_eq!(video.cursor_address, 2);
 }
 
@@ -102,7 +102,7 @@ fn character_output_and_control_characters_update_both_cursors() {
         (0x08, (0, 1), 80),
     ] {
         video.write_char(&mut memory, byte).unwrap();
-        assert_eq!(video.get_cursor(), position);
+        assert_eq!(video.get_bios_cursor(), position);
         assert_eq!(video.cursor_address, address);
     }
     // BIOS backspace moves the cursor without erasing the character.
@@ -113,10 +113,10 @@ fn character_output_and_control_characters_update_both_cursors() {
 fn wrapping_to_next_row_moves_the_rendered_cursor() {
     let (mut video, mut memory) = setup();
     write_spaces(&mut video, &mut memory, 79);
-    assert_eq!(video.get_cursor(), (79, 0));
+    assert_eq!(video.get_bios_cursor(), (79, 0));
     assert_rendered_cursor(&video, &memory, Some(79));
     video.write_char(&mut memory, b' ').unwrap();
-    assert_eq!(video.get_cursor(), (0, 1));
+    assert_eq!(video.get_bios_cursor(), (0, 1));
     assert_eq!(video.cursor_address, 80);
     assert_rendered_cursor(&video, &memory, Some(80));
 }
@@ -129,7 +129,7 @@ fn bottom_right_output_scrolls_before_updating_cursor() {
             video.write_char(&mut memory, b'A' + row).unwrap();
         }
     }
-    assert_eq!(video.get_cursor(), (0, 24));
+    assert_eq!(video.get_bios_cursor(), (0, 24));
     assert_eq!(video.cursor_address, 1920);
     for row in 0..24 {
         for column in 0..80 {
@@ -147,7 +147,7 @@ fn line_feed_at_bottom_scrolls_and_preserves_column() {
     let (mut video, mut memory) = setup();
     write_spaces(&mut video, &mut memory, 1923);
     video.write_char(&mut memory, b'\n').unwrap();
-    assert_eq!(video.get_cursor(), (3, 24));
+    assert_eq!(video.get_bios_cursor(), (3, 24));
     assert_eq!(video.cursor_address, 1923);
     assert_rendered_cursor(&video, &memory, Some(1923));
 }
@@ -160,7 +160,7 @@ fn dos_backspace_erases_and_updates_cursor_across_row_boundary() {
             video.write_char(&mut memory, b'X').unwrap();
         }
         video.backspace(&mut memory).unwrap();
-        assert_eq!(video.get_cursor(), position);
+        assert_eq!(video.get_bios_cursor(), position);
         assert_eq!(video.cursor_address, address);
         let offset = VIDEO_BASE + 2 * usize::from(address);
         assert_eq!(&memory[offset..offset + 2], b" \x07");
@@ -174,7 +174,7 @@ fn clear_resets_both_cursor_positions_and_screen() {
     write_register(&mut video, 0x0E, 1);
     write_register(&mut video, 0x0F, 0x34);
     video.clear_text(&mut memory).unwrap();
-    assert_eq!(video.get_cursor(), (0, 0));
+    assert_eq!(video.get_bios_cursor(), (0, 0));
     assert_eq!(video.cursor_address, 0);
     for cell in memory[VIDEO_BASE..VIDEO_BASE + 4000].chunks_exact(2) {
         assert_eq!(cell, b" \x07");
@@ -190,7 +190,7 @@ fn rendering_uses_hardware_address_and_hides_cursor_outside_visible_cells() {
     for (high, low, visible_cell) in [(1, 0x34, Some(308)), (0, 0x34, Some(52)), (7, 0xD0, None)] {
         write_register(&mut video, 0x0E, high);
         write_register(&mut video, 0x0F, low);
-        assert_eq!(video.get_cursor(), (3, 0));
+        assert_eq!(video.get_bios_cursor(), (3, 0));
         assert_rendered_cursor(&video, &memory, visible_cell);
     }
 }

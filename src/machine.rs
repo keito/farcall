@@ -20,6 +20,7 @@ use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
 
+pub(crate) use cga_video::{TextCell, TextCursor, TextScreen};
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
@@ -192,8 +193,12 @@ impl Machine {
         Ok(machine)
     }
 
-    pub fn render_video(&self, frame: &mut [u8]) {
+    pub(crate) fn render_video(&self, frame: &mut [u8]) {
         self.cga_video.render(&self.memory, frame);
+    }
+
+    pub(crate) fn render_text_screen(&self) -> Option<TextScreen> {
+        self.cga_video.render_text_screen(&self.memory)
     }
 
     /// Used for COM and Boot modes

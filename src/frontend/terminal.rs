@@ -21,6 +21,7 @@ use guard::TerminalGuard;
 mod graphics;
 mod guard;
 mod keyboard;
+mod text;
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(33_333); // 30 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
@@ -28,7 +29,7 @@ const CPU_HZ: u64 = 4_772_727;
 
 const PADDING: usize = 8;
 
-pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
+pub(crate) fn run(mut machine: Machine, use_kitty: bool) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new()?;
 
     // Set title
@@ -109,31 +110,48 @@ pub(crate) fn run(mut machine: Machine) -> anyhow::Result<u8> {
         // Is the next frame due? (or is this our last frame)
         if Instant::now() >= next_frame || exit_code.is_some() {
             next_frame = Instant::now() + FRAME_INTERVAL;
-            machine.render_video(&mut current_frame);
 
-            let winsize = tcgetwinsize(&guard.terminal)?;
-            let (display_width, display_height) = calc_display_size(winsize);
+            if use_kitty {
+                machine.render_video(&mut current_frame);
 
-            // Send new frame if different from previous frame
-            if current_frame != previous_frame || previous_size != (display_width, display_height) {
-                if display_width == 0 || display_height == 0 {
-                    anyhow::bail!("Terminal is too small");
+                let winsize = tcgetwinsize(&guard.terminal)?;
+                let (display_width, display_height) = calc_display_size(winsize);
+
+                // Send new frame if different from previous frame
+                if current_frame != previous_frame
+                    || previous_size != (display_width, display_height)
+                {
+                    if display_width == 0 || display_height == 0 {
+                        anyhow::bail!("Terminal is too small");
+                    }
+
+                    let data = graphics::encode_image(
+                        &current_frame,
+                        640,
+                        200,
+                        display_width,
+                        display_height,
+                    )?;
+                    for line in data {
+                        stdout().write_all(&line.as_bytes())?;
+                    }
+                    stdout().flush()?;
+
+                    std::mem::swap(&mut current_frame, &mut previous_frame);
+                    previous_size = (display_width, display_height);
                 }
-
-                let data = graphics::encode_image(
-                    &current_frame,
-                    640,
-                    200,
-                    display_width,
-                    display_height,
-                )?;
-                for line in data {
-                    stdout().write_all(&line.as_bytes())?;
+            } else {
+                let screen = machine.render_text_screen();
+                if let Some(screen) = screen {
+                    let mut buf: Vec<u8> = vec![];
+                    text::render(&screen, &mut buf)?;
+                    stdout().write_all(&buf)?;
+                    stdout().flush()?;
+                } else {
+                    stdout().write_all(b"\x1b[2J\x1b[H")?;
+                    stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text \r\nTerminal frontend. Press Ctrl-] to terminate.")?;
+                    stdout().flush()?;
                 }
-                stdout().flush()?;
-
-                std::mem::swap(&mut current_frame, &mut previous_frame);
-                previous_size = (display_width, display_height);
             }
         }
 

@@ -46,7 +46,7 @@ impl Bios {
                 video.write(0x3D8, 0x29); // Mode
                 video.write(0x3D9, 0x0); // Color Control
                 video.clear_text(memory)?;
-                video.set_scan_lines(6, 7);
+                video.set_cursor_shape(6, 7);
             }
             0x04 => {
                 // 320x200 graphics
@@ -86,10 +86,7 @@ impl Bios {
             }
             // Set text cursor shape
             0x01 => {
-                video.set_scan_lines(
-                    cpu.get_reg(Reg8::Ch) as usize,
-                    cpu.get_reg(Reg8::Cl) as usize,
-                );
+                video.set_cursor_shape(cpu.get_reg(Reg8::Ch), cpu.get_reg(Reg8::Cl));
                 Ok(InterruptResult::ResumeExecution)
             }
             // Read Cursor Position, Size, and Shape
@@ -102,11 +99,11 @@ impl Bios {
                     )));
                 }
 
-                let scan_lines = video.get_scan_lines();
-                cpu.set_reg(Reg8::Ch, scan_lines.0 as u8);
-                cpu.set_reg(Reg8::Cl, scan_lines.1 as u8);
+                let scan_lines = video.get_cursor_shape();
+                cpu.set_reg(Reg8::Ch, scan_lines.0);
+                cpu.set_reg(Reg8::Cl, scan_lines.1);
 
-                let (column, row) = video.get_cursor();
+                let (column, row) = video.get_bios_cursor();
                 cpu.set_reg(Reg8::Dh, row as u8);
                 cpu.set_reg(Reg8::Dl, column as u8);
 

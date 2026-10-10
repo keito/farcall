@@ -22,7 +22,9 @@ compile_error!("Enable at least one frontend feature: window or terminal");
 #[derive(Clone, clap::ValueEnum)]
 enum FrontendChoice {
     #[cfg(feature = "terminal")]
-    Terminal,
+    TerminalGraphics,
+    #[cfg(feature = "terminal")]
+    TerminalText,
     #[cfg(feature = "window")]
     Window,
 }
@@ -93,7 +95,10 @@ fn main() -> anyhow::Result<process::ExitCode> {
 
     let exit_code = match &cli.frontend {
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::Terminal) => terminal::run(machine)?,
+        Some(FrontendChoice::TerminalGraphics) => terminal::run(machine, true)?,
+
+        #[cfg(feature = "terminal")]
+        Some(FrontendChoice::TerminalText) => terminal::run(machine, false)?,
 
         #[cfg(feature = "window")]
         Some(FrontendChoice::Window) => window::run(machine)?,
@@ -104,7 +109,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
 
         // Fall back to terminal if window is not compiled in
         #[cfg(all(feature = "terminal", not(feature = "window")))]
-        None => terminal::run(machine)?,
+        None => terminal::run(machine, true)?,
     };
 
     Ok(exit_code.into())

@@ -11,22 +11,22 @@ const GLYPH_HEIGHT: usize = 8;
 const BYTES_PER_PIXEL: usize = 3;
 
 pub(super) struct CgaVideo {
+    /// BIOS emulation cursor position: column
+    bios_cursor_column: usize,
+    /// BIOS emulation cursor position: row
+    bios_cursor_row: usize,
     /// Color Control Register
     color_control: u8,
     /// Hardware cursor address
     cursor_address: u16,
-    /// BIOS emulation cursor position: column
-    cursor_column: usize,
-    /// BIOS emulation cursor position: row
-    cursor_row: usize,
     /// Which register will be written to with port 0x3D4 writes
     cursor_write_selector: Option<CursorRegister>,
+    /// Cursor start scan line
+    cursor_start_reg: u8,
     /// Cursor end scan line
-    end_scan_line: usize,
+    cursor_end_reg: u8,
     /// Mode Control Register
     mode: u8,
-    /// Cursor start scan line
-    start_scan_line: usize,
     status: u8,
 }
 
@@ -37,6 +37,25 @@ enum CursorRegister {
     CursorAddressLow,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextCell {
+    pub character: u8,
+    pub attribute: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct TextCursor {
+    pub column: usize,
+    pub row: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TextScreen {
+    pub cells: [[TextCell; NUM_COLUMNS]; NUM_ROWS],
+    pub video_enabled: bool,
+    pub cursor: Option<TextCursor>,
+}
+
 const GLYPH_BYTES: &[u8; 2048] = include_bytes!("cga_8x8.dat");
 
 impl CgaVideo {
@@ -44,12 +63,12 @@ impl CgaVideo {
         Self {
             color_control: 0,
             cursor_address: 0,
-            cursor_column: 0,
-            cursor_row: 0,
+            bios_cursor_column: 0,
+            bios_cursor_row: 0,
             cursor_write_selector: None,
-            end_scan_line: 7,
+            cursor_end_reg: 7,
             mode: 0,
-            start_scan_line: 6,
+            cursor_start_reg: 6,
             status: 0,
         }
     }
@@ -64,8 +83,8 @@ impl CgaVideo {
                 _ => self.cursor_write_selector = None,
             },
             0x3D5 => match self.cursor_write_selector {
-                Some(CursorRegister::CursorStartScanLine) => self.start_scan_line = value as usize,
-                Some(CursorRegister::CursorEndScanLine) => self.end_scan_line = value as usize,
+                Some(CursorRegister::CursorStartScanLine) => self.cursor_start_reg = value,
+                Some(CursorRegister::CursorEndScanLine) => self.cursor_end_reg = value,
                 Some(CursorRegister::CursorAddressHigh) => {
                     self.cursor_address = ((value as u16) << 8) | (self.cursor_address & 0x00FF);
                 }
@@ -80,22 +99,22 @@ impl CgaVideo {
         }
     }
 
-    pub(super) fn set_scan_lines(&mut self, start_scan_line: usize, end_scan_line: usize) {
-        self.start_scan_line = start_scan_line;
-        self.end_scan_line = end_scan_line;
+    pub(super) fn set_cursor_shape(&mut self, cursor_start_reg: u8, cursor_end_reg: u8) {
+        self.cursor_start_reg = cursor_start_reg;
+        self.cursor_end_reg = cursor_end_reg;
     }
 
-    pub(super) fn get_scan_lines(&self) -> (usize, usize) {
-        (self.start_scan_line, self.end_scan_line)
+    pub(super) fn get_cursor_shape(&self) -> (u8, u8) {
+        (self.cursor_start_reg, self.cursor_end_reg)
     }
 
-    pub(super) fn get_cursor(&self) -> (usize, usize) {
-        (self.cursor_column, self.cursor_row)
+    pub(super) fn get_bios_cursor(&self) -> (usize, usize) {
+        (self.bios_cursor_column, self.bios_cursor_row)
     }
 
     /// Call to sync cursor_address with cursor column/row
-    fn sync_cursor_address(&mut self) {
-        self.cursor_address = (self.cursor_row * NUM_COLUMNS + self.cursor_column) as u16;
+    fn sync_bios_cursor_address(&mut self) {
+        self.cursor_address = (self.bios_cursor_row * NUM_COLUMNS + self.bios_cursor_column) as u16;
     }
 
     /// Used by BIOS emulation to clear video memory in text mode
@@ -107,9 +126,9 @@ impl CgaVideo {
         }
 
         // reset the cursor
-        self.cursor_column = 0;
-        self.cursor_row = 0;
-        self.sync_cursor_address();
+        self.bios_cursor_column = 0;
+        self.bios_cursor_row = 0;
+        self.sync_bios_cursor_address();
         Ok(())
     }
 
@@ -121,36 +140,37 @@ impl CgaVideo {
         }
 
         // reset the cursor
-        self.cursor_column = 0;
-        self.cursor_row = 0;
-        self.sync_cursor_address();
+        self.bios_cursor_column = 0;
+        self.bios_cursor_row = 0;
+        self.sync_bios_cursor_address();
         Ok(())
     }
 
     /// Used by BIOS emulation to write a charcater to video memory
     pub(super) fn write_char(&mut self, memory: &mut [u8], byte: u8) -> Result<(), MemoryError> {
         if byte == b'\r' {
-            self.cursor_column = 0;
-            self.sync_cursor_address();
+            self.bios_cursor_column = 0;
+            self.sync_bios_cursor_address();
             return Ok(());
         } else if byte == b'\n' {
-            self.cursor_row = self.cursor_row + 1;
+            self.bios_cursor_row = self.bios_cursor_row + 1;
         } else if byte.is_ascii_graphic() || byte == b' ' {
-            let addr = VIDEO_ADDR_BASE + 2 * (self.cursor_row * NUM_COLUMNS + self.cursor_column);
+            let addr = VIDEO_ADDR_BASE
+                + 2 * (self.bios_cursor_row * NUM_COLUMNS + self.bios_cursor_column);
             memory[addr] = byte;
             memory[addr + 1] = 0x07;
-            self.cursor_column += 1;
+            self.bios_cursor_column += 1;
         } else if byte == 0x08 {
             // Backspace
-            self.cursor_column = self.cursor_column.saturating_sub(1);
+            self.bios_cursor_column = self.bios_cursor_column.saturating_sub(1);
         }
 
-        if self.cursor_column == NUM_COLUMNS {
-            self.cursor_column = 0;
-            self.cursor_row = self.cursor_row + 1;
+        if self.bios_cursor_column == NUM_COLUMNS {
+            self.bios_cursor_column = 0;
+            self.bios_cursor_row = self.bios_cursor_row + 1;
         }
 
-        if self.cursor_row == NUM_ROWS {
+        if self.bios_cursor_row == NUM_ROWS {
             // scroll up by one row
             for r in 0..NUM_ROWS - 1 {
                 for c in 0..NUM_COLUMNS {
@@ -165,40 +185,50 @@ impl CgaVideo {
                 memory[VIDEO_ADDR_BASE + 2 * ((NUM_ROWS - 1) * NUM_COLUMNS + c)] = 0x20;
                 memory[VIDEO_ADDR_BASE + 2 * ((NUM_ROWS - 1) * NUM_COLUMNS + c) + 1] = 0x07;
             }
-            self.cursor_row = NUM_ROWS - 1;
+            self.bios_cursor_row = NUM_ROWS - 1;
         }
 
-        self.sync_cursor_address();
+        self.sync_bios_cursor_address();
         Ok(())
     }
 
     /// Used by DOS emulation to emulate a backspace
     pub(super) fn backspace(&mut self, memory: &mut [u8]) -> Result<(), MemoryError> {
-        if self.cursor_column == 0 {
+        if self.bios_cursor_column == 0 {
             // Go back one row, to the end unless we're at the top
-            if self.cursor_row > 0 {
-                self.cursor_row -= 1;
-                self.cursor_column = NUM_COLUMNS - 1;
+            if self.bios_cursor_row > 0 {
+                self.bios_cursor_row -= 1;
+                self.bios_cursor_column = NUM_COLUMNS - 1;
             }
         } else {
-            self.cursor_column -= 1;
+            self.bios_cursor_column -= 1;
         }
 
         // Delete the character that was there
-        let addr = VIDEO_ADDR_BASE + 2 * (self.cursor_row * NUM_COLUMNS + self.cursor_column);
+        let addr =
+            VIDEO_ADDR_BASE + 2 * (self.bios_cursor_row * NUM_COLUMNS + self.bios_cursor_column);
         memory[addr] = b' ';
         memory[addr + 1] = 0x07;
-        self.sync_cursor_address();
+        self.sync_bios_cursor_address();
         Ok(())
+    }
+
+    /// Are we in graphics mode
+    fn is_graphics(&self) -> bool {
+        self.mode & 0x2 != 0
+    }
+
+    /// Is the VIDEO bit set
+    fn is_video(&self) -> bool {
+        self.mode & 0x8 != 0
     }
 
     /// Renders video memory to the framebuffer
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
-        let is_graphics = self.mode & 0x2 != 0;
-        let is_video = self.mode & 0x8 != 0; // VIDEO bit
+        let is_graphics = self.is_graphics();
 
         // Blank the display if the VIDEO bit is not set
-        if !is_video {
+        if !self.is_video() {
             let (red, green, blue) = if is_graphics {
                 attribute_color_to_rgb(self.color_control & 0xF) // Overscan color
             } else {
@@ -211,13 +241,13 @@ impl CgaVideo {
         }
 
         if is_graphics {
-            self.render_graphics(memory, frame);
+            self.render_graphics_mode(memory, frame);
         } else {
-            self.render_text(memory, frame);
+            self.render_text_mode(memory, frame);
         }
     }
 
-    fn render_text(&self, memory: &[u8], frame: &mut [u8]) {
+    fn render_text_mode(&self, memory: &[u8], frame: &mut [u8]) {
         for row in 0..NUM_ROWS {
             for column in 0..NUM_COLUMNS {
                 let text_byte = memory[VIDEO_ADDR_BASE + 2 * (row * NUM_COLUMNS + column)];
@@ -231,9 +261,9 @@ impl CgaVideo {
 
                 // Maybe draw cursor
                 let cursor_cell = row * NUM_COLUMNS + column == self.cursor_address as usize;
-                let cursor_enabled = (self.start_scan_line & 0x60) != 0x20;
-                let cursor_start = self.start_scan_line & 0x1F;
-                let cursor_end = self.end_scan_line & 0x1F;
+                let cursor_enabled = (self.cursor_start_reg & 0x60) != 0x20;
+                let cursor_start = usize::from(self.cursor_start_reg & 0x1F);
+                let cursor_end = usize::from(self.cursor_end_reg & 0x1F);
 
                 for gy in 0..GLYPH_HEIGHT {
                     // Is this a cursor line?
@@ -260,7 +290,7 @@ impl CgaVideo {
     }
 
     /// Implements medium-resolution graphics mode (320x200)
-    fn render_graphics(&self, memory: &[u8], frame: &mut [u8]) {
+    fn render_graphics_mode(&self, memory: &[u8], frame: &mut [u8]) {
         for x in 0..320 {
             for y in 0..200 {
                 // Each pixel is 2 bits (red / green)
@@ -327,6 +357,52 @@ impl CgaVideo {
         // TODO: Do proper status
         self.status = !self.status;
         self.status
+    }
+
+    /// Renders video memory to a TextScreen, if we can. This is for the text-only frontend.
+    pub(super) fn render_text_screen(&self, memory: &[u8]) -> Option<TextScreen> {
+        if self.is_graphics() {
+            return None;
+        }
+
+        let is_video = self.is_video();
+
+        let cursor_enabled = (self.cursor_start_reg & 0x60) != 0x20;
+        let cursor_addr = usize::from(self.cursor_address);
+        let cursor_start = self.cursor_start_reg & 0x1F;
+        let cursor_end = self.cursor_end_reg & 0x1F;
+        let cursor = (cursor_enabled
+            && is_video
+            && cursor_addr < NUM_COLUMNS * NUM_ROWS
+            && cursor_start <= cursor_end
+            && cursor_start < GLYPH_HEIGHT as u8)
+            .then(|| TextCursor {
+                column: cursor_addr % NUM_COLUMNS,
+                row: cursor_addr / NUM_COLUMNS,
+            });
+
+        let mut screen = TextScreen {
+            cells: [[TextCell {
+                character: 0,
+                attribute: 0,
+            }; NUM_COLUMNS]; NUM_ROWS],
+            video_enabled: is_video,
+            cursor,
+        };
+
+        for row in 0..NUM_ROWS {
+            for column in 0..NUM_COLUMNS {
+                let character = memory[VIDEO_ADDR_BASE + 2 * (row * NUM_COLUMNS + column)];
+                let attribute = memory[VIDEO_ADDR_BASE + 2 * (row * NUM_COLUMNS + column) + 1];
+
+                screen.cells[row][column] = TextCell {
+                    character,
+                    attribute,
+                };
+            }
+        }
+
+        Some(screen)
     }
 }
 
