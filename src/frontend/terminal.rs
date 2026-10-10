@@ -29,8 +29,8 @@ const CPU_HZ: u64 = 4_772_727;
 
 const PADDING: usize = 8;
 
-pub(crate) fn run(mut machine: Machine, use_kitty: bool) -> anyhow::Result<u8> {
-    let guard = TerminalGuard::new()?;
+pub(crate) fn run(mut machine: Machine, use_kitty_graphics: bool) -> anyhow::Result<u8> {
+    let guard = TerminalGuard::new(use_kitty_graphics)?;
 
     // Set title
     crossterm::execute!(stdout(), SetTitle("pc86 - Press Ctrl-] to exit"))?;
@@ -111,7 +111,7 @@ pub(crate) fn run(mut machine: Machine, use_kitty: bool) -> anyhow::Result<u8> {
         if Instant::now() >= next_frame || exit_code.is_some() {
             next_frame = Instant::now() + FRAME_INTERVAL;
 
-            if use_kitty {
+            if use_kitty_graphics {
                 machine.render_video(&mut current_frame);
 
                 let winsize = tcgetwinsize(&guard.terminal)?;
@@ -142,6 +142,7 @@ pub(crate) fn run(mut machine: Machine, use_kitty: bool) -> anyhow::Result<u8> {
                 }
             } else {
                 let screen = machine.render_text_screen();
+                // TODO: Don't send frame if same as previous frame
                 if let Some(screen) = screen {
                     let mut buf: Vec<u8> = vec![];
                     text::render(&screen, &mut buf)?;

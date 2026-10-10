@@ -20,7 +20,7 @@ use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
 
-pub(crate) use cga_video::{TextCell, TextCursor, TextScreen};
+pub(crate) use cga_video::TextScreen;
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;

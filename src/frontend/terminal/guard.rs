@@ -12,7 +12,8 @@ use crossterm::{
 use rustix::termios::{OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
 
 const UNSUPPORTED_HINT: &str =
-    "\n\npc86 requires a terminal emulator that supports the Kitty keyboard and graphics protocols. Supported emulators include:
+    "\n\npc86 requires a terminal emulator that supports both the Kitty keyboard and
+    graphics protocols. Supported emulators include:
     - Kitty
     - Ghostty
     - iTerm2 (>= 3.6, with \"Apps can change how keys are reported\" enabled under Profiles -> Keys -> General)
@@ -23,10 +24,11 @@ pub(super) struct TerminalGuard {
     pub(super) terminal: File,
     original_settings: Option<Termios>,
     did_enable_keyboard: bool,
+    require_kitty_graphics: bool,
 }
 
 impl TerminalGuard {
-    pub(super) fn new() -> Result<Self, anyhow::Error> {
+    pub(super) fn new(require_kitty_graphics: bool) -> Result<Self, anyhow::Error> {
         // TODO: Add support for Windows
         let Ok(tty) = std::fs::File::open("/dev/tty") else {
             return Err(anyhow::anyhow!(
@@ -38,6 +40,7 @@ impl TerminalGuard {
             terminal: tty,
             original_settings: None,
             did_enable_keyboard: false,
+            require_kitty_graphics,
         };
         let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
         guard.original_settings = Some(attrs.clone());
@@ -76,6 +79,10 @@ impl TerminalGuard {
                 "Your terminal does not support keyboard enhancements. {}",
                 UNSUPPORTED_HINT
             ));
+        }
+
+        if !self.require_kitty_graphics {
+            return Ok(());
         }
 
         // Send query
@@ -126,10 +133,12 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         if self.did_enable_keyboard {
-            // Delete Kitty image
-            let mut output = std::io::stdout();
-            if let Err(err) = output.write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
-                eprintln!("Failed to restore terminal: {}", err);
+            if self.require_kitty_graphics {
+                // Delete Kitty image
+                let mut output = std::io::stdout();
+                if let Err(err) = output.write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
+                    eprintln!("Failed to restore terminal: {}", err);
+                }
             }
 
             // Pop Kitty keyboard input flags
