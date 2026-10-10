@@ -4,13 +4,15 @@ use std::{
 };
 
 use crossterm::{
-    event::{self, KeyCode, KeyModifiers},
+    event::{self, KeyCode, KeyEvent, KeyModifiers},
     terminal::SetTitle,
 };
 use rustix::termios::{Winsize, tcgetwinsize};
 
 use crate::{
-    frontend::terminal::keyboard::{crossterm_to_bios_keystroke, crossterm_to_pc_scan_code},
+    frontend::terminal::keyboard::{
+        crossterm_to_bios_keystroke, crossterm_to_pc_scan_code, normalize_basic_crossterm_key_event,
+    },
     machine::{
         KeyboardInputMode::{BiosKeystrokes, PcHardware},
         Machine, MachineStepResult,
@@ -28,6 +30,81 @@ const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
 const PADDING: usize = 8;
+
+fn handle_enhanced_key_event(machine: &mut Machine, key_event: KeyEvent) -> bool {
+    // Handle Ctrl-]
+    if key_event.code == KeyCode::Char(']')
+        && key_event.modifiers.contains(KeyModifiers::CONTROL)
+        && key_event.is_press()
+    {
+        return true;
+    }
+
+    match machine.keyboard_input_mode() {
+        BiosKeystrokes => {
+            if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
+                machine.enqueue_bios_keystroke(keystroke);
+            }
+        }
+        PcHardware => {
+            if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
+                machine.enqueue_pc_keyboard_event(
+                    scan_code,
+                    key_event.is_press() || key_event.is_repeat(),
+                );
+            }
+        }
+    }
+
+    false
+}
+
+fn handle_basic_key_event(machine: &mut Machine, key_event: KeyEvent) -> bool {
+    // Handle Ctrl-]
+    if key_event.code == KeyCode::Char('5') && key_event.modifiers.contains(KeyModifiers::CONTROL) {
+        return true;
+    }
+
+    // Convert shifted characters to shift + unshifted character
+    let key_event = normalize_basic_crossterm_key_event(key_event);
+
+    match machine.keyboard_input_mode() {
+        BiosKeystrokes => {
+            if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
+                machine.enqueue_bios_keystroke(keystroke);
+            }
+        }
+        PcHardware => {
+            if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
+                let modifiers = [
+                    (KeyModifiers::SHIFT, 0x2A),
+                    (KeyModifiers::CONTROL, 0x1D),
+                    (KeyModifiers::ALT, 0x38),
+                ];
+
+                // Simulate modifier key key press
+                for &(modifier, code) in &modifiers {
+                    if key_event.modifiers.contains(modifier) {
+                        machine.enqueue_pc_keyboard_event(code, true);
+                    }
+                }
+
+                // Simulate key press
+                machine.enqueue_pc_keyboard_event(scan_code, true);
+                machine.enqueue_pc_keyboard_event(scan_code, false);
+
+                // Simulate modifier key release
+                for &(modifier, code) in modifiers.iter().rev() {
+                    if key_event.modifiers.contains(modifier) {
+                        machine.enqueue_pc_keyboard_event(code, false);
+                    }
+                }
+            }
+        }
+    }
+
+    false
+}
 
 pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new(use_graphics)?;
@@ -60,27 +137,13 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
             }
             let event = event::read()?;
             if let event::Event::Key(key_event) = event {
-                // Handle Ctrl-]
-                if key_event.code == KeyCode::Char(']')
-                    && key_event.modifiers.contains(KeyModifiers::CONTROL)
-                    && key_event.is_press()
-                {
-                    return Ok(0);
-                }
-
-                match machine.keyboard_input_mode() {
-                    BiosKeystrokes => {
-                        if let Some(keystroke) = crossterm_to_bios_keystroke(&key_event) {
-                            machine.enqueue_bios_keystroke(keystroke);
-                        }
+                if guard.keyboard_enhancement_enabled() {
+                    if handle_enhanced_key_event(&mut machine, key_event) {
+                        return Ok(0);
                     }
-                    PcHardware => {
-                        if let Some(scan_code) = crossterm_to_pc_scan_code(&key_event) {
-                            machine.enqueue_pc_keyboard_event(
-                                scan_code,
-                                key_event.is_press() || key_event.is_repeat(),
-                            );
-                        }
+                } else {
+                    if handle_basic_key_event(&mut machine, key_event) {
+                        return Ok(0);
                     }
                 }
             }
@@ -150,7 +213,7 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                     stdout().flush()?;
                 } else {
                     stdout().write_all(b"\x1b[2J\x1b[H")?;
-                    stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text \r\nTerminal frontend. Press Ctrl-] to terminate.")?;
+                    stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Press Ctrl-] to terminate.")?;
                     stdout().flush()?;
                 }
             }

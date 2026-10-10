@@ -4,6 +4,9 @@ use crossterm::event::{
 
 use crate::machine::bios_keyboard::BiosKeyStroke;
 
+#[cfg(test)]
+mod tests;
+
 enum KeyMap {
     Override(u8, u8), // Override ASCII code; provide (scan code, ascii code)
     Ignore,           // Ignores the key
@@ -461,4 +464,41 @@ pub(crate) fn crossterm_to_pc_scan_code(event: &CTKeyEvent) -> Option<u8> {
         _ => return None,
     };
     Some(scan_code as u8)
+}
+
+pub(crate) fn normalize_basic_crossterm_key_event(key_event: CTKeyEvent) -> CTKeyEvent {
+    fn shift_event(key_event: CTKeyEvent, key_char: char) -> CTKeyEvent {
+        CTKeyEvent {
+            code: CTKeyCode::Char(key_char),
+            modifiers: key_event.modifiers | KeyModifiers::SHIFT,
+            kind: key_event.kind,
+            state: key_event.state,
+        }
+    }
+
+    match key_event.code {
+        CTKeyCode::Char(char @ 'A'..='Z') => shift_event(key_event, char.to_ascii_lowercase()),
+        CTKeyCode::Char('~') => shift_event(key_event, '`'),
+        CTKeyCode::Char('!') => shift_event(key_event, '1'),
+        CTKeyCode::Char('@') => shift_event(key_event, '2'),
+        CTKeyCode::Char('#') => shift_event(key_event, '3'),
+        CTKeyCode::Char('$') => shift_event(key_event, '4'),
+        CTKeyCode::Char('%') => shift_event(key_event, '5'),
+        CTKeyCode::Char('^') => shift_event(key_event, '6'),
+        CTKeyCode::Char('&') => shift_event(key_event, '7'),
+        CTKeyCode::Char('*') => shift_event(key_event, '8'),
+        CTKeyCode::Char('(') => shift_event(key_event, '9'),
+        CTKeyCode::Char(')') => shift_event(key_event, '0'),
+        CTKeyCode::Char('_') => shift_event(key_event, '-'),
+        CTKeyCode::Char('+') => shift_event(key_event, '='),
+        CTKeyCode::Char('{') => shift_event(key_event, '['),
+        CTKeyCode::Char('}') => shift_event(key_event, ']'),
+        CTKeyCode::Char('|') => shift_event(key_event, '\\'),
+        CTKeyCode::Char(':') => shift_event(key_event, ';'),
+        CTKeyCode::Char('"') => shift_event(key_event, '\''),
+        CTKeyCode::Char('<') => shift_event(key_event, ','),
+        CTKeyCode::Char('>') => shift_event(key_event, '.'),
+        CTKeyCode::Char('?') => shift_event(key_event, '/'),
+        _ => key_event,
+    }
 }

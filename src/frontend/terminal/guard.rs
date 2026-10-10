@@ -11,9 +11,7 @@ use crossterm::{
 };
 use rustix::termios::{OptionalActions, SpecialCodeIndex, Termios, tcgetattr, tcsetattr};
 
-const UNSUPPORTED_HINT: &str =
-    "\n\nGraphics Terminal mode requires a terminal emulator that supports the Kitty
-    graphics protocol.";
+const UNSUPPORTED_HINT: &str = "\n\nGraphics Terminal mode requires a terminal emulator that supports the Kitty graphics protocol.";
 
 pub(super) struct TerminalGuard {
     did_enable_enhanced_keyboard: bool,
