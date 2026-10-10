@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{Read, Write},
+    io::{Read, Write, stdout},
     time::{Duration, Instant},
 };
 
@@ -21,9 +21,11 @@ const UNSUPPORTED_HINT: &str =
     - Warp";
 
 pub(super) struct TerminalGuard {
+    did_enable_enhanced_keyboard: bool,
+    did_enter_alternate_screen: bool,
+    did_use_kitty_graphics: bool,
     pub(super) terminal: File,
     original_settings: Option<Termios>,
-    did_enable_keyboard: bool,
     require_kitty_graphics: bool,
 }
 
@@ -37,9 +39,11 @@ impl TerminalGuard {
         };
 
         let mut guard = Self {
+            did_enable_enhanced_keyboard: false,
+            did_enter_alternate_screen: false,
+            did_use_kitty_graphics: false,
             terminal: tty,
             original_settings: None,
-            did_enable_keyboard: false,
             require_kitty_graphics,
         };
         let mut attrs = tcgetattr(&guard.terminal).map_err(std::io::Error::from)?;
@@ -54,21 +58,23 @@ impl TerminalGuard {
 
         tcsetattr(&guard.terminal, OptionalActions::Now, &attrs).map_err(std::io::Error::from)?;
 
+        // Enter alternate screen and hide cursor
+        crossterm::execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
+        guard.did_enter_alternate_screen = true;
+
         // Check if we have Kitty graphics and keyboard
         guard.check_capabilities()?;
 
-        // Enter alternate screen and enable Kitty keyboard input
+        // Enable Kitty keyboard input
         crossterm::execute!(
-            std::io::stdout(),
-            EnterAlternateScreen,
-            cursor::Hide,
+            stdout(),
             PushKeyboardEnhancementFlags(
                 KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
                     | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
             )
         )?;
-        guard.did_enable_keyboard = true;
+        guard.did_enable_enhanced_keyboard = true;
 
         Ok(guard)
     }
@@ -86,8 +92,8 @@ impl TerminalGuard {
         }
 
         // Send query
-        std::io::stdout().write_all(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c")?;
-        std::io::stdout().flush()?;
+        stdout().write_all(b"\x1b_Gi=31,s=1,v=1,a=q,t=d,f=24;AAAA\x1b\\\x1b[c")?;
+        stdout().flush()?;
 
         // Wait for graphics reply, and identification reply, up to 1 second
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -126,34 +132,36 @@ impl TerminalGuard {
             ));
         }
 
+        self.did_use_kitty_graphics = true;
         Ok(())
     }
 }
 
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
-        if self.did_enable_keyboard {
-            if self.require_kitty_graphics {
-                // Delete Kitty image
-                let mut output = std::io::stdout();
-                if let Err(err) = output.write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
-                    eprintln!("Failed to restore terminal: {}", err);
-                }
+        if self.did_use_kitty_graphics {
+            // Delete Kitty image
+            if let Err(err) = stdout().write_all(b"\x1b_Ga=d,d=I,i=86,q=2\x1b\\") {
+                eprintln!("Failed to restore terminal: {}", err);
             }
+        }
 
+        if self.did_enable_enhanced_keyboard {
             // Pop Kitty keyboard input flags
-            if let Err(err) = crossterm::execute!(
-                std::io::stdout(),
-                PopKeyboardEnhancementFlags,
-                cursor::Show,
-                LeaveAlternateScreen
-            ) {
+            if let Err(err) = crossterm::execute!(stdout(), PopKeyboardEnhancementFlags) {
                 eprintln!("Failed to crossterm::execute!: {}", err);
             }
         }
 
-        // Restore saved terminal settings
+        if self.did_enter_alternate_screen {
+            // Show cursor and leave alternate screen
+            if let Err(err) = crossterm::execute!(stdout(), cursor::Show, LeaveAlternateScreen) {
+                eprintln!("Failed to crossterm::execute!: {}", err);
+            }
+        }
+
         if let Some(settings) = &self.original_settings {
+            // Restore saved terminal settings
             if let Err(err) = tcsetattr(&self.terminal, OptionalActions::Now, settings) {
                 eprintln!("Failed to restore terminal settings: {}", err);
             }
