@@ -15,7 +15,7 @@ use crate::{
     },
     machine::{
         KeyboardInputMode::{BiosKeystrokes, PcHardware},
-        Machine, MachineStepResult,
+        Machine, MachineStepResult, TextScreen,
     },
 };
 use guard::TerminalGuard;
@@ -116,6 +116,9 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
     let mut previous_frame = [0u8; 640 * 200 * 3];
     let mut previous_size: (usize, usize) = (0, 0);
 
+    let mut has_rendered_text_frame = false;
+    let mut previous_screen: Option<TextScreen> = None;
+
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
 
@@ -135,17 +138,22 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
             if !event::poll(Duration::ZERO)? {
                 break;
             }
-            let event = event::read()?;
-            if let event::Event::Key(key_event) = event {
-                if guard.keyboard_enhancement_enabled() {
-                    if handle_enhanced_key_event(&mut machine, key_event) {
-                        return Ok(0);
-                    }
-                } else {
-                    if handle_basic_key_event(&mut machine, key_event) {
-                        return Ok(0);
+            match event::read()? {
+                event::Event::Key(key_event) => {
+                    if guard.keyboard_enhancement_enabled() {
+                        if handle_enhanced_key_event(&mut machine, key_event) {
+                            return Ok(0);
+                        }
+                    } else {
+                        if handle_basic_key_event(&mut machine, key_event) {
+                            return Ok(0);
+                        }
                     }
                 }
+                event::Event::Resize(_, _) => {
+                    has_rendered_text_frame = false;
+                }
+                _ => (),
             }
         }
 
@@ -204,17 +212,20 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                     previous_size = (display_width, display_height);
                 }
             } else {
-                let screen = machine.render_text_screen();
-                // TODO: Don't send frame if same as previous frame
-                if let Some(screen) = screen {
-                    let mut buf: Vec<u8> = vec![];
-                    text::render(&screen, &mut buf)?;
-                    stdout().write_all(&buf)?;
-                    stdout().flush()?;
-                } else {
-                    stdout().write_all(b"\x1b[2J\x1b[H")?;
-                    stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Press Ctrl-] to terminate.")?;
-                    stdout().flush()?;
+                let maybe_screen = machine.render_text_screen();
+                if !has_rendered_text_frame || (maybe_screen != previous_screen) {
+                    if let Some(screen) = maybe_screen.as_ref() {
+                        let mut buf: Vec<u8> = vec![];
+                        text::render(&screen, &mut buf)?;
+                        stdout().write_all(&buf)?;
+                        stdout().flush()?;
+                    } else {
+                        stdout().write_all(b"\x1b[2J\x1b[H")?;
+                        stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Press Ctrl-] to terminate.")?;
+                        stdout().flush()?;
+                    }
+                    has_rendered_text_frame = true;
+                    previous_screen = maybe_screen;
                 }
             }
         }
