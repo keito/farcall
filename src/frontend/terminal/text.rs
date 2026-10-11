@@ -20,7 +20,8 @@ pub(super) fn render(screen: &TextScreen, output: &mut impl Write) -> std::io::R
         output.write_all(format!("\x1b[{};{}H", row_index + 1, 1).as_bytes())?;
         for cell in row {
             if screen.video_enabled {
-                let bg_color = (cell.attribute >> 4) & 0x07;
+                let bg_color =
+                    (cell.attribute >> 4) & (if screen.blink_enabled { 0x07 } else { 0x0F });
                 if Some(bg_color) != prev_bg_color {
                     crossterm::execute!(
                         output,

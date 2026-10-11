@@ -4,6 +4,7 @@ use super::render;
 
 fn blank_screen() -> TextScreen {
     TextScreen {
+        blink_enabled: false,
         cells: [[TextCell {
             character: b' ',
             attribute: 0x07,

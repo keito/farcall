@@ -51,6 +51,7 @@ pub(crate) struct TextCursor {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TextScreen {
+    pub blink_enabled: bool,
     pub cells: [[TextCell; NUM_COLUMNS]; NUM_ROWS],
     pub video_enabled: bool,
     pub cursor: Option<TextCursor>,
@@ -382,6 +383,7 @@ impl CgaVideo {
             });
 
         let mut screen = TextScreen {
+            blink_enabled: self.mode & 0x20 != 0,
             cells: [[TextCell {
                 character: 0,
                 attribute: 0,
