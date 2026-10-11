@@ -15,7 +15,7 @@ use crate::{
     },
     machine::{
         KeyboardInputMode::{BiosKeystrokes, PcHardware},
-        Machine, MachineStepResult, TextScreen,
+        Machine, MachineStepResult,
     },
 };
 use guard::TerminalGuard;
@@ -116,10 +116,6 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
     let mut previous_frame = [0u8; 640 * 200 * 3];
     let mut previous_size: (usize, usize) = (0, 0);
 
-    let mut has_rendered_text_frame = false;
-    let mut previous_screen: Option<TextScreen> = None;
-    let mut screen_buf: Vec<u8> = vec![];
-
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
 
@@ -128,6 +124,8 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
 
     let mut pacing_start = Instant::now();
     let mut starting_cycles = machine.total_elapsed_cycles();
+
+    let mut text_renderer = text::Renderer::new();
 
     // Render each frame, at FRAME_INTERVAL
     loop {
@@ -152,7 +150,7 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                     }
                 }
                 event::Event::Resize(_, _) => {
-                    has_rendered_text_frame = false;
+                    text_renderer.invalidate();
                 }
                 _ => (),
             }
@@ -213,36 +211,8 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                     previous_size = (display_width, display_height);
                 }
             } else {
-                let maybe_screen = machine.render_text_screen();
-                if !has_rendered_text_frame || (maybe_screen != previous_screen) {
-                    let winsize = tcgetwinsize(&guard.terminal)?;
-                    if winsize.ws_col < 80 || winsize.ws_row < 25 {
-                        crossterm::execute!(
-                            stdout(),
-                            crossterm::cursor::Hide,
-                            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-                            crossterm::cursor::MoveTo(0, 0),
-                        )?;
-                        stdout().write_all(b"Resize to 80x25")?;
-                        stdout().flush()?;
-                    } else if let Some(screen) = maybe_screen.as_ref() {
-                        screen_buf.clear();
-                        text::render(&screen, &mut screen_buf)?;
-                        stdout().write_all(&screen_buf)?;
-                        stdout().flush()?;
-                    } else {
-                        crossterm::execute!(
-                            stdout(),
-                            crossterm::cursor::Hide,
-                            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-                            crossterm::cursor::MoveTo(0, 0),
-                        )?;
-                        stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Return to text mode or press Ctrl-] to terminate.")?;
-                        stdout().flush()?;
-                    }
-                    has_rendered_text_frame = true;
-                    previous_screen = maybe_screen;
-                }
+                let winsize = tcgetwinsize(&guard.terminal)?;
+                text_renderer.render(&machine, winsize, &mut stdout())?;
             }
         }
 

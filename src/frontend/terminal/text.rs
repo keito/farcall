@@ -4,14 +4,74 @@ use crossterm::{
     cursor,
     style::{Color, SetAttribute, SetBackgroundColor, SetForegroundColor},
 };
+use rustix::termios::Winsize;
 
-use crate::machine::{TextScreen, attribute_color_to_rgb};
+use crate::machine::{Machine, TextScreen, attribute_color_to_rgb};
 
 #[cfg(test)]
 mod tests;
 
+pub(crate) struct Renderer {
+    has_rendered_frame: bool,
+    previous_screen: Option<TextScreen>,
+    screen_buf: Vec<u8>,
+}
+
+impl Renderer {
+    pub(crate) fn new() -> Self {
+        Self {
+            has_rendered_frame: false,
+            previous_screen: None,
+            screen_buf: vec![],
+        }
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        self.has_rendered_frame = false;
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        machine: &Machine,
+        winsize: Winsize,
+        stdout: &mut impl Write,
+    ) -> std::io::Result<()> {
+        let maybe_screen = machine.render_text_screen();
+        if !self.has_rendered_frame || (maybe_screen != self.previous_screen) {
+            if winsize.ws_col < 80 || winsize.ws_row < 25 {
+                crossterm::execute!(
+                    stdout,
+                    crossterm::cursor::Hide,
+                    crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                    crossterm::cursor::MoveTo(0, 0),
+                )?;
+                stdout.write_all(b"Resize to 80x25")?;
+                stdout.flush()?;
+            } else if let Some(screen) = maybe_screen.as_ref() {
+                self.screen_buf.clear();
+                render_screen(&screen, &mut self.screen_buf)?;
+                stdout.write_all(&self.screen_buf)?;
+                stdout.flush()?;
+            } else {
+                crossterm::execute!(
+                    stdout,
+                    crossterm::cursor::Hide,
+                    crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                    crossterm::cursor::MoveTo(0, 0),
+                )?;
+                stdout.write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Return to text mode or press Ctrl-] to terminate.")?;
+                stdout.flush()?;
+            }
+            self.has_rendered_frame = true;
+            self.previous_screen = maybe_screen;
+        }
+
+        Ok(())
+    }
+}
+
 /// Render text-only output to the terminal.
-pub(super) fn render(screen: &TextScreen, output: &mut impl Write) -> std::io::Result<()> {
+pub(super) fn render_screen(screen: &TextScreen, output: &mut impl Write) -> std::io::Result<()> {
     crossterm::execute!(output, cursor::Hide)?;
 
     let mut prev_fg_color: Option<u8> = None;

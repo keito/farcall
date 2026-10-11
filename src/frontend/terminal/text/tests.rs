@@ -2,7 +2,7 @@ use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor};
 
 use crate::machine::{TextCell, TextCursor, TextScreen};
 
-use super::render;
+use super::render_screen;
 
 fn blank_screen() -> TextScreen {
     TextScreen {
@@ -18,7 +18,7 @@ fn blank_screen() -> TextScreen {
 
 fn render_output(screen: &TextScreen) -> String {
     let mut output = Vec::new();
-    render(screen, &mut output).expect("rendering to a Vec should succeed");
+    render_screen(screen, &mut output).expect("rendering to a Vec should succeed");
     assert!(
         !output.contains(&0),
         "rendered output must not contain NUL padding"
