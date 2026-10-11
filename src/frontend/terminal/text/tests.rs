@@ -1,3 +1,5 @@
+use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor};
+
 use crate::machine::{TextCell, TextScreen};
 
 use super::render;
@@ -14,15 +16,18 @@ fn blank_screen() -> TextScreen {
     }
 }
 
-fn first_row(screen: &TextScreen) -> String {
+fn render_output(screen: &TextScreen) -> String {
     let mut output = Vec::new();
     render(screen, &mut output).expect("rendering to a Vec should succeed");
     assert!(
         !output.contains(&0),
         "rendered output must not contain NUL padding"
     );
-    let output = String::from_utf8(output).expect("rendered output must be valid UTF-8");
+    String::from_utf8(output).expect("rendered output must be valid UTF-8")
+}
 
+fn first_row(screen: &TextScreen) -> String {
+    let output = render_output(screen);
     let (_, rows) = output.split_once("\x1b[1;1H").expect("first row position");
     let (mut row, _) = rows.split_once("\x1b[2;1H").expect("second row position");
 
@@ -91,4 +96,82 @@ fn screen_bytes_render_as_cp437_glyphs_instead_of_terminal_controls() {
     assert_eq!(row, expected);
     assert_eq!(row.chars().count(), 80);
     assert!(!row.chars().any(char::is_control));
+}
+
+#[test]
+fn blink_transitions_preserve_colors_and_leave_following_cells_steady() {
+    let mut screen = blank_screen();
+    screen.blink_enabled = true;
+    for cell in &mut screen.cells[0] {
+        cell.attribute = 0x1F; // White on dark blue, steady.
+    }
+    for (cell, (character, attribute)) in
+        screen.cells[0]
+            .iter_mut()
+            .zip([(b'A', 0x9F), (b'B', 0x9F), (b'C', 0x1F), (b'D', 0x9F)])
+    {
+        cell.character = character;
+        cell.attribute = attribute;
+    }
+
+    let output = render_output(&screen);
+    // Attribute bit 7 selects blink here, so all four letters keep dark blue.
+    // Build color commands via Crossterm so the test also works with NO_COLOR.
+    let background = SetBackgroundColor(Color::Rgb { r: 0, g: 0, b: 170 });
+    let foreground = SetForegroundColor(Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    });
+    let expected = format!(
+        "\x1b[1;1H{background}{foreground}\x1b[5mAB\x1b[25mC\x1b[5mD\x1b[25m{}",
+        " ".repeat(76),
+    );
+    assert!(
+        output.contains(&expected),
+        "unexpected blink/color transitions: {output:?}"
+    );
+    assert_eq!(output.matches("\x1b[5m").count(), 2);
+    assert_eq!(output.matches("\x1b[25m").count(), 2);
+    assert!(
+        output.ends_with("\x1b[0m"),
+        "frame must reset its attributes"
+    );
+}
+
+#[test]
+fn blink_disabled_uses_bright_backgrounds_without_enabling_blink() {
+    let mut screen = blank_screen();
+    for (cell, (character, attribute)) in
+        screen.cells[0]
+            .iter_mut()
+            .zip([(b'A', 0x9F), (b'B', 0x1F), (b'C', 0x9F), (b'D', 0x1F)])
+    {
+        cell.character = character;
+        cell.attribute = attribute;
+    }
+
+    let output = render_output(&screen);
+    let bright = SetBackgroundColor(Color::Rgb {
+        r: 85,
+        g: 85,
+        b: 255,
+    });
+    let dark = SetBackgroundColor(Color::Rgb { r: 0, g: 0, b: 170 });
+    let foreground = SetForegroundColor(Color::Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    });
+    let expected = format!("\x1b[1;1H{bright}{foreground}\x1b[25mA{dark}B{bright}C{dark}D");
+    assert!(
+        output.contains(&expected),
+        "unexpected background colors: {output:?}"
+    );
+    assert!(!output.contains("\x1b[5m"), "CGA blink mode is disabled");
+    assert_eq!(output.matches("\x1b[25m").count(), 1);
+    assert!(
+        output.ends_with("\x1b[0m"),
+        "frame must reset its attributes"
+    );
 }
