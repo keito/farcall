@@ -2,7 +2,7 @@ use std::io::Write;
 
 use crossterm::{
     cursor,
-    style::{Color, SetBackgroundColor, SetForegroundColor},
+    style::{Color, SetAttribute, SetBackgroundColor, SetForegroundColor},
 };
 
 use crate::machine::{TextScreen, attribute_color_to_rgb};
@@ -16,6 +16,7 @@ pub(super) fn render(screen: &TextScreen, output: &mut impl Write) -> std::io::R
 
     let mut prev_fg_color: Option<u8> = None;
     let mut prev_bg_color: Option<u8> = None;
+    let mut prev_blink: Option<bool> = None;
     for (row_index, row) in screen.cells.iter().enumerate() {
         output.write_all(format!("\x1b[{};{}H", row_index + 1, 1).as_bytes())?;
         for cell in row {
@@ -37,6 +38,19 @@ pub(super) fn render(screen: &TextScreen, output: &mut impl Write) -> std::io::R
                         SetForegroundColor(attribute_color_to_crossterm_color(fg_color))
                     )?;
                     prev_fg_color = Some(fg_color);
+                }
+
+                let blink = screen.blink_enabled && (cell.attribute & 0x80) != 0;
+                if Some(blink) != prev_blink {
+                    crossterm::execute!(
+                        output,
+                        SetAttribute(if blink {
+                            crossterm::style::Attribute::SlowBlink
+                        } else {
+                            crossterm::style::Attribute::NoBlink
+                        })
+                    )?;
+                    prev_blink = Some(blink);
                 }
             }
 
