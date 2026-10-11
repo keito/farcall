@@ -1,9 +1,62 @@
-use base64::{Engine as _, engine::general_purpose::STANDARD};
+use std::io::Write;
 
-use crate::frontend::terminal::PADDING;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use rustix::termios::Winsize;
+
+use crate::machine::Machine;
+
+const PADDING: usize = 8;
+
+pub(crate) struct Renderer {
+    current_frame: [u8; 640 * 200 * 3],
+    previous_frame: [u8; 640 * 200 * 3],
+    previous_size: (usize, usize),
+}
+
+impl Renderer {
+    pub(crate) fn new() -> Self {
+        Self {
+            current_frame: [0u8; 640 * 200 * 3],
+            previous_frame: [0u8; 640 * 200 * 3],
+            previous_size: (0, 0),
+        }
+    }
+
+    pub(crate) fn render(
+        &mut self,
+        machine: &Machine,
+        winsize: Winsize,
+        stdout: &mut impl Write,
+    ) -> anyhow::Result<()> {
+        machine.render_video(&mut self.current_frame);
+        let (display_width, display_height) = calc_display_size(winsize);
+
+        // Skip output if frame and size are unchanged
+        if self.current_frame == self.previous_frame
+            && self.previous_size == (display_width, display_height)
+        {
+            return Ok(());
+        }
+
+        if display_width == 0 || display_height == 0 {
+            anyhow::bail!("Terminal is too small");
+        }
+
+        let data = encode_image(&self.current_frame, 640, 200, display_width, display_height)?;
+        for line in data {
+            stdout.write_all(&line.as_bytes())?;
+        }
+        stdout.flush()?;
+
+        std::mem::swap(&mut self.current_frame, &mut self.previous_frame);
+        self.previous_size = (display_width, display_height);
+
+        Ok(())
+    }
+}
 
 /// Encodes the given image pixels into a Vec of Kitty commands
-pub(crate) fn encode_image(
+fn encode_image(
     pixels: &[u8],
     width: usize,
     height: usize,
@@ -84,4 +137,15 @@ pub(crate) fn encode_image(
             }
         })
         .collect())
+}
+
+fn calc_display_size(winsize: Winsize) -> (usize, usize) {
+    // Reserve some margin
+    let width_px = f64::from(winsize.ws_xpixel.saturating_sub(PADDING as u16 * 2));
+    let height_px = f64::from(winsize.ws_ypixel.saturating_sub(PADDING as u16 * 2));
+
+    let image_width = width_px.min(height_px * (4.0 / 3.0));
+    let image_height = image_width * (3.0 / 4.0);
+
+    (image_width as usize, image_height as usize)
 }

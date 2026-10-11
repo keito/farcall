@@ -29,7 +29,31 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(33_333); // 30 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
-const PADDING: usize = 8;
+enum Renderer {
+    Graphics(graphics::Renderer),
+    Text(text::Renderer),
+}
+
+impl Renderer {
+    pub(crate) fn render(
+        &mut self,
+        machine: &Machine,
+        winsize: Winsize,
+        stdout: &mut impl Write,
+    ) -> anyhow::Result<()> {
+        match self {
+            Renderer::Graphics(graphics) => graphics.render(machine, winsize, stdout),
+            Renderer::Text(text) => text.render(machine, winsize, stdout),
+        }
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        match self {
+            Renderer::Graphics(_) => (),
+            Renderer::Text(text) => text.invalidate(),
+        }
+    }
+}
 
 fn handle_enhanced_key_event(machine: &mut Machine, key_event: KeyEvent) -> bool {
     // Handle Ctrl-]
@@ -112,10 +136,6 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
     // Set title
     crossterm::execute!(stdout(), SetTitle("pc86 - Press Ctrl-] to exit"))?;
 
-    let mut current_frame = [0u8; 640 * 200 * 3];
-    let mut previous_frame = [0u8; 640 * 200 * 3];
-    let mut previous_size: (usize, usize) = (0, 0);
-
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
 
@@ -125,7 +145,11 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
     let mut pacing_start = Instant::now();
     let mut starting_cycles = machine.total_elapsed_cycles();
 
-    let mut text_renderer = text::Renderer::new();
+    let mut renderer: Renderer = if use_graphics {
+        Renderer::Graphics(graphics::Renderer::new())
+    } else {
+        Renderer::Text(text::Renderer::new())
+    };
 
     // Render each frame, at FRAME_INTERVAL
     loop {
@@ -150,7 +174,7 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                     }
                 }
                 event::Event::Resize(_, _) => {
-                    text_renderer.invalidate();
+                    renderer.invalidate();
                 }
                 _ => (),
             }
@@ -181,39 +205,8 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
         if Instant::now() >= next_frame || exit_code.is_some() {
             next_frame = Instant::now() + FRAME_INTERVAL;
 
-            if use_graphics {
-                machine.render_video(&mut current_frame);
-
-                let winsize = tcgetwinsize(&guard.terminal)?;
-                let (display_width, display_height) = calc_display_size(winsize);
-
-                // Send new frame if different from previous frame
-                if current_frame != previous_frame
-                    || previous_size != (display_width, display_height)
-                {
-                    if display_width == 0 || display_height == 0 {
-                        anyhow::bail!("Terminal is too small");
-                    }
-
-                    let data = graphics::encode_image(
-                        &current_frame,
-                        640,
-                        200,
-                        display_width,
-                        display_height,
-                    )?;
-                    for line in data {
-                        stdout().write_all(&line.as_bytes())?;
-                    }
-                    stdout().flush()?;
-
-                    std::mem::swap(&mut current_frame, &mut previous_frame);
-                    previous_size = (display_width, display_height);
-                }
-            } else {
-                let winsize = tcgetwinsize(&guard.terminal)?;
-                text_renderer.render(&machine, winsize, &mut stdout())?;
-            }
+            let winsize = tcgetwinsize(&guard.terminal)?;
+            renderer.render(&machine, winsize, &mut stdout())?;
         }
 
         if let Some(code) = exit_code {
@@ -222,15 +215,4 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
 
         std::thread::sleep(Duration::from_millis(1));
     }
-}
-
-fn calc_display_size(winsize: Winsize) -> (usize, usize) {
-    // Reserve some margin
-    let width_px = f64::from(winsize.ws_xpixel.saturating_sub(PADDING as u16 * 2));
-    let height_px = f64::from(winsize.ws_ypixel.saturating_sub(PADDING as u16 * 2));
-
-    let image_width = width_px.min(height_px * (4.0 / 3.0));
-    let image_height = image_width * (3.0 / 4.0);
-
-    (image_width as usize, image_height as usize)
 }

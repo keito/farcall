@@ -35,36 +35,40 @@ impl Renderer {
         machine: &Machine,
         winsize: Winsize,
         stdout: &mut impl Write,
-    ) -> std::io::Result<()> {
+    ) -> anyhow::Result<()> {
         let maybe_screen = machine.render_text_screen();
-        if !self.has_rendered_frame || (maybe_screen != self.previous_screen) {
-            if winsize.ws_col < 80 || winsize.ws_row < 25 {
-                crossterm::execute!(
-                    stdout,
-                    crossterm::cursor::Hide,
-                    crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-                    crossterm::cursor::MoveTo(0, 0),
-                )?;
-                stdout.write_all(b"Resize to 80x25")?;
-                stdout.flush()?;
-            } else if let Some(screen) = maybe_screen.as_ref() {
-                self.screen_buf.clear();
-                render_screen(&screen, &mut self.screen_buf)?;
-                stdout.write_all(&self.screen_buf)?;
-                stdout.flush()?;
-            } else {
-                crossterm::execute!(
-                    stdout,
-                    crossterm::cursor::Hide,
-                    crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
-                    crossterm::cursor::MoveTo(0, 0),
-                )?;
-                stdout.write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Return to text mode or press Ctrl-] to terminate.")?;
-                stdout.flush()?;
-            }
-            self.has_rendered_frame = true;
-            self.previous_screen = maybe_screen;
+
+        // Skip if frame is unchanged and we're not invalidated
+        if self.has_rendered_frame && (maybe_screen == self.previous_screen) {
+            return Ok(());
         }
+
+        if winsize.ws_col < 80 || winsize.ws_row < 25 {
+            crossterm::execute!(
+                stdout,
+                crossterm::cursor::Hide,
+                crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                crossterm::cursor::MoveTo(0, 0),
+            )?;
+            stdout.write_all(b"Resize to 80x25")?;
+            stdout.flush()?;
+        } else if let Some(screen) = maybe_screen.as_ref() {
+            self.screen_buf.clear();
+            render_screen(&screen, &mut self.screen_buf)?;
+            stdout.write_all(&self.screen_buf)?;
+            stdout.flush()?;
+        } else {
+            crossterm::execute!(
+                stdout,
+                crossterm::cursor::Hide,
+                crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                crossterm::cursor::MoveTo(0, 0),
+            )?;
+            stdout.write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Return to text mode or press Ctrl-] to terminate.")?;
+            stdout.flush()?;
+        }
+        self.has_rendered_frame = true;
+        self.previous_screen = maybe_screen;
 
         Ok(())
     }
