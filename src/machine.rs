@@ -21,7 +21,7 @@ use pit::Pit;
 use ppi::Ppi;
 
 #[cfg(test)]
-pub(crate) use cga_video::TextCell;
+pub(crate) use cga_video::{TextCell, TextCursor};
 pub(crate) use cga_video::TextScreen;
 pub use cga_video::attribute_color_to_rgb;
 pub use disk::{DiskImageConfig, DiskType};

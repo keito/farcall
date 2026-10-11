@@ -1,6 +1,6 @@
 use crossterm::style::{Color, SetBackgroundColor, SetForegroundColor};
 
-use crate::machine::{TextCell, TextScreen};
+use crate::machine::{TextCell, TextCursor, TextScreen};
 
 use super::render;
 
@@ -173,5 +173,58 @@ fn blink_disabled_uses_bright_backgrounds_without_enabling_blink() {
     assert!(
         output.ends_with("\x1b[0m"),
         "frame must reset its attributes"
+    );
+}
+
+#[test]
+fn visible_cursor_is_positioned_and_shown_after_resetting_attributes() {
+    let mut screen = blank_screen();
+    screen.blink_enabled = true;
+    // Leave blink enabled on the final cell to exercise cleanup before Show.
+    screen.cells[24][79] = TextCell {
+        character: b'X',
+        attribute: 0x87,
+    };
+
+    for (column, row) in [(0, 0), (7, 11), (79, 24)] {
+        screen.cursor = Some(TextCursor { column, row });
+        let output = render_output(&screen);
+
+        assert!(
+            output.starts_with("\x1b[?25l"),
+            "hide cursor before drawing"
+        );
+        assert_eq!(output.matches("\x1b[?25l").count(), 1);
+        assert_eq!(output.matches("\x1b[?25h").count(), 1);
+        // Screen coordinates are zero-based; ANSI positions are one-based,
+        // with the row before the column.
+        let expected = format!("\x1b[5mX\x1b[0m\x1b[{};{}H\x1b[?25h", row + 1, column + 1,);
+        assert!(
+            output.ends_with(&expected),
+            "incorrect cursor position or cleanup order at ({column}, {row})"
+        );
+    }
+}
+
+#[test]
+fn absent_cursor_stays_hidden_after_rendering() {
+    let mut screen = blank_screen();
+    screen.blink_enabled = true;
+    screen.cells[24][79] = TextCell {
+        character: b'X',
+        attribute: 0x87,
+    };
+
+    let output = render_output(&screen);
+
+    assert!(
+        output.starts_with("\x1b[?25l"),
+        "hide cursor before drawing"
+    );
+    assert_eq!(output.matches("\x1b[?25l").count(), 1);
+    assert!(!output.contains("\x1b[?25h"), "cursor must remain hidden");
+    assert!(
+        output.ends_with("\x1b[5mX\x1b[0m"),
+        "reset attributes even when no cursor is shown"
     );
 }
