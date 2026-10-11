@@ -214,14 +214,29 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
             } else {
                 let maybe_screen = machine.render_text_screen();
                 if !has_rendered_text_frame || (maybe_screen != previous_screen) {
-                    if let Some(screen) = maybe_screen.as_ref() {
+                    let winsize = tcgetwinsize(&guard.terminal)?;
+                    if winsize.ws_col < 80 || winsize.ws_row < 25 {
+                        crossterm::execute!(
+                            stdout(),
+                            crossterm::cursor::Hide,
+                            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                            crossterm::cursor::MoveTo(0, 0),
+                        )?;
+                        stdout().write_all(b"Resize to 80x25")?;
+                        stdout().flush()?;
+                    } else if let Some(screen) = maybe_screen.as_ref() {
                         let mut buf: Vec<u8> = vec![];
                         text::render(&screen, &mut buf)?;
                         stdout().write_all(&buf)?;
                         stdout().flush()?;
                     } else {
-                        stdout().write_all(b"\x1b[2J\x1b[H")?;
-                        stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Press Ctrl-] to terminate.")?;
+                        crossterm::execute!(
+                            stdout(),
+                            crossterm::cursor::Hide,
+                            crossterm::terminal::Clear(crossterm::terminal::ClearType::All),
+                            crossterm::cursor::MoveTo(0, 0),
+                        )?;
+                        stdout().write_all(b"The video card is rendering graphics, which is not supported in the Text\r\nTerminal frontend. Return to text mode or press Ctrl-] to terminate.")?;
                         stdout().flush()?;
                     }
                     has_rendered_text_frame = true;
