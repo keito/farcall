@@ -21,6 +21,7 @@ use pit::Pit;
 use ppi::Ppi;
 
 pub(crate) use cga_video::TextScreen;
+pub use cga_video::attribute_color_to_rgb;
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
