@@ -118,6 +118,7 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
 
     let mut has_rendered_text_frame = false;
     let mut previous_screen: Option<TextScreen> = None;
+    let mut screen_buf: Vec<u8> = vec![];
 
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
@@ -225,9 +226,9 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
                         stdout().write_all(b"Resize to 80x25")?;
                         stdout().flush()?;
                     } else if let Some(screen) = maybe_screen.as_ref() {
-                        let mut buf: Vec<u8> = vec![];
-                        text::render(&screen, &mut buf)?;
-                        stdout().write_all(&buf)?;
+                        screen_buf.clear();
+                        text::render(&screen, &mut screen_buf)?;
+                        stdout().write_all(&screen_buf)?;
                         stdout().flush()?;
                     } else {
                         crossterm::execute!(
