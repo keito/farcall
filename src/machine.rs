@@ -111,6 +111,11 @@ pub(crate) enum KeyboardInputMode {
     PcHardware,
 }
 
+enum FloppyOperation {
+    Read,
+    Write,
+}
+
 const APPROXIMATE_CYCLES_PER_STEP: u32 = 4;
 
 impl Machine {
@@ -427,11 +432,7 @@ impl Machine {
             0x3F2 | 0x3F5 => {
                 self.fdc.write(port, value);
                 if let Some(request) = self.fdc.take_data_request() {
-                    if request.command & 0x1F == 0x06 {
-                        self.handle_floppy_read(request)?;
-                    } else {
-                        self.handle_floppy_write(request)?;
-                    }
+                    self.handle_floppy_operation(request)?;
                 }
                 // Synchronize PIC's IRQ line with the FDC's output
                 self.pic.set_irq_line(6, self.fdc.irq_output());
@@ -441,7 +442,7 @@ impl Machine {
         Ok(())
     }
 
-    fn handle_floppy_write(&mut self, request: FdcDataRequest) -> Result<(), MachineError> {
+    fn handle_floppy_operation(&mut self, request: FdcDataRequest) -> Result<(), MachineError> {
         let [
             drive_head,
             cylinder,
@@ -453,6 +454,12 @@ impl Machine {
             _data_length,
         ] = request.parameters;
 
+        let operation = match request.command & 0x1F {
+            0x05 => FloppyOperation::Write,
+            0x06 => FloppyOperation::Read,
+            _ => unreachable!("Invalid floppy operation command"),
+        };
+
         let drive = drive_head & 0x03; // Extract Unit Select bits
         let physical_head = (drive_head >> 2) & 1; // Extract HD bit
 
@@ -461,22 +468,17 @@ impl Machine {
             return Err(MachineError::DiskError("Unsupported disk".to_string()));
         }
 
-        // See how many bytes DMA is configured to send
+        // See how many bytes DMA is configured for
         let count_bytes = self.dma.count_bytes();
 
-        // Require DMA to be unmasked, mode 0x4A, and byte count divisible by 512
-        if self.dma.is_masked() || self.dma.mode() != 0x4A || count_bytes % 512 != 0 {
+        // Require DMA to be unmasked, correct mode, and byte count divisible by 512
+        let dma_mode = match operation {
+            FloppyOperation::Read => 0x46,
+            FloppyOperation::Write => 0x4A,
+        };
+        if self.dma.is_masked() || self.dma.mode() != dma_mode || count_bytes % 512 != 0 {
             return Err(MachineError::DiskError(
                 "Unsupported DMA parameters".to_string(),
-            ));
-        }
-
-        let source_addr = self.dma.physical_address();
-        let dma_offset = (source_addr & 0xFFFF) as usize;
-
-        if dma_offset + count_bytes > 0x10000 {
-            return Err(MachineError::DiskError(
-                "DMA transfer crosses 64 KiB boundary".to_string(),
             ));
         }
 
@@ -489,14 +491,20 @@ impl Machine {
             return Ok(());
         };
 
+        let dma_addr = self.dma.physical_address();
+        let dma_offset = (dma_addr & 0xFFFF) as usize;
+
+        if dma_offset + count_bytes > 0x10000 {
+            return Err(MachineError::DiskError(
+                "DMA transfer crosses 64 KiB boundary".to_string(),
+            ));
+        }
+
         let multi_track = request.command & 0x80 != 0;
         let mut current_head = head;
         let mut current_sector = sector;
 
-        // Read bytes to write
-        let bytes = read_buffer(&self.memory, PhysAddr::from_u32(source_addr), count_bytes)?;
-
-        // Collect destination offsets
+        // Collect floppy offsets
         let mut offsets: Vec<usize> = vec![];
         let mut bytes_written = 0;
         for _ in 0..count_bytes / 512 {
@@ -510,7 +518,7 @@ impl Machine {
                 .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
             floppy_image
                 .bytes
-                .get_mut(offset..offset + 512)
+                .get(offset..offset + 512)
                 .ok_or_else(|| {
                     MachineError::DiskError("Cannot get slice of floppy image bytes".to_string())
                 })?;
@@ -536,133 +544,27 @@ impl Machine {
             }
         }
 
-        // Now actually perform the writes by sector
-        for (offset, chunk) in offsets.into_iter().zip(bytes.chunks_exact(512)) {
-            floppy_image.bytes[offset..offset + 512].copy_from_slice(chunk);
-        }
-
-        self.dma.complete_transfer(count_bytes as u16);
-
-        // Construct position after transfer
-        let reached_end_of_track = current_sector == end_sector;
-        let (result_cylinder, result_head, result_sector) =
-            match (reached_end_of_track, multi_track, current_head) {
-                // Continue within current track
-                (false, _, _) => (cylinder, current_head, current_sector + 1),
-                // Continue onto head 1 of this cylinder
-                (true, true, 0) => (cylinder, 1, 1),
-                // Finished the last head
-                (true, true, _) => (cylinder + 1, 0, 1),
-                // Single-track mode: go to next cylinder on current head
-                (true, false, _) => (cylinder + 1, current_head, 1),
-            };
-
-        let results = [
-            drive | (current_head << 2), // ST0: Normal completion,
-            00,                          // ST1: no errors
-            00,                          // ST2: no errors
-            result_cylinder,
-            result_head,
-            result_sector,
-            size_code,
-        ];
-        self.fdc.complete_transfer(results);
-
-        Ok(())
-    }
-
-    fn handle_floppy_read(&mut self, request: FdcDataRequest) -> Result<(), MachineError> {
-        let [
-            drive_head,
-            cylinder,
-            head,
-            sector,
-            size_code,  // sector size code (bytes = 128 << size_code except 0)
-            end_sector, // EOT: final sector ID on a track for this command
-            _gap,
-            _data_length,
-        ] = request.parameters;
-
-        let drive = drive_head & 0x03; // Extract Unit Select bits
-        let physical_head = (drive_head >> 2) & 1; // Extract HD bit
-
-        // Ensure drive A or B and sectors are 512 bytes, and physical head agrees with head ID.
-        if (drive != 0 && drive != 1) || size_code != 2 || physical_head != head {
-            return Err(MachineError::DiskError("Unsupported disk".to_string()));
-        }
-
-        // See how many bytes DMA is configured to receive
-        let count_bytes = self.dma.count_bytes();
-
-        // Require DMA to be unmasked, mode 0x46, and byte count divisible by 512
-        if self.dma.is_masked() || self.dma.mode() != 0x46 || count_bytes % 512 != 0 {
-            return Err(MachineError::DiskError(
-                "Unsupported DMA parameters".to_string(),
-            ));
-        }
-
-        let dest_addr = self.dma.physical_address();
-        let dma_offset = (dest_addr & 0xFFFF) as usize;
-
-        if dma_offset + count_bytes > 0x10000 {
-            return Err(MachineError::DiskError(
-                "DMA transfer crosses 64 KiB boundary".to_string(),
-            ));
-        }
-
-        // Handle disk image not provided with a MA (Missing Address Mark) status
-        // TODO: more accurately simulate empty disk
-        let Some(floppy_image) = self.floppy_images[drive as usize].as_ref() else {
-            let st0 = 0x40 | (physical_head << 2) | drive;
-            let results = [st0, 0x01, 0x00, cylinder, head, sector, size_code];
-            self.fdc.complete_transfer(results);
-            return Ok(());
-        };
-
-        let multi_track = request.command & 0x80 != 0;
-        let mut current_head = head;
-        let mut current_sector = sector;
-        let mut buffer: Vec<u8> = Vec::with_capacity(count_bytes);
-
-        // For each sector...
-        for _ in 0..count_bytes / 512 {
-            let offset = floppy_image
-                .geometry
-                .byte_offset(
-                    cylinder as usize,
-                    current_head as usize,
-                    current_sector as usize,
-                )
-                .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
-
-            let Some(bytes) = floppy_image.bytes.get(offset..offset + 512) else {
-                return Err(MachineError::DiskError("Bytes out of bounds".to_string()));
-            };
-
-            buffer.extend_from_slice(bytes);
-
-            if buffer.len() == count_bytes {
-                break;
+        match operation {
+            FloppyOperation::Read => {
+                let mut buffer: Vec<u8> = Vec::with_capacity(count_bytes);
+                for offset in offsets {
+                    let bytes = &floppy_image.bytes[offset..offset + 512];
+                    buffer.extend_from_slice(bytes);
+                }
+                // Write buffer to DMA-requested memory address
+                let validated_buffer =
+                    validate_buffer(&mut self.memory, PhysAddr::from_u32(dma_addr), count_bytes)?;
+                write_buffer(validated_buffer, &buffer)?;
             }
-
-            if current_sector != end_sector {
-                // Not yet at end of track
-                current_sector = current_sector.wrapping_add(1);
-            } else if current_sector == end_sector && multi_track && current_head == 0 {
-                // At end of track, multi-track enabled, and we're on the first head
-                current_head = 1;
-                current_sector = 1;
-            } else if current_sector == end_sector {
-                return Err(MachineError::DiskError(
-                    "Cannot read past end of track without multi-track".to_string(),
-                ));
+            FloppyOperation::Write => {
+                // Read bytes to write
+                let bytes = read_buffer(&self.memory, PhysAddr::from_u32(dma_addr), count_bytes)?;
+                // Now actually perform the writes by sector
+                for (offset, chunk) in offsets.into_iter().zip(bytes.chunks_exact(512)) {
+                    floppy_image.bytes[offset..offset + 512].copy_from_slice(chunk);
+                }
             }
         }
-
-        // Write buffer to DMA-requested memory address
-        let validated_buffer =
-            validate_buffer(&mut self.memory, PhysAddr::from_u32(dest_addr), count_bytes)?;
-        write_buffer(validated_buffer, &buffer)?;
 
         self.dma.complete_transfer(count_bytes as u16);
 

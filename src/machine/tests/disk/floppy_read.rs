@@ -1,4 +1,4 @@
-//! Direct tests of Machine::handle_floppy_read, bypassing the hosted INT 13h BIOS.
+//! Read tests of Machine::handle_floppy_operation, bypassing the hosted INT 13h BIOS.
 //!
 //! NEC uPD765A/B: Read Data and Table 6 (result C/H/R/N after terminal count).
 //! https://cpctech.cpcwiki.de/docs/upd765a/necfdc.htm
@@ -99,7 +99,7 @@ fn expect_read(
     let request = read_request(&mut machine, multi_track, 0, start, eot);
 
     machine
-        .handle_floppy_read(request)
+        .handle_floppy_operation(request)
         .expect("valid floppy read must succeed");
 
     assert!(
@@ -162,7 +162,7 @@ fn selected_drive_supplies_the_data_and_result_unit() {
         setup_dma(&mut machine, DESTINATION, 1);
         let request = read_request(&mut machine, false, drive, [0, 0, 2], 9);
 
-        machine.handle_floppy_read(request).unwrap();
+        machine.handle_floppy_operation(request).unwrap();
 
         assert!(machine.memory == expected_memory);
         assert!(machine.floppy_images[0].as_ref().unwrap().bytes == image_a);
