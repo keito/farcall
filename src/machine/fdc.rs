@@ -15,7 +15,6 @@ pub(super) struct Fdc {
     head_unload_time: u8,
     head_load_time: u8,
     non_dma: bool,
-    data_request: Option<FdcDataRequest>,
 }
 
 enum PendingInterrupt {
@@ -29,12 +28,14 @@ enum CommandState {
     SpecifyFirst,
     SpecifySecond,
     RecalibrateDrive,
-    DataParameters,
+    DataParameters(FdcDataRequest),
+    PendingDataRequest(FdcDataRequest),
     ExecutingDataRequest,
     SeekDrive,
     SeekCylinder { drive_head: u8 },
 }
 
+#[derive(Clone)]
 pub(super) struct FdcDataRequest {
     pub(super) command: u8,
     pub(super) parameters: [u8; 8],
@@ -53,7 +54,6 @@ impl Fdc {
             head_unload_time: 0,
             head_load_time: 0,
             non_dma: false,
-            data_request: None,
         }
     }
 
@@ -62,11 +62,12 @@ impl Fdc {
             // Idle vs result bytes available status
             0x3F4 => {
                 if !matches!(self.command_state, CommandState::Idle) {
-                    if matches!(self.command_state, CommandState::ExecutingDataRequest) {
-                        return 0x10;
+                    match self.command_state {
+                        CommandState::PendingDataRequest(_)
+                        | CommandState::ExecutingDataRequest => 0x10, // busy
+                        // Command busy bit set
+                        _ => 0x90,
                     }
-                    // Command busy bit set
-                    0x90
                 } else if self.result_bytes.is_empty() {
                     0x80
                 } else {
@@ -112,10 +113,14 @@ impl Fdc {
     }
 
     pub(super) fn take_data_request(&mut self) -> Option<FdcDataRequest> {
-        if matches!(self.command_state, CommandState::ExecutingDataRequest) {
-            return self.data_request.take();
+        match self.command_state {
+            CommandState::PendingDataRequest(ref request) => {
+                let request = request.clone();
+                self.command_state = CommandState::ExecutingDataRequest;
+                Some(request)
+            }
+            _ => None,
         }
-        None
     }
 
     pub(super) fn write(&mut self, port: u16, value: u8) {
@@ -129,7 +134,6 @@ impl Fdc {
                     self.result_bytes.clear();
                     self.command_state = CommandState::Idle;
                     self.interrupt_request = None;
-                    self.data_request = None;
                     self.read_irq_pending = false;
                 }
                 self.dor = value;
@@ -147,12 +151,11 @@ impl Fdc {
                             0x07 => self.command_state = CommandState::RecalibrateDrive,
                             0x08 => self.sense_interrupt_status(),
                             _ if matches!(value & 0x1F, 0x05 | 0x06) => {
-                                self.data_request = Some(FdcDataRequest {
+                                self.command_state = CommandState::DataParameters(FdcDataRequest {
                                     command: value,
                                     parameters: [0; 8],
                                     next: 0,
                                 });
-                                self.command_state = CommandState::DataParameters;
                             }
                             0x0F => self.command_state = CommandState::SeekDrive,
                             _ => {
@@ -178,17 +181,19 @@ impl Fdc {
                         });
                         self.command_state = CommandState::Idle;
                     }
-                    CommandState::DataParameters => {
-                        let Some(request) = self.data_request.as_mut() else {
-                            panic!("ExecutingDataRequest state without data_request set");
-                        };
+                    CommandState::DataParameters(ref request) => {
+                        let mut request = request.clone();
                         request.parameters[request.next] = value;
                         if request.next == 7 {
-                            self.command_state = CommandState::ExecutingDataRequest;
+                            self.command_state = CommandState::PendingDataRequest(request);
                             return;
                         } else {
                             request.next += 1;
                         }
+                        self.command_state = CommandState::DataParameters(request);
+                    }
+                    CommandState::PendingDataRequest(ref _request) => {
+                        // TODO
                     }
                     CommandState::ExecutingDataRequest => {
                         // TODO
