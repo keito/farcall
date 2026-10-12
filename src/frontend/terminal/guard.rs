@@ -100,7 +100,14 @@ impl TerminalGuard {
                 std::thread::sleep(Duration::from_millis(1));
                 continue;
             }
+
             response.extend_from_slice(&chunk[..count]);
+
+            // Don't grow response more than 4KB
+            if response.len() > 4096 {
+                return Err(anyhow::anyhow!("Response too large"));
+            }
+
             if has_identification_reply(&response) {
                 break;
             }
