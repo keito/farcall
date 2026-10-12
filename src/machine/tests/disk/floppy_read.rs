@@ -4,7 +4,7 @@
 //! https://cpctech.cpcwiki.de/docs/upd765a/necfdc.htm
 
 use super::{Machine, disk_image, floppy_360kib, machine_with_image};
-use crate::machine::fdc::FdcReadData;
+use crate::machine::fdc::FdcDataRequest;
 
 const SECTOR_BYTES: usize = 512;
 const DESTINATION: usize = 0x12000;
@@ -29,7 +29,7 @@ fn read_request(
     drive: u8,
     [cylinder, head, sector]: [u8; 3],
     eot: u8,
-) -> FdcReadData {
+) -> FdcDataRequest {
     // Build the request through the FDC's command interface, including its
     // execution state, rather than exposing private request-parser fields.
     machine.fdc.write(0x3F2, 0x08); // Enable the interrupt gate without a reset event.
@@ -47,7 +47,7 @@ fn read_request(
     ] {
         machine.fdc.write(0x3F5, byte);
     }
-    machine.fdc.take_read_request().unwrap()
+    machine.fdc.take_data_request().unwrap()
 }
 
 fn expect_completion(machine: &mut Machine, drive: u8, chrn: [u8; 4]) {

@@ -14,16 +14,16 @@ use cga_video::CgaVideo;
 use disk::{DiskGeometry, FloppyDisk};
 use dma::Dma;
 use dos::{Dos, DosError};
-use fdc::{Fdc, FdcReadData};
+use fdc::{Fdc, FdcDataRequest};
 use pc_keyboard::PcKeyboard;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
 
-#[cfg(test)]
-pub(crate) use cga_video::{TextCell, TextCursor};
 pub(crate) use cga_video::TextScreen;
 pub use cga_video::attribute_color_to_rgb;
+#[cfg(test)]
+pub(crate) use cga_video::{TextCell, TextCursor};
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
@@ -425,8 +425,14 @@ impl Machine {
             }
             0x3F2 | 0x3F5 => {
                 self.fdc.write(port, value);
-                if let Some(read_request) = self.fdc.take_read_request() {
-                    self.handle_floppy_read(read_request)?;
+                if let Some(request) = self.fdc.take_data_request() {
+                    if request.command & 0x1F == 0x06 {
+                        self.handle_floppy_read(request)?;
+                    } else {
+                        return Err(MachineError::DiskError(
+                            "Writes not implemented".to_string(),
+                        ));
+                    }
                 }
                 // Synchronize PIC's IRQ line with the FDC's output
                 self.pic.set_irq_line(6, self.fdc.irq_output());
@@ -436,7 +442,7 @@ impl Machine {
         Ok(())
     }
 
-    fn handle_floppy_read(&mut self, read_request: FdcReadData) -> Result<(), MachineError> {
+    fn handle_floppy_read(&mut self, read_request: FdcDataRequest) -> Result<(), MachineError> {
         let [
             drive_head,
             cylinder,
