@@ -5,7 +5,8 @@ use thiserror::Error;
 
 use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
 use crate::memory::{
-    MemoryError, PhysAddr, SegmentedAddr, validate_buffer, write_buffer, write_byte, write_word,
+    MemoryError, PhysAddr, SegmentedAddr, read_buffer, validate_buffer, write_buffer, write_byte,
+    write_word,
 };
 use crate::registers::Reg8;
 use bios::{Bios, BiosError};
@@ -429,9 +430,7 @@ impl Machine {
                     if request.command & 0x1F == 0x06 {
                         self.handle_floppy_read(request)?;
                     } else {
-                        return Err(MachineError::DiskError(
-                            "Writes not implemented".to_string(),
-                        ));
+                        self.handle_floppy_write(request)?;
                     }
                 }
                 // Synchronize PIC's IRQ line with the FDC's output
@@ -442,7 +441,7 @@ impl Machine {
         Ok(())
     }
 
-    fn handle_floppy_read(&mut self, read_request: FdcDataRequest) -> Result<(), MachineError> {
+    fn handle_floppy_write(&mut self, request: FdcDataRequest) -> Result<(), MachineError> {
         let [
             drive_head,
             cylinder,
@@ -452,7 +451,137 @@ impl Machine {
             end_sector, // EOT: final sector ID on a track for this command
             _gap,
             _data_length,
-        ] = read_request.parameters;
+        ] = request.parameters;
+
+        let drive = drive_head & 0x03; // Extract Unit Select bits
+        let physical_head = (drive_head >> 2) & 1; // Extract HD bit
+
+        // Ensure drive A or B and sectors are 512 bytes, and physical head agrees with head ID.
+        if (drive != 0 && drive != 1) || size_code != 2 || physical_head != head {
+            return Err(MachineError::DiskError("Unsupported disk".to_string()));
+        }
+
+        // See how many bytes DMA is configured to send
+        let count_bytes = self.dma.count_bytes();
+
+        // Require DMA to be unmasked, mode 0x4A, and byte count divisible by 512
+        if self.dma.is_masked() || self.dma.mode() != 0x4A || count_bytes % 512 != 0 {
+            return Err(MachineError::DiskError(
+                "Unsupported DMA parameters".to_string(),
+            ));
+        }
+
+        let source_addr = self.dma.physical_address();
+        let dma_offset = (source_addr & 0xFFFF) as usize;
+
+        if dma_offset + count_bytes > 0x10000 {
+            return Err(MachineError::DiskError(
+                "DMA transfer crosses 64 KiB boundary".to_string(),
+            ));
+        }
+
+        // Handle disk image not provided with a MA (Missing Address Mark) status
+        // TODO: more accurately simulate empty disk
+        let Some(floppy_image) = self.floppy_images[drive as usize].as_mut() else {
+            let st0 = 0x40 | (physical_head << 2) | drive;
+            let results = [st0, 0x01, 0x00, cylinder, head, sector, size_code];
+            self.fdc.complete_transfer(results);
+            return Ok(());
+        };
+
+        let multi_track = request.command & 0x80 != 0;
+        let mut current_head = head;
+        let mut current_sector = sector;
+
+        // Read bytes to write
+        let bytes = read_buffer(&self.memory, PhysAddr::from_u32(source_addr), count_bytes)?;
+
+        // Collect destination offsets
+        let mut offsets: Vec<usize> = vec![];
+        let mut bytes_written = 0;
+        for _ in 0..count_bytes / 512 {
+            let offset = floppy_image
+                .geometry
+                .byte_offset(
+                    cylinder as usize,
+                    current_head as usize,
+                    current_sector as usize,
+                )
+                .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
+            floppy_image
+                .bytes
+                .get_mut(offset..offset + 512)
+                .ok_or_else(|| {
+                    MachineError::DiskError("Cannot get slice of floppy image bytes".to_string())
+                })?;
+            offsets.push(offset);
+
+            bytes_written += 512;
+
+            if bytes_written == count_bytes {
+                break;
+            }
+
+            if current_sector != end_sector {
+                // Not yet at end of track
+                current_sector = current_sector.wrapping_add(1);
+            } else if current_sector == end_sector && multi_track && current_head == 0 {
+                // At end of track, multi-track enabled, and we're on the first head
+                current_head = 1;
+                current_sector = 1;
+            } else if current_sector == end_sector {
+                return Err(MachineError::DiskError(
+                    "Cannot read past end of track without multi-track".to_string(),
+                ));
+            }
+        }
+
+        // Now actually perform the writes by sector
+        for (offset, chunk) in offsets.into_iter().zip(bytes.chunks_exact(512)) {
+            floppy_image.bytes[offset..offset + 512].copy_from_slice(chunk);
+        }
+
+        self.dma.complete_transfer(count_bytes as u16);
+
+        // Construct position after transfer
+        let reached_end_of_track = current_sector == end_sector;
+        let (result_cylinder, result_head, result_sector) =
+            match (reached_end_of_track, multi_track, current_head) {
+                // Continue within current track
+                (false, _, _) => (cylinder, current_head, current_sector + 1),
+                // Continue onto head 1 of this cylinder
+                (true, true, 0) => (cylinder, 1, 1),
+                // Finished the last head
+                (true, true, _) => (cylinder + 1, 0, 1),
+                // Single-track mode: go to next cylinder on current head
+                (true, false, _) => (cylinder + 1, current_head, 1),
+            };
+
+        let results = [
+            drive | (current_head << 2), // ST0: Normal completion,
+            00,                          // ST1: no errors
+            00,                          // ST2: no errors
+            result_cylinder,
+            result_head,
+            result_sector,
+            size_code,
+        ];
+        self.fdc.complete_transfer(results);
+
+        Ok(())
+    }
+
+    fn handle_floppy_read(&mut self, request: FdcDataRequest) -> Result<(), MachineError> {
+        let [
+            drive_head,
+            cylinder,
+            head,
+            sector,
+            size_code,  // sector size code (bytes = 128 << size_code except 0)
+            end_sector, // EOT: final sector ID on a track for this command
+            _gap,
+            _data_length,
+        ] = request.parameters;
 
         let drive = drive_head & 0x03; // Extract Unit Select bits
         let physical_head = (drive_head >> 2) & 1; // Extract HD bit
@@ -486,11 +615,11 @@ impl Machine {
         let Some(floppy_image) = self.floppy_images[drive as usize].as_ref() else {
             let st0 = 0x40 | (physical_head << 2) | drive;
             let results = [st0, 0x01, 0x00, cylinder, head, sector, size_code];
-            self.fdc.complete_read(results);
+            self.fdc.complete_transfer(results);
             return Ok(());
         };
 
-        let multi_track = read_request.command & 0x80 != 0;
+        let multi_track = request.command & 0x80 != 0;
         let mut current_head = head;
         let mut current_sector = sector;
         let mut buffer: Vec<u8> = Vec::with_capacity(count_bytes);
@@ -560,7 +689,7 @@ impl Machine {
             result_sector,
             size_code,
         ];
-        self.fdc.complete_read(results);
+        self.fdc.complete_transfer(results);
 
         Ok(())
     }

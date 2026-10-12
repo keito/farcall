@@ -8,7 +8,7 @@ pub(super) struct Fdc {
     /// Digital Output Register
     dor: u8,
     interrupt_request: Option<PendingInterrupt>,
-    read_irq_pending: bool,
+    transfer_irq_pending: bool,
     result_bytes: VecDeque<u8>,
     command_state: CommandState,
     step_rate: u8,
@@ -47,7 +47,7 @@ impl Fdc {
         Self {
             dor: 0,
             interrupt_request: None,
-            read_irq_pending: false,
+            transfer_irq_pending: false,
             result_bytes: VecDeque::new(),
             command_state: CommandState::Idle,
             step_rate: 0,
@@ -76,7 +76,7 @@ impl Fdc {
             }
             // Result bytes from commands
             0x3F5 => {
-                self.read_irq_pending = false;
+                self.transfer_irq_pending = false;
                 self.result_bytes.pop_front().unwrap_or(0)
             }
             _ => unreachable!(),
@@ -134,7 +134,7 @@ impl Fdc {
                     self.result_bytes.clear();
                     self.command_state = CommandState::Idle;
                     self.interrupt_request = None;
-                    self.read_irq_pending = false;
+                    self.transfer_irq_pending = false;
                 }
                 self.dor = value;
             }
@@ -216,10 +216,10 @@ impl Fdc {
         }
     }
 
-    pub(super) fn complete_read(&mut self, results: [u8; 7]) {
+    pub(super) fn complete_transfer(&mut self, results: [u8; 7]) {
         // queue the supplied bytes
         self.result_bytes.extend(results.iter().cloned());
-        self.read_irq_pending = true;
+        self.transfer_irq_pending = true;
         self.command_state = CommandState::Idle;
     }
 
@@ -227,6 +227,6 @@ impl Fdc {
     pub(super) fn irq_output(&self) -> bool {
         // If we have an interrupt request and the DOR bit 3 (interrupt/DMA interface) is set
         // or a read IRQ is pending
-        (self.interrupt_request.is_some() || self.read_irq_pending) && (self.dor & 0x08 != 0)
+        (self.interrupt_request.is_some() || self.transfer_irq_pending) && (self.dor & 0x08 != 0)
     }
 }
