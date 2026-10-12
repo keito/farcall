@@ -8,6 +8,7 @@ use crate::machine::{
 use crate::memory::MemoryError;
 
 mod floppy_read;
+mod floppy_write;
 
 fn registers(cpu: &Cpu) -> [u16; 13] {
     [
