@@ -130,7 +130,7 @@ fn handle_basic_key_event(machine: &mut Machine, key_event: KeyEvent) -> bool {
     false
 }
 
-pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8> {
+pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new(use_graphics)?;
 
     // Set title
@@ -164,11 +164,11 @@ pub(crate) fn run(mut machine: Machine, use_graphics: bool) -> anyhow::Result<u8
             match event::read()? {
                 event::Event::Key(key_event) => {
                     if guard.keyboard_enhancement_enabled() {
-                        if handle_enhanced_key_event(&mut machine, key_event) {
+                        if handle_enhanced_key_event(machine, key_event) {
                             return Ok(0);
                         }
                     } else {
-                        if handle_basic_key_event(&mut machine, key_event) {
+                        if handle_basic_key_event(machine, key_event) {
                             return Ok(0);
                         }
                     }

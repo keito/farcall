@@ -20,11 +20,11 @@ use keyboard::{ModifierState, winit_to_bios_key_stroke, winit_to_pc_scan_code};
 mod cga_renderer;
 mod keyboard;
 
-pub struct App {
+pub struct App<'a> {
     cga_renderer: Option<CgaRenderer>,
     error: Option<anyhow::Error>,
     exit_code: Option<u8>,
-    machine: Machine,
+    machine: &'a mut Machine,
     modifier_state: ModifierState,
     next_frame: Instant,
     pixels: Option<Pixels<'static>>,
@@ -43,14 +43,14 @@ const FRAME_INTERVAL: Duration = Duration::from_micros(16_700); // 60 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
 const CPU_HZ: u64 = 4_772_727;
 
-impl App {
+impl App<'_> {
     fn fail(&mut self, event_loop: &ActiveEventLoop, error: anyhow::Error) {
         self.error = Some(error);
         event_loop.exit();
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler for App<'_> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -216,7 +216,7 @@ impl ApplicationHandler for App {
     }
 }
 
-pub(crate) fn run(machine: Machine) -> anyhow::Result<u8> {
+pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
     let event_loop = EventLoop::new()?;
     let mut app = App {
         machine,

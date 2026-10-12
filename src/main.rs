@@ -68,6 +68,10 @@ struct Cli {
     /// How much verbose debug output to print
     #[arg(short, long, default_value = "0", action = ArgAction::Count)]
     verbose: u8,
+
+    /// Write floppy drive B's resulting image to this path on exit
+    #[arg(long, requires = "floppy_b")]
+    write_floppy_b: Option<PathBuf>,
 }
 
 fn main() -> anyhow::Result<process::ExitCode> {
@@ -91,26 +95,33 @@ fn main() -> anyhow::Result<process::ExitCode> {
         }
     };
 
-    let machine = Machine::new(boot_mode, cli.verbose)?;
+    let mut machine = Machine::new(boot_mode, cli.verbose)?;
 
-    let exit_code = match &cli.frontend {
+    let result = match &cli.frontend {
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::TerminalGraphics) => terminal::run(machine, true)?,
+        Some(FrontendChoice::TerminalGraphics) => terminal::run(&mut machine, true),
 
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::TerminalText) => terminal::run(machine, false)?,
+        Some(FrontendChoice::TerminalText) => terminal::run(&mut machine, false),
 
         #[cfg(feature = "window")]
-        Some(FrontendChoice::Window) => window::run(machine)?,
+        Some(FrontendChoice::Window) => window::run(&mut machine),
 
         // Prioritize window if compiled in and not specified
         #[cfg(feature = "window")]
-        None => window::run(machine)?,
+        None => window::run(&mut machine),
 
         // Fall back to terminal if window is not compiled in
         #[cfg(all(feature = "terminal", not(feature = "window")))]
-        None => terminal::run(machine, true)?,
+        None => terminal::run(&mut machine, true),
     };
 
+    if let Some(write_floppy_b_path) = cli.write_floppy_b
+        && let Some(floppy_b_image) = machine.floppy_image(1)
+    {
+        std::fs::write(write_floppy_b_path, floppy_b_image)?;
+    }
+
+    let exit_code = result?;
     Ok(exit_code.into())
 }

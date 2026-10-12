@@ -722,6 +722,14 @@ impl Machine {
     pub(crate) fn total_elapsed_cycles(&self) -> u64 {
         self.total_elapsed_cycles
     }
+
+    /// Returns the bytes of the given floppy's current image, if any (0 = A:, 1 = B:)
+    pub(crate) fn floppy_image(&self, drive: u8) -> Option<&[u8]> {
+        self.floppy_images
+            .get(drive as usize)
+            .and_then(|slot| slot.as_ref())
+            .map(|image| image.bytes.as_slice())
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
