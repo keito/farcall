@@ -70,8 +70,12 @@ struct Cli {
     verbose: u8,
 
     /// Write floppy drive B's resulting image to this path on exit
-    #[arg(long, requires = "floppy_b")]
+    #[arg(long, requires = "floppy_b", conflicts_with = "com")]
     write_floppy_b: Option<PathBuf>,
+
+    /// Write-protect floppy drive A
+    #[arg(long, requires = "floppy_a", conflicts_with = "com")]
+    floppy_a_read_only: bool,
 }
 
 fn main() -> anyhow::Result<process::ExitCode> {
@@ -82,10 +86,12 @@ fn main() -> anyhow::Result<process::ExitCode> {
             drive_a: DiskImageConfig {
                 path: floppy_a,
                 disk_type: cli.floppy_a_type.unwrap_or(DiskType::Floppy180),
+                write_protected: cli.floppy_a_read_only,
             },
             drive_b: cli.floppy_b.map(|floppy_b| DiskImageConfig {
                 path: floppy_b,
                 disk_type: cli.floppy_b_type.unwrap_or(DiskType::Floppy180),
+                write_protected: false,
             }),
             rom: cli.rom,
         }

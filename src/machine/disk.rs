@@ -36,9 +36,11 @@ impl DiskGeometry {
 pub(super) struct FloppyDisk {
     pub(super) bytes: Vec<u8>,
     pub(super) geometry: DiskGeometry,
+    pub(super) write_protected: bool,
 }
 
 pub struct DiskImageConfig {
     pub path: PathBuf,
     pub disk_type: DiskType,
+    pub write_protected: bool,
 }

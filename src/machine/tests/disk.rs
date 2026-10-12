@@ -32,6 +32,7 @@ fn floppy_360kib(bytes: Vec<u8>) -> FloppyDisk {
             heads: 2,
             sectors_per_track: 9,
         },
+        write_protected: false,
     }
 }
 
@@ -660,7 +661,9 @@ fn boot_code_reads_a_sector_through_int13_then_executes_it() {
         let expected_sector = image[sector_offset..sector_offset + 512].to_vec();
         let mut machine = machine_with_image(None);
         machine.cpu.flags = 0xF003; // Ensure the successful read clears stale CF.
-        machine.load_boot_sector(image.clone(), image_type).unwrap();
+        machine
+            .load_boot_sector(image.clone(), image_type, false)
+            .unwrap();
         assert!(
             machine.memory[0x7E00..0x8000]
                 .iter()

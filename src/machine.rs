@@ -111,6 +111,7 @@ pub(crate) enum KeyboardInputMode {
     PcHardware,
 }
 
+#[derive(PartialEq, Eq)]
 enum FloppyOperation {
     Read,
     Write,
@@ -171,7 +172,7 @@ impl Machine {
                 rom,
             } => {
                 let data = fs::read(drive_a.path)?;
-                machine.load_boot_sector(data, drive_a.disk_type)?;
+                machine.load_boot_sector(data, drive_a.disk_type, drive_a.write_protected)?;
 
                 if let Some(rom_path) = rom {
                     machine.load_rom(&rom_path)?;
@@ -179,7 +180,7 @@ impl Machine {
 
                 if let Some(drive_b) = drive_b {
                     let data = fs::read(drive_b.path)?;
-                    machine.load_floppy_image(1, data, drive_b.disk_type);
+                    machine.load_floppy_image(1, data, drive_b.disk_type, drive_b.write_protected);
                 }
             }
         }
@@ -454,10 +455,16 @@ impl Machine {
             _data_length,
         ] = request.parameters;
 
-        let operation = match request.command & 0x1F {
+        let command = request.command & 0x1F;
+        let operation = match command {
             0x05 => FloppyOperation::Write,
             0x06 => FloppyOperation::Read,
-            _ => unreachable!("Invalid floppy operation command"),
+            _ => {
+                return Err(MachineError::DiskError(format!(
+                    "Invalid floppy operation: {:X}h",
+                    command
+                )));
+            }
         };
 
         let drive = drive_head & 0x03; // Extract Unit Select bits
@@ -490,6 +497,14 @@ impl Machine {
             self.fdc.complete_transfer(results);
             return Ok(());
         };
+
+        // Are we writing to a write-protected disk?
+        if operation == FloppyOperation::Write && floppy_image.write_protected {
+            let st0 = 0x40 | (physical_head << 2) | drive;
+            let results = [st0, 0x02, 0x00, cylinder, head, sector, size_code]; // ST1: not writable
+            self.fdc.complete_transfer(results);
+            return Ok(());
+        }
 
         let dma_addr = self.dma.physical_address();
         let dma_offset = (dma_addr & 0xFFFF) as usize;
@@ -654,6 +669,7 @@ impl Machine {
         &mut self,
         bytes: Vec<u8>,
         image_type: DiskType,
+        write_protected: bool,
     ) -> Result<(), MachineError> {
         if bytes.len() < 512 {
             return Err(MachineError::BootSectorError(
@@ -669,13 +685,19 @@ impl Machine {
         self.cpu.set_reg(Reg8::Dl, 0);
 
         // Keep the floppy image in machine
-        self.load_floppy_image(0, bytes, image_type);
+        self.load_floppy_image(0, bytes, image_type, write_protected);
 
         Ok(())
     }
 
     /// Loads the bytes/geometry of the given floppy image into the given slot
-    fn load_floppy_image(&mut self, drive: u8, bytes: Vec<u8>, image_type: DiskType) {
+    fn load_floppy_image(
+        &mut self,
+        drive: u8,
+        bytes: Vec<u8>,
+        image_type: DiskType,
+        write_protected: bool,
+    ) {
         let geometry = match image_type {
             DiskType::Floppy180 => DiskGeometry {
                 cylinders: 40,
@@ -696,6 +718,7 @@ impl Machine {
         self.floppy_images[drive as usize] = Some(FloppyDisk {
             bytes: bytes,
             geometry: geometry,
+            write_protected,
         });
     }
 
