@@ -132,7 +132,7 @@ fn encode_image(
                 // C=1 specifies no cursor movement
                 // i=86 is the image ID
                 // q=2 turns off responses
-                format!("\x1b_Gi=86,q=2,C=1,a=T,f=100,m={m};{chunk}\x1b\\")
+                format!("\x1b_Gi=86,p=1,q=2,C=1,a=T,f=100,m={m};{chunk}\x1b\\")
             } else {
                 format!("\x1b_Gq=2,m={m};{chunk}\x1b\\")
             }
