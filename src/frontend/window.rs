@@ -37,7 +37,7 @@ pub struct App<'a> {
 const WIDTH: u32 = 640;
 const HEIGHT: u32 = 200;
 const CORRECTED_HEIGHT: u32 = 480;
-const WINDOW_TITLE: &str = "PC86";
+const WINDOW_TITLE: &str = "farcall";
 
 const FRAME_INTERVAL: Duration = Duration::from_micros(16_700); // 60 Hz
 const EXECUTION_BUDGET: Duration = Duration::from_millis(10);
