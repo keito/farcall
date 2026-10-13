@@ -21,10 +21,13 @@ use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
 
-pub(crate) use cga_video::TextScreen;
+#[cfg(feature = "terminal")]
 pub use cga_video::attribute_color_to_rgb;
+#[cfg(feature = "terminal")]
+pub(crate) use cga_video::text_terminal::TextScreen;
 #[cfg(test)]
-pub(crate) use cga_video::{TextCell, TextCursor};
+pub(crate) use cga_video::text_terminal::{TextCell, TextCursor};
+
 pub use disk::{DiskImageConfig, DiskType};
 
 mod bios;
@@ -207,6 +210,7 @@ impl Machine {
         self.cga_video.render(&self.memory, frame);
     }
 
+    #[cfg(feature = "terminal")]
     pub(crate) fn render_text_screen(&self) -> Option<TextScreen> {
         self.cga_video.render_text_screen(&self.memory)
     }
