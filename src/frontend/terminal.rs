@@ -134,7 +134,7 @@ pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u
     let guard = TerminalGuard::new(use_graphics)?;
 
     // Set title
-    crossterm::execute!(stdout(), SetTitle("farcall - Press Ctrl-] to exit"))?;
+    crossterm::execute!(stdout(), SetTitle("Farcall - Press Ctrl-] to exit"))?;
 
     // Move cursor to row 1, column 1
     stdout().write_all(b"\x1b[H")?;
