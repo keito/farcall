@@ -1,3 +1,4 @@
+use anyhow::Context;
 use core::fmt::Debug;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -166,7 +167,7 @@ impl Machine {
 
         match boot_mode {
             BootMode::Com { program } => {
-                let data = fs::read(program)?;
+                let data = fs::read(program).context("Failed to read COM file")?;
                 machine.load_com(&data)?;
             }
             BootMode::Floppy {
@@ -174,15 +175,15 @@ impl Machine {
                 drive_b,
                 rom,
             } => {
-                let data = fs::read(drive_a.path)?;
+                let data = fs::read(drive_a.path).context("Failed to read Floppy A image")?;
                 machine.load_boot_sector(data, drive_a.disk_type, drive_a.write_protected)?;
 
                 if let Some(rom_path) = rom {
-                    machine.load_rom(&rom_path)?;
+                    machine.load_rom(&rom_path).context("Failed to load ROM")?;
                 }
 
                 if let Some(drive_b) = drive_b {
-                    let data = fs::read(drive_b.path)?;
+                    let data = fs::read(drive_b.path).context("Failed to read Floppy B image")?;
                     machine.load_floppy_image(1, data, drive_b.disk_type, drive_b.write_protected);
                 }
             }
