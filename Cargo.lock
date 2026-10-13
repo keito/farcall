@@ -526,6 +526,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "farcall"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "clap",
+ "crossterm",
+ "pixels",
+ "png",
+ "rustix 1.1.4",
+ "thiserror 2.0.20",
+ "winit",
+]
+
+[[package]]
 name = "fdeflate"
 version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1403,21 +1418,6 @@ dependencies = [
  "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
-]
-
-[[package]]
-name = "pc86"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "clap",
- "crossterm",
- "pixels",
- "png",
- "rustix 1.1.4",
- "thiserror 2.0.20",
- "winit",
 ]
 
 [[package]]
