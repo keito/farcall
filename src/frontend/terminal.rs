@@ -130,7 +130,11 @@ fn handle_basic_key_event(machine: &mut Machine, key_event: KeyEvent) -> bool {
     false
 }
 
-pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u8> {
+pub(crate) fn run(
+    machine: &mut Machine,
+    use_graphics: bool,
+    idle_timeout: Option<Duration>,
+) -> anyhow::Result<u8> {
     let guard = TerminalGuard::new(use_graphics)?;
 
     // Set title
@@ -150,6 +154,9 @@ pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u
     } else {
         Renderer::Text(text::Renderer::new())
     };
+
+    // Kill session if keyboard is idle for more than idle timeout
+    let mut idle_deadline: Option<Instant> = idle_timeout.map(|t| Instant::now() + t);
 
     // Render each frame, at FRAME_INTERVAL
     loop {
@@ -172,6 +179,9 @@ pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u
                             return Ok(0);
                         }
                     }
+
+                    // Extend idle timeout
+                    idle_deadline = idle_timeout.map(|t| Instant::now() + t);
                 }
                 event::Event::Resize(_, _) => {
                     renderer.invalidate();
@@ -211,6 +221,13 @@ pub(crate) fn run(machine: &mut Machine, use_graphics: bool) -> anyhow::Result<u
 
         if let Some(code) = exit_code {
             return Ok(code);
+        }
+
+        // Handle idle timeout, if one is specified
+        if let Some(deadline) = idle_deadline
+            && Instant::now() > deadline
+        {
+            return Ok(124);
         }
 
         std::thread::sleep(Duration::from_millis(1));

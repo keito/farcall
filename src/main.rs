@@ -2,6 +2,8 @@ use clap::ArgAction;
 use clap::Parser;
 use std::path::PathBuf;
 use std::process;
+#[cfg(feature = "terminal")]
+use std::time::Duration;
 
 #[cfg(feature = "terminal")]
 use crate::frontend::terminal;
@@ -49,6 +51,10 @@ struct Cli {
     #[arg(long, value_enum, requires = "floppy_a", conflicts_with = "com")]
     floppy_a_type: Option<DiskType>,
 
+    /// Write-protect floppy drive A
+    #[arg(long, requires = "floppy_a", conflicts_with = "com")]
+    floppy_a_read_only: bool,
+
     /// Image for floppy drive B
     #[arg(long, conflicts_with = "com")]
     floppy_b: Option<PathBuf>,
@@ -65,17 +71,18 @@ struct Cli {
     #[arg(long, value_enum)]
     frontend: Option<FrontendChoice>,
 
-    /// How much verbose debug output to print
-    #[arg(short, long, default_value = "0", action = ArgAction::Count)]
-    verbose: u8,
-
     /// Write floppy drive B's resulting image to this path on exit
     #[arg(long, requires = "floppy_b", conflicts_with = "com")]
     write_floppy_b: Option<PathBuf>,
 
-    /// Write-protect floppy drive A
-    #[arg(long, requires = "floppy_a", conflicts_with = "com")]
-    floppy_a_read_only: bool,
+    /// Terminate emulator after IDLE_TIMEOUT seconds with no keyboard input (terminal frontend only)
+    #[arg(long)]
+    #[cfg(feature = "terminal")]
+    idle_timeout: Option<u64>,
+
+    /// How much verbose debug output to print
+    #[arg(short, long, default_value = "0", action = ArgAction::Count)]
+    verbose: u8,
 }
 
 fn main() -> anyhow::Result<process::ExitCode> {
@@ -101,14 +108,17 @@ fn main() -> anyhow::Result<process::ExitCode> {
         }
     };
 
+    #[cfg(feature = "terminal")]
+    let idle_timeout = cli.idle_timeout.map(|s| Duration::from_secs(s));
+
     let mut machine = Machine::new(boot_mode, cli.verbose)?;
 
     let result = match &cli.frontend {
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::TerminalGraphics) => terminal::run(&mut machine, true),
+        Some(FrontendChoice::TerminalGraphics) => terminal::run(&mut machine, true, idle_timeout),
 
         #[cfg(feature = "terminal")]
-        Some(FrontendChoice::TerminalText) => terminal::run(&mut machine, false),
+        Some(FrontendChoice::TerminalText) => terminal::run(&mut machine, false, idle_timeout),
 
         #[cfg(feature = "window")]
         Some(FrontendChoice::Window) => window::run(&mut machine),
@@ -119,7 +129,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
 
         // Fall back to terminal if window is not compiled in
         #[cfg(all(feature = "terminal", not(feature = "window")))]
-        None => terminal::run(&mut machine, true),
+        None => terminal::run(&mut machine, true, idle_timeout),
     };
 
     if let Some(write_floppy_b_path) = cli.write_floppy_b
