@@ -24,16 +24,16 @@ fn write_spaces(video: &mut CgaVideo, memory: &mut [u8], count: usize) {
 
 // On a blank screen, only the default two-scan-line cursor should be lit.
 fn assert_rendered_cursor(video: &CgaVideo, memory: &[u8], cell: Option<usize>) {
-    let mut frame = vec![0; 640 * 200 * 3];
+    let mut frame = vec![0; 640 * 200];
     video.render(memory, &mut frame);
     let lit_pixels: Vec<_> = frame
-        .chunks_exact(3)
+        .iter()
         .enumerate()
-        .filter_map(|(index, rgb)| {
-            if rgb == [0, 0, 0] {
+        .filter_map(|(index, &color)| {
+            if color == 0 {
                 None
             } else {
-                assert_eq!(rgb, &[0xAA; 3]);
+                assert_eq!(color, 7);
                 Some(index)
             }
         })

@@ -13,7 +13,10 @@ use winit::{
     window::{Window, WindowId},
 };
 
-use crate::machine::{KeyboardInputMode, Machine, MachineStepResult};
+use crate::{
+    frontend::palette_color_to_rgb,
+    machine::{KeyboardInputMode, Machine, MachineStepResult},
+};
 use cga_renderer::CgaRenderer;
 use keyboard::{ModifierState, winit_to_bios_key_stroke, winit_to_pc_scan_code};
 
@@ -28,7 +31,7 @@ pub struct App<'a> {
     modifier_state: ModifierState,
     next_frame: Instant,
     pixels: Option<Pixels<'static>>,
-    rgb_frame: Box<[u8]>,
+    indexed_frame: Box<[u8]>,
     window: Option<Arc<Window>>,
     pacing_start: Instant,
     starting_cycles: u64,
@@ -140,14 +143,15 @@ impl ApplicationHandler for App<'_> {
                 window.pre_present_notify();
                 let pixels = self.pixels.as_mut().unwrap();
 
-                // Render temporarily into memory and convert RGB to RGBA
-                self.machine.render_video(&mut self.rgb_frame);
-                for (rgb, rgba) in self
-                    .rgb_frame
-                    .chunks_exact(3)
+                // Render temporarily into memory and convert indexed colors to RGBA
+                self.machine.render_video(&mut self.indexed_frame);
+                for (color, rgba) in self
+                    .indexed_frame
+                    .iter()
                     .zip(pixels.frame_mut().chunks_exact_mut(4))
                 {
-                    rgba[..3].copy_from_slice(rgb);
+                    let (r, g, b) = palette_color_to_rgb(*color);
+                    rgba[..3].copy_from_slice(&[r, g, b]);
                     rgba[3] = 255;
                 }
 
@@ -231,7 +235,7 @@ pub(crate) fn run(machine: &mut Machine) -> anyhow::Result<u8> {
             alt: false,
         },
         cga_renderer: None,
-        rgb_frame: vec![0; 640 * 200 * 3].into_boxed_slice(),
+        indexed_frame: vec![0; 640 * 200].into_boxed_slice(),
         pacing_start: Instant::now(),
         starting_cycles: 0,
     };

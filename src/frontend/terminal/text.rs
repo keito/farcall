@@ -6,7 +6,10 @@ use crossterm::{
 };
 use rustix::termios::Winsize;
 
-use crate::machine::{Machine, TextScreen, attribute_color_to_rgb};
+use crate::{
+    frontend::palette_color_to_rgb,
+    machine::{Machine, TextScreen},
+};
 
 #[cfg(test)]
 mod tests;
@@ -143,7 +146,7 @@ pub(super) fn render_screen(screen: &TextScreen, output: &mut impl Write) -> std
 
 fn attribute_color_to_crossterm_color(color: u8) -> Color {
     // TODO: Support fallback to 256 colors using available_color_count()
-    let (r, g, b) = attribute_color_to_rgb(color);
+    let (r, g, b) = palette_color_to_rgb(color);
     Color::Rgb { r, g, b }
 }
 

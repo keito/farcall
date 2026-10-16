@@ -3,22 +3,22 @@ use std::io::Write;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rustix::termios::Winsize;
 
-use crate::machine::Machine;
+use crate::{frontend::palette_color_to_rgb, machine::Machine};
 
 const MAX_DISPLAY_WIDTH: usize = 1280;
 const PADDING: usize = 8;
 
 pub(crate) struct Renderer {
-    current_frame: [u8; 640 * 200 * 3],
-    previous_frame: [u8; 640 * 200 * 3],
+    current_frame: [u8; 640 * 200],
+    previous_frame: [u8; 640 * 200],
     previous_size: (usize, usize),
 }
 
 impl Renderer {
     pub(crate) fn new() -> Self {
         Self {
-            current_frame: [0u8; 640 * 200 * 3],
-            previous_frame: [0u8; 640 * 200 * 3],
+            current_frame: [0u8; 640 * 200],
+            previous_frame: [0u8; 640 * 200],
             previous_size: (0, 0),
         }
     }
@@ -90,8 +90,10 @@ fn encode_image(
         // Copy the row
         for x in 0..display_width {
             let source_x = x * width / display_width;
-            let source_offset = (source_y * width + source_x) * 3;
-            new_pixels.extend_from_slice(&pixels[source_offset..source_offset + 3]);
+            let source_offset = source_y * width + source_x;
+            let color = pixels[source_offset];
+            let (r, g, b) = palette_color_to_rgb(color);
+            new_pixels.extend_from_slice(&[r, g, b]);
         }
 
         // Add right margin

@@ -10,7 +10,6 @@ const NUM_ROWS: usize = 25;
 const VIDEO_ADDR_BASE: usize = 0xB8000;
 const GLYPH_WIDTH: usize = 8;
 const GLYPH_HEIGHT: usize = 8;
-const BYTES_PER_PIXEL: usize = 3;
 
 pub(super) struct CgaVideo {
     /// BIOS emulation cursor position: column
@@ -207,19 +206,18 @@ impl CgaVideo {
     }
 
     /// Renders video memory to the framebuffer
+    /// frame: 640x200 bytes, one byte (representing a color index) per pixel
     pub(super) fn render(&self, memory: &[u8], frame: &mut [u8]) {
         let is_graphics = self.is_graphics();
 
         // Blank the display if the VIDEO bit is not set
         if !self.is_video() {
-            let (red, green, blue) = if is_graphics {
-                attribute_color_to_rgb(self.color_control & 0xF) // Overscan color
+            let color = if is_graphics {
+                self.color_control & 0xF // Overscan color
             } else {
-                (0, 0, 0)
+                0
             };
-            for pixel in frame.chunks_exact_mut(BYTES_PER_PIXEL) {
-                pixel.copy_from_slice(&[red, green, blue]);
-            }
+            frame.fill(color);
             return;
         }
 
@@ -238,9 +236,9 @@ impl CgaVideo {
                 let offset = usize::from(text_byte) * 8;
                 let glyph = GLYPH_BYTES.get(offset..offset + 8).unwrap_or(&[0; 8]);
 
-                let (fg_red, fg_green, fg_blue) = attribute_color_to_rgb(attributes & 0x0F);
+                let foreground = attributes & 0x0F;
                 // TODO: Support blinking, change to 0x0F for blink disabled
-                let (bg_red, bg_green, bg_blue) = attribute_color_to_rgb((attributes >> 4) & 0x07);
+                let background = (attributes >> 4) & 0x07;
 
                 // Maybe draw cursor
                 let cursor_cell = row * NUM_COLUMNS + column == self.cursor_address as usize;
@@ -258,14 +256,8 @@ impl CgaVideo {
                         let lit = glyph_pixel || cursor_line;
                         let x = column * GLYPH_WIDTH + gx;
                         let y = row * GLYPH_HEIGHT + gy;
-                        let offset = BYTES_PER_PIXEL * (y * NUM_COLUMNS * GLYPH_WIDTH + x);
-                        set_cell_color(
-                            frame,
-                            offset,
-                            if lit { fg_red } else { bg_red }, // red
-                            if lit { fg_green } else { bg_green }, // green
-                            if lit { fg_blue } else { bg_blue }, // blue
-                        );
+                        let offset = y * NUM_COLUMNS * GLYPH_WIDTH + x;
+                        frame[offset] = if lit { foreground } else { background };
                     }
                 }
             }
@@ -291,18 +283,16 @@ impl CgaVideo {
                 // (x % 4) is the offset within the byte
                 let shift = 6 - 2 * (x % 4);
                 let pixel = (byte >> shift) & 0b11;
-                let (red, green, blue) = self.pixel_to_rgb(pixel);
-
-                let offset = BYTES_PER_PIXEL * (y * 640 + x * 2);
-                set_cell_color(frame, offset, red, green, blue);
-
-                let offset2 = BYTES_PER_PIXEL * (y * 640 + x * 2 + 1);
-                set_cell_color(frame, offset2, red, green, blue);
+                let color = self.pixel_to_color(pixel);
+                let offset = y * 640 + x * 2;
+                frame[offset] = color;
+                // We render 320x200 into a 640x200 buffer to match text mode
+                frame[offset + 1] = color;
             }
         }
     }
 
-    fn pixel_to_rgb(&self, pixel: u8) -> (u8, u8, u8) {
+    fn pixel_to_color(&self, pixel: u8) -> u8 {
         // Blue and Intensity signal
         let pal_b = (self.color_control >> 5) & 1;
         let pal_i = (self.color_control >> 4) & 1;
@@ -311,7 +301,7 @@ impl CgaVideo {
 
         if pixel == 0b00 {
             // Overscan
-            return attribute_color_to_rgb(self.color_control & 0x0F);
+            return self.color_control & 0x0F;
         }
 
         let base_color = match (b_w, pixel, pal_b) {
@@ -333,7 +323,7 @@ impl CgaVideo {
             _ => unreachable!("Cases above should be exhaustive"),
         };
 
-        return attribute_color_to_rgb(base_color + (if pal_i != 0 { 8 } else { 0 }));
+        return base_color + (if pal_i != 0 { 8 } else { 0 });
     }
 
     pub(super) fn read_status(&mut self) -> u8 {
@@ -341,31 +331,4 @@ impl CgaVideo {
         self.status = !self.status;
         self.status
     }
-}
-
-pub fn attribute_color_to_rgb(color: u8) -> (u8, u8, u8) {
-    match color {
-        0x00 => (0x00, 0x00, 0x00), // black
-        0x01 => (0x00, 0x00, 0xAA), // blue
-        0x02 => (0x00, 0xAA, 0x00), // green
-        0x03 => (0x00, 0xAA, 0xAA), // cyan
-        0x04 => (0xAA, 0x00, 0x00), // red
-        0x05 => (0xAA, 0x00, 0xAA), // magenta
-        0x06 => (0xAA, 0x55, 0x00), // brown
-        0x07 => (0xAA, 0xAA, 0xAA), // light gray
-        0x08 => (0x55, 0x55, 0x55), // dark gray
-        0x09 => (0x55, 0x55, 0xFF), // light blue
-        0x0A => (0x55, 0xFF, 0x55), // light green
-        0x0B => (0x55, 0xFF, 0xFF), // light cyan
-        0x0C => (0xFF, 0x55, 0x55), // light red
-        0x0D => (0xFF, 0x55, 0xFF), // light magenta
-        0x0E => (0xFF, 0xFF, 0x55), // yellow
-        _ => (0xFF, 0xFF, 0xFF),    // bright white (0x0F)
-    }
-}
-
-fn set_cell_color(frame: &mut [u8], offset: usize, red: u8, green: u8, blue: u8) {
-    frame[offset] = red;
-    frame[offset + 1] = green;
-    frame[offset + 2] = blue;
 }

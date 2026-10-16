@@ -23,10 +23,8 @@ use pit::Pit;
 use ppi::Ppi;
 
 #[cfg(feature = "terminal")]
-pub use cga_video::attribute_color_to_rgb;
-#[cfg(feature = "terminal")]
 pub(crate) use cga_video::text_terminal::TextScreen;
-#[cfg(test)]
+#[cfg(all(test, feature = "terminal"))]
 pub(crate) use cga_video::text_terminal::{TextCell, TextCursor};
 
 pub use disk::{DiskImageConfig, DiskType};
