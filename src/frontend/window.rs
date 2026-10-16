@@ -150,8 +150,7 @@ impl ApplicationHandler for App<'_> {
                     .iter()
                     .zip(pixels.frame_mut().chunks_exact_mut(4))
                 {
-                    let (r, g, b) = palette_color_to_rgb(*color);
-                    rgba[..3].copy_from_slice(&[r, g, b]);
+                    rgba[..3].copy_from_slice(&palette_color_to_rgb(*color));
                     rgba[3] = 255;
                 }
 

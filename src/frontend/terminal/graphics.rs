@@ -3,7 +3,10 @@ use std::io::Write;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use rustix::termios::Winsize;
 
-use crate::{frontend::palette_color_to_rgb, machine::Machine};
+use crate::{frontend::PALETTE, machine::Machine};
+
+#[cfg(test)]
+mod tests;
 
 const MAX_DISPLAY_WIDTH: usize = 1280;
 const PADDING: usize = 8;
@@ -64,66 +67,56 @@ fn encode_image(
     display_width: usize,
     display_height: usize,
 ) -> anyhow::Result<Vec<String>> {
-    let mut new_pixels: Vec<u8> =
-        Vec::with_capacity((PADDING * 2 + display_width) * (display_height + PADDING * 2) * 3);
+    let out_w = display_width + PADDING * 2;
+    let out_h = display_height + PADDING * 2;
+    let mut out_pixels = vec![0; out_w * out_h];
 
-    let stride = (display_width + PADDING * 2) * 3;
-    let vert_padding_bytes = PADDING * stride;
-
-    // Append top padding
-    new_pixels.resize(vert_padding_bytes, 0);
+    // Optimization: precompute lookup
+    let xmap = (0..display_width)
+        .map(|x| x * width / display_width)
+        .collect::<Vec<_>>();
 
     let mut prev_source_y: Option<usize> = None;
     for y in 0..display_height {
         let source_y = y * height / display_height;
+        let start = (y + PADDING) * out_w;
 
         // See if we can just copy the previous row
         if prev_source_y == Some(source_y) {
-            let row_offset = new_pixels.len() - stride;
-            new_pixels.extend_from_within(row_offset..row_offset + stride);
-            continue;
+            out_pixels.copy_within((start - out_w)..start, start);
+        } else {
+            // Copy the row
+            let source_row = &pixels[source_y * width..(source_y + 1) * width];
+            for (out, &source_x) in out_pixels[start + PADDING..start + PADDING + display_width]
+                .iter_mut()
+                .zip(&xmap)
+            {
+                *out = source_row[source_x];
+            }
+            prev_source_y = Some(source_y);
         }
-
-        // Add left margin
-        new_pixels.extend_from_slice(&[0; PADDING * 3]);
-
-        // Copy the row
-        for x in 0..display_width {
-            let source_x = x * width / display_width;
-            let source_offset = source_y * width + source_x;
-            let color = pixels[source_offset];
-            let (r, g, b) = palette_color_to_rgb(color);
-            new_pixels.extend_from_slice(&[r, g, b]);
-        }
-
-        // Add right margin
-        new_pixels.extend_from_slice(&[0; PADDING * 3]);
-
-        prev_source_y = Some(source_y);
     }
-
-    // Append bottom padding
-    new_pixels.resize(new_pixels.len() + vert_padding_bytes, 0);
 
     let mut png_bytes = Vec::new();
 
-    let mut encoder = png::Encoder::new(
-        &mut png_bytes,
-        (display_width + PADDING * 2) as u32,
-        (display_height + PADDING * 2) as u32,
-    );
-    encoder.set_color(png::ColorType::Rgb);
+    let mut encoder = png::Encoder::new(&mut png_bytes, out_w as u32, out_h as u32);
+    encoder.set_color(png::ColorType::Indexed);
+    encoder.set_palette(PALETTE.as_flattened());
     encoder.set_depth(png::BitDepth::Eight);
     encoder.set_compression(png::Compression::Fast);
 
     let mut writer = encoder.write_header()?;
-    writer.write_image_data(&new_pixels)?;
+    writer.write_image_data(&out_pixels)?;
     writer.finish()?;
 
+    Ok(kitty_messages(&png_bytes))
+}
+
+fn kitty_messages(png_bytes: &[u8]) -> Vec<String> {
     let payload = STANDARD.encode(&png_bytes);
     let chunks = payload.as_bytes().chunks(4096);
     let count = chunks.len();
-    Ok(chunks
+    chunks
         .enumerate()
         .map(|(i, chunk)| {
             let chunk = str::from_utf8(chunk).expect("base64 output is ASCII");
@@ -139,7 +132,7 @@ fn encode_image(
                 format!("\x1b_Gq=2,m={m};{chunk}\x1b\\")
             }
         })
-        .collect())
+        .collect()
 }
 
 fn calc_display_size(winsize: Winsize) -> (usize, usize) {
@@ -154,64 +147,4 @@ fn calc_display_size(winsize: Winsize) -> (usize, usize) {
     let image_height = image_width * (3.0 / 4.0);
 
     (image_width as usize, image_height as usize)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn display_size(width: u16, height: u16) -> (usize, usize) {
-        calc_display_size(Winsize {
-            ws_row: 25,
-            ws_col: 80,
-            ws_xpixel: width,
-            ws_ypixel: height,
-        })
-    }
-
-    #[test]
-    fn width_limited_image_reserves_padding_and_preserves_aspect_ratio() {
-        assert_eq!(display_size(816, 1016), (800, 600));
-    }
-
-    #[test]
-    fn height_limited_image_reserves_padding_and_preserves_aspect_ratio() {
-        assert_eq!(display_size(2016, 616), (800, 600));
-    }
-
-    #[test]
-    fn large_terminal_sizes_cap_both_image_dimensions() {
-        assert_eq!(display_size(1295, 976), (1279, 959));
-        assert_eq!(display_size(1296, 976), (1280, 960));
-        assert_eq!(display_size(1297, 976), (1280, 960));
-        assert_eq!(display_size(u16::MAX, u16::MAX), (1280, 960));
-    }
-
-    #[test]
-    fn terminals_without_room_for_padding_produce_zero_size() {
-        for dimension in [0, 1, 15, 16] {
-            assert_eq!(display_size(dimension, u16::MAX), (0, 0));
-            assert_eq!(display_size(u16::MAX, dimension), (0, 0));
-        }
-        assert_eq!(display_size(0, 0), (0, 0));
-    }
-
-    #[test]
-    fn tiny_images_round_down_without_exceeding_available_space() {
-        assert_eq!(display_size(17, u16::MAX), (1, 0));
-        assert_eq!(display_size(u16::MAX, 17), (1, 1));
-    }
-
-    #[test]
-    fn image_dimensions_stay_bounded_and_fit_available_space() {
-        for width in 0..=u16::MAX {
-            for height in [0, 15, 16, 17, 18, 200, 600, 976, u16::MAX] {
-                let (image_width, image_height) = display_size(width, height);
-                assert!(image_width <= MAX_DISPLAY_WIDTH);
-                assert!(image_height <= 960);
-                assert!(image_width <= usize::from(width.saturating_sub(16)));
-                assert!(image_height <= usize::from(height.saturating_sub(16)));
-            }
-        }
-    }
 }
