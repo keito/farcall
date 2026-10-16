@@ -69,7 +69,8 @@ fn encode_image(
 ) -> anyhow::Result<Vec<String>> {
     let out_w = display_width + PADDING * 2;
     let out_h = display_height + PADDING * 2;
-    let mut out_pixels = vec![0; out_w * out_h];
+    let row_bytes = out_w.div_ceil(2);
+    let mut out_pixels = vec![0; row_bytes * out_h];
 
     // Optimization: precompute lookup
     let xmap = (0..display_width)
@@ -79,20 +80,28 @@ fn encode_image(
     let mut prev_source_y: Option<usize> = None;
     for y in 0..display_height {
         let source_y = y * height / display_height;
-        let start = (y + PADDING) * out_w;
+        let start = (y + PADDING) * row_bytes;
 
         // See if we can just copy the previous row
         if prev_source_y == Some(source_y) {
-            out_pixels.copy_within((start - out_w)..start, start);
+            out_pixels.copy_within((start - row_bytes)..start, start);
         } else {
             // Copy the row
+            let content_start = start + PADDING / 2;
             let source_row = &pixels[source_y * width..(source_y + 1) * width];
-            for (out, &source_x) in out_pixels[start + PADDING..start + PADDING + display_width]
+            for (out, pair) in out_pixels[content_start..content_start + display_width / 2]
                 .iter_mut()
-                .zip(&xmap)
+                .zip(xmap.chunks_exact(2))
             {
-                *out = source_row[source_x];
+                *out = (source_row[pair[0]] << 4) | source_row[pair[1]];
             }
+
+            // Handle the one remaining pixel for odd display widths
+            if display_width % 2 != 0 {
+                out_pixels[content_start + display_width / 2] =
+                    source_row[xmap[display_width - 1]] << 4;
+            }
+
             prev_source_y = Some(source_y);
         }
     }
@@ -102,7 +111,7 @@ fn encode_image(
     let mut encoder = png::Encoder::new(&mut png_bytes, out_w as u32, out_h as u32);
     encoder.set_color(png::ColorType::Indexed);
     encoder.set_palette(PALETTE.as_flattened());
-    encoder.set_depth(png::BitDepth::Eight);
+    encoder.set_depth(png::BitDepth::Four);
     encoder.set_compression(png::Compression::Fast);
 
     let mut writer = encoder.write_header()?;
