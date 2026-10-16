@@ -337,7 +337,7 @@ impl Machine {
         }
 
         // Check PIC for pending interrupts
-        if self.pic.interrupt_pending() && self.cpu.get_flag(Flag::InterruptEnable) {
+        if self.cpu.get_flag(Flag::InterruptEnable) && self.pic.interrupt_pending() {
             let vector = self.pic.acknowledge()?;
             self.cpu.enter_interrupt(&mut self.memory, vector)?;
         }

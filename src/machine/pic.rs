@@ -117,6 +117,11 @@ impl Pic {
 
     /// Returns the highest-priority pending IRQ
     fn next_pending_irq(&self) -> Option<u8> {
+        // No unmasked requests
+        if self.irr & !self.imr == 0 {
+            return None;
+        }
+
         for i in 0..8 {
             let mask = 1 << i;
             // If an interrupt is being serviced, block this and lower-priority
