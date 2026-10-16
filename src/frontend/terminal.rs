@@ -191,11 +191,19 @@ pub(crate) fn run(
         }
 
         let target_cycles = pacing_start.elapsed().as_nanos() * u128::from(CPU_HZ) / 1_000_000_000;
+        let mut steps_until_deadline_check = 0u32;
 
         // Step until exit, guest has caught up with real time, or execution deadline is reached
-        while u128::from(machine.total_elapsed_cycles() - starting_cycles) < target_cycles
-            && Instant::now() < execution_deadline
-        {
+        while u128::from(machine.total_elapsed_cycles() - starting_cycles) < target_cycles {
+            // Checking Instant::now() costs substantial host CPU, so check it once every 128 steps
+            if steps_until_deadline_check == 0 {
+                if Instant::now() >= execution_deadline {
+                    break;
+                }
+                steps_until_deadline_check = 128;
+            }
+            steps_until_deadline_check -= 1;
+
             let result = machine.step()?;
             match result {
                 MachineStepResult::Continue => (),
