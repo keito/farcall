@@ -47,9 +47,11 @@ impl Renderer {
         }
 
         let data = encode_image(&self.current_frame, 640, 200, display_width, display_height)?;
+        stdout.write_all(b"\x1b[?2026h")?; // Begin synchronized update
         for line in data {
             stdout.write_all(&line.as_bytes())?;
         }
+        stdout.write_all(b"\x1b[?2026l")?; // End synchronized update
         stdout.flush()?;
 
         std::mem::swap(&mut self.current_frame, &mut self.previous_frame);
