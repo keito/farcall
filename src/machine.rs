@@ -74,6 +74,8 @@ pub enum MachineError {
     Bios(#[from] BiosError),
     #[error("Boot Sector error: {0}")]
     BootSectorError(String),
+    #[error("ROM error: {0}")]
+    RomError(String),
     #[error("CPU Error: {0}")]
     CpuError(#[from] CpuError),
     #[error("Disk error: {0}")]
@@ -172,12 +174,18 @@ impl Machine {
                 drive_a,
                 drive_b,
                 rom,
+                rom_fixed_disk,
             } => {
                 let data = fs::read(drive_a.path).context("Failed to read Floppy A image")?;
                 machine.load_boot_sector(data, drive_a.disk_type, drive_a.write_protected)?;
 
                 if let Some(rom_path) = rom {
                     machine.load_rom(&rom_path).context("Failed to load ROM")?;
+                    if let Some(rom_fixed_disk) = rom_fixed_disk {
+                        machine
+                            .load_rom_fixed_disk(&rom_fixed_disk)
+                            .context("Failed to load fixed disk option ROM")?;
+                    }
                 }
 
                 if let Some(drive_b) = drive_b {
@@ -741,6 +749,36 @@ impl Machine {
         Ok(())
     }
 
+    fn load_rom_fixed_disk(&mut self, path: &Path) -> Result<(), MachineError> {
+        let bytes: Vec<u8> = fs::read(path)?;
+        if bytes.len() < 512 {
+            return Err(MachineError::RomError(
+                "Option ROM must at least be 512 bytes long".to_string(),
+            ));
+        }
+
+        // Read the header bytes to get the length indicator
+        if bytes[0] != 0x55 || bytes[1] != 0xAA {
+            return Err(MachineError::RomError(
+                "Option ROM does not start with 0x55 0xAA".to_string(),
+            ));
+        }
+        let length = bytes[2] as usize * 512;
+
+        if bytes.len() != length {
+            return Err(MachineError::RomError(
+                "Option ROM length does not match length indicator".to_string(),
+            ));
+        }
+
+        // Copy the ROM to C8000h
+        let validated_buffer =
+            validate_buffer(&mut self.memory, PhysAddr::from_u32(0xC8000), length)?;
+        write_buffer(validated_buffer, &bytes)?;
+
+        Ok(())
+    }
+
     pub(crate) fn keyboard_input_mode(&self) -> KeyboardInputMode {
         self.keyboard_input_mode
     }
@@ -773,6 +811,7 @@ pub(crate) enum BootMode {
         drive_a: DiskImageConfig,
         drive_b: Option<DiskImageConfig>,
         rom: Option<PathBuf>,
+        rom_fixed_disk: Option<PathBuf>,
     },
 }
 
@@ -788,6 +827,7 @@ impl BootMode {
                 drive_a: _,
                 drive_b: _,
                 rom,
+                rom_fixed_disk: _,
             } => rom.is_some(),
         }
     }

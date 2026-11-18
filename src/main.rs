@@ -67,6 +67,10 @@ struct Cli {
     #[arg(long, requires = "floppy_a", conflicts_with = "com")]
     rom: Option<PathBuf>,
 
+    /// Load a fixed-disk option ROM. Requires --rom
+    #[arg(long, requires = "rom", conflicts_with = "com")]
+    rom_fixed_disk: Option<PathBuf>,
+
     /// Which frontend to use
     #[arg(long, value_enum)]
     frontend: Option<FrontendChoice>,
@@ -101,6 +105,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
                 write_protected: false,
             }),
             rom: cli.rom,
+            rom_fixed_disk: cli.rom_fixed_disk,
         }
     } else {
         BootMode::Com {
