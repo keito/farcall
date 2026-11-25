@@ -83,6 +83,7 @@ fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
         keyboard_input_mode: KeyboardInputMode::BiosKeystrokes,
         pc_keyboard: PcKeyboard::new(),
         synthetic_int09_pending: false,
+        xt_cf: None,
         pic: Pic::new(),
         pit: Pit::new(),
         ppi: Ppi::new(),

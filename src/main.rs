@@ -63,6 +63,10 @@ struct Cli {
     #[arg(long, value_enum, requires = "floppy_b", conflicts_with = "com")]
     floppy_b_type: Option<DiskType>,
 
+    /// Image for a hard disk drive
+    #[arg(long, requires = "rom_fixed_disk", conflicts_with = "com")]
+    hdd: Option<PathBuf>,
+
     /// Load a BIOS ROM image; turns off BIOS emulation. Requires --floppy-a
     #[arg(long, requires = "floppy_a", conflicts_with = "com")]
     rom: Option<PathBuf>,
@@ -104,6 +108,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
                 disk_type: cli.floppy_b_type.unwrap_or(DiskType::Floppy180),
                 write_protected: false,
             }),
+            hdd: cli.hdd,
             rom: cli.rom,
             rom_fixed_disk: cli.rom_fixed_disk,
         }

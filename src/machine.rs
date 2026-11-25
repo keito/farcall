@@ -1,6 +1,6 @@
 use anyhow::Context;
 use core::fmt::Debug;
-use std::fs;
+use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -21,6 +21,7 @@ use pc_keyboard::PcKeyboard;
 use pic::Pic;
 use pit::Pit;
 use ppi::Ppi;
+use xt_cf::XtCf;
 
 #[cfg(feature = "terminal")]
 pub(crate) use cga_video::text_terminal::TextScreen;
@@ -42,6 +43,7 @@ mod pit;
 mod ppi;
 #[cfg(test)]
 mod tests;
+mod xt_cf;
 
 // Owns everything
 pub struct Machine {
@@ -64,6 +66,7 @@ pub struct Machine {
     ppi: Ppi,
     /// Used to directly raise INT 09h when emulating a BIOS
     synthetic_int09_pending: bool,
+    xt_cf: Option<XtCf>,
     total_elapsed_cycles: u64,
     verbosity: u8,
 }
@@ -159,6 +162,7 @@ impl Machine {
             synthetic_int09_pending: false,
             total_elapsed_cycles: 0,
             verbosity,
+            xt_cf: None,
         };
 
         if let Some(bios) = machine.bios.as_mut() {
@@ -173,6 +177,7 @@ impl Machine {
             BootMode::Floppy {
                 drive_a,
                 drive_b,
+                hdd,
                 rom,
                 rom_fixed_disk,
             } => {
@@ -185,6 +190,24 @@ impl Machine {
                         machine
                             .load_rom_fixed_disk(&rom_fixed_disk)
                             .context("Failed to load fixed disk option ROM")?;
+
+                        // Load hard disk image
+                        let image = hdd
+                            .map(|hdd| {
+                                let file =
+                                    File::open(hdd).context("Failed to open hard disk image")?;
+                                let len = file.metadata()?.len();
+                                // TODO: Remove hardcoding
+                                if len != 16_515_072 {
+                                    return Err(anyhow::anyhow!(
+                                        "Invalid hard disk image size".to_string()
+                                    ));
+                                }
+                                Ok(file)
+                            })
+                            .transpose()?;
+
+                        machine.xt_cf = Some(XtCf::new(image));
                     }
                 }
 
@@ -374,36 +397,11 @@ impl Machine {
                 }
             }
             CpuStepResult::PortRead8 { port } => {
-                match port {
-                    0x20 | 0x21 => {
-                        let result = self.pic.read(port);
-                        self.cpu.set_reg(Reg8::Al, result);
-                    }
-                    0x40..=0x43 => {
-                        let result = self.pit.read(port);
-                        self.cpu.set_reg(Reg8::Al, result);
-                    }
-                    0x3DA => {
-                        // Video Service
-                        self.cpu.set_reg(Reg8::Al, self.cga_video.read_status());
-                    }
-                    0x3F4 | 0x3F5 => {
-                        let result = self.fdc.read(port);
-                        self.cpu.set_reg(Reg8::Al, result);
-                        // Synchronize the PIC
-                        self.pic.set_irq_line(6, self.fdc.irq_output());
-                    }
-                    0x60..=0x63 => {
-                        let result = self.ppi.read(port);
-                        self.cpu.set_reg(Reg8::Al, result);
-                    }
-                    _ => {
-                        self.cpu.set_reg(Reg8::Al, 0xFF);
-                    }
-                };
+                self.read_port8(port)?;
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortRead16 { .. } => {
+                // TODO
                 self.cpu.ax = 0xFFFF;
                 Ok(MachineStepResult::Continue)
             }
@@ -419,6 +417,45 @@ impl Machine {
         };
         self.cpu.trace();
         outcome
+    }
+
+    fn read_port8(&mut self, port: u16) -> Result<(), MachineError> {
+        match port {
+            0x20 | 0x21 => {
+                let result = self.pic.read(port);
+                self.cpu.set_reg(Reg8::Al, result);
+            }
+            0x40..=0x43 => {
+                let result = self.pit.read(port);
+                self.cpu.set_reg(Reg8::Al, result);
+            }
+            0x3DA => {
+                // Video Service
+                self.cpu.set_reg(Reg8::Al, self.cga_video.read_status());
+            }
+            0x3F4 | 0x3F5 => {
+                let result = self.fdc.read(port);
+                self.cpu.set_reg(Reg8::Al, result);
+                // Synchronize the PIC
+                self.pic.set_irq_line(6, self.fdc.irq_output());
+            }
+            0x60..=0x63 => {
+                let result = self.ppi.read(port);
+                self.cpu.set_reg(Reg8::Al, result);
+            }
+            0x300 | 0x302 | 0x30E => {
+                if let Some(xt_cf) = self.xt_cf.as_mut() {
+                    let result = xt_cf.read(port);
+                    self.cpu.set_reg(Reg8::Al, result);
+                } else {
+                    self.cpu.set_reg(Reg8::Al, 0xFF);
+                }
+            }
+            _ => {
+                self.cpu.set_reg(Reg8::Al, 0xFF);
+            }
+        };
+        Ok(())
     }
 
     fn write_port8(&mut self, port: u16, value: u8) -> Result<(), MachineError> {
@@ -437,6 +474,14 @@ impl Machine {
             0x60..=0x63 => {
                 self.ppi.write(port, value);
                 self.pic.set_irq_line(1, self.ppi.irq_output());
+            }
+            0x302 | 0x304 | 0x306 | 0x308 | 0x30A | 0x30C | 0x30E => {
+                if let Some(xt_cf) = self.xt_cf.as_mut() {
+                    if self.verbosity > 0 {
+                        eprintln!("XT-CF OUT port={port:04X} value={value:02X}");
+                    }
+                    xt_cf.write(port, value);
+                }
             }
             0x3D4 | 0x3D5 | 0x3D8 | 0x3D9 => {
                 self.cga_video.write(port, value);
@@ -810,6 +855,7 @@ pub(crate) enum BootMode {
     Floppy {
         drive_a: DiskImageConfig,
         drive_b: Option<DiskImageConfig>,
+        hdd: Option<PathBuf>,
         rom: Option<PathBuf>,
         rom_fixed_disk: Option<PathBuf>,
     },
@@ -826,6 +872,7 @@ impl BootMode {
             BootMode::Floppy {
                 drive_a: _,
                 drive_b: _,
+                hdd: _,
                 rom,
                 rom_fixed_disk: _,
             } => rom.is_some(),
