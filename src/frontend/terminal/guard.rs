@@ -183,10 +183,6 @@ fn has_identification_reply(response: &[u8]) -> bool {
             .take_while(|&&byte| byte.is_ascii_digit() || byte == b';')
             .count();
 
-        param_len > 0
-            && rest[..param_len]
-                .split(|&byte| byte == b';')
-                .all(|param| !param.is_empty() && param.iter().all(|byte| byte.is_ascii_digit()))
-            && rest.get(param_len) == Some(&b'c')
+        param_len > 0 && rest.get(param_len) == Some(&b'c')
     })
 }
