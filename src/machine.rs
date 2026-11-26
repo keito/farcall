@@ -1,6 +1,6 @@
 use anyhow::Context;
 use core::fmt::Debug;
-use std::fs::{self, File};
+use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -194,8 +194,11 @@ impl Machine {
                         // Load hard disk image
                         let image = hdd
                             .map(|hdd| {
-                                let file =
-                                    File::open(hdd).context("Failed to open hard disk image")?;
+                                let file = OpenOptions::new()
+                                    .read(true)
+                                    .write(true)
+                                    .open(hdd)
+                                    .context("Failed to open hard disk image")?;
                                 let len = file.metadata()?.len();
                                 // TODO: Remove hardcoding
                                 if len != 16_515_072 {
@@ -475,7 +478,7 @@ impl Machine {
                 self.ppi.write(port, value);
                 self.pic.set_irq_line(1, self.ppi.irq_output());
             }
-            0x302 | 0x304 | 0x306 | 0x308 | 0x30A | 0x30C | 0x30E => {
+            0x300 | 0x302 | 0x304 | 0x306 | 0x308 | 0x30A | 0x30C | 0x30E => {
                 if let Some(xt_cf) = self.xt_cf.as_mut() {
                     if self.verbosity > 0 {
                         eprintln!("XT-CF OUT port={port:04X} value={value:02X}");

@@ -6,6 +6,7 @@ use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 use super::{CgaVideo, Cpu, InterruptResult, LoadMode, Machine, MachineStepResult};
 
 mod disk;
+mod xt_cf;
 
 #[test]
 fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
