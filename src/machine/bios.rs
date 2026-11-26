@@ -60,6 +60,12 @@ impl Bios {
                 video.write(0x3D9, 0x30); // Color Control
                 video.clear_graphics(memory)?;
             }
+            0x06 => {
+                // 640x200 graphics
+                video.write(0x3D8, 0x3A); // Mode
+                video.write(0x3D9, 0x0F); // Color Control
+                video.clear_graphics(memory)?;
+            }
             _ => {
                 return Err(BiosError::VideoServiceError(format!(
                     "Mode {:#02}h not supported",
@@ -133,7 +139,7 @@ impl Bios {
                 cpu.set_reg(
                     Reg8::Ah,
                     match self.graphics_mode {
-                        0x03 => 80,
+                        0x03 | 0x06 => 80,
                         0x04 | 0x05 => 40, // 320 / 8 (because 8 pixel wide chars
                         _ => unreachable!("Mode not supported"),
                     },

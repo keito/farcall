@@ -5,6 +5,7 @@ use crate::machine::{Dma, Fdc, KeyboardInputMode, PcKeyboard, Pic, Pit, Ppi};
 
 use super::{CgaVideo, Cpu, InterruptResult, LoadMode, Machine, MachineStepResult};
 
+mod bios_video;
 mod disk;
 mod xt_cf;
 
