@@ -1,4 +1,64 @@
-use super::DiskGeometry;
+use super::{DiskGeometry, parse_disk_geometry};
+
+#[test]
+fn hard_disk_offsets_above_four_gib_preserve_the_full_address() {
+    let geometry = DiskGeometry {
+        cylinders: 16383,
+        heads: 16,
+        sectors_per_track: 63,
+    };
+    for (cylinder, head, sector, offset) in [
+        (9000, 0, 1, 4_644_864_000u64),
+        (16382, 15, 63, 8_455_200_256),
+    ] {
+        assert_eq!(geometry.byte_offset(cylinder, head, sector), Some(offset));
+    }
+    assert_eq!(geometry.byte_offset(16383, 0, 1), None);
+}
+
+#[test]
+fn geometry_parser_accepts_boundary_counts_and_custom_geometries() {
+    for (text, expected) in [
+        ("1,1,1", (1, 1, 1)),
+        ("16383,16,63", (16383, 16, 63)),
+        ("100,4,25", (100, 4, 25)),
+    ] {
+        let geometry = parse_disk_geometry(text).unwrap();
+        assert_eq!(
+            (
+                geometry.cylinders,
+                geometry.heads,
+                geometry.sectors_per_track
+            ),
+            expected,
+            "geometry {text}"
+        );
+    }
+}
+
+#[test]
+fn geometry_parser_rejects_malformed_and_out_of_range_values() {
+    for text in [
+        "",
+        "32,16",
+        "32,16,63,1",
+        "32,,63",
+        "abc,16,63",
+        "-1,16,63",
+        "0,16,63",
+        "16384,16,63",
+        "32,0,63",
+        "32,17,63",
+        "32,16,0",
+        "32,16,64",
+        "18446744073709551616,16,63",
+    ] {
+        assert!(
+            parse_disk_geometry(text).is_err(),
+            "accepted geometry {text:?}"
+        );
+    }
+}
 
 #[test]
 fn single_sided_geometry_maps_cylinders_and_rejects_a_second_head() {

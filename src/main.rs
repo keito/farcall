@@ -9,8 +9,9 @@ use std::time::Duration;
 use crate::frontend::terminal;
 #[cfg(feature = "window")]
 use crate::frontend::window;
-use crate::machine::DiskImageConfig;
-use crate::machine::{BootMode, DiskType, Machine};
+use crate::machine::{
+    BootMode, DiskGeometry, DiskImageConfig, DiskType, Machine, parse_disk_geometry,
+};
 
 mod cpu;
 mod frontend;
@@ -67,6 +68,10 @@ struct Cli {
     #[arg(long, requires = "rom_fixed_disk", conflicts_with = "com")]
     hdd: Option<PathBuf>,
 
+    /// Cylinders/Heads/Sectors per track for hard disk image (e.g. 100,4,25)
+    #[arg(long, requires = "hdd", value_name = "C,H,S", value_parser = parse_disk_geometry)]
+    hdd_geometry: Option<DiskGeometry>,
+
     /// Load a BIOS ROM image; turns off BIOS emulation. Requires --floppy-a
     #[arg(long, requires = "floppy_a", conflicts_with = "com")]
     rom: Option<PathBuf>,
@@ -109,6 +114,7 @@ fn main() -> anyhow::Result<process::ExitCode> {
                 write_protected: false,
             }),
             hdd: cli.hdd,
+            hdd_geometry: cli.hdd_geometry,
             rom: cli.rom,
             rom_fixed_disk: cli.rom_fixed_disk,
         }

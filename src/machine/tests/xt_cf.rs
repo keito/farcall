@@ -1,13 +1,13 @@
 use std::{
     fs::{self, File},
-    io::Write,
+    io::{Read, Seek, SeekFrom, Write},
     path::PathBuf,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use super::Machine;
 use crate::machine::{
-    BootMode,
+    BootMode, DiskGeometry,
     disk::{DiskImageConfig, DiskType},
 };
 
@@ -45,6 +45,15 @@ impl TestDisk {
     }
 
     fn machine(&self) -> Machine {
+        self.load_machine(Some(self.directory.join("hdd.img")), None)
+            .unwrap()
+    }
+
+    fn load_machine(
+        &self,
+        image: Option<PathBuf>,
+        geometry: Option<DiskGeometry>,
+    ) -> anyhow::Result<Machine> {
         Machine::new(
             BootMode::Floppy {
                 drive_a: DiskImageConfig {
@@ -53,13 +62,30 @@ impl TestDisk {
                     write_protected: true,
                 },
                 drive_b: None,
-                hdd: Some(self.directory.join("hdd.img")),
+                hdd: image,
+                hdd_geometry: geometry,
                 rom: Some(self.directory.join("bios.rom")),
                 rom_fixed_disk: Some(self.directory.join("option.rom")),
             },
             0,
         )
-        .unwrap()
+    }
+
+    fn resize(&self, size: u64) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(self.directory.join("hdd.img"))
+            .unwrap()
+            .set_len(size)
+            .unwrap();
+    }
+
+    fn sector(&self, offset: u64) -> [u8; 512] {
+        let mut file = File::open(self.directory.join("hdd.img")).unwrap();
+        file.seek(SeekFrom::Start(offset)).unwrap();
+        let mut bytes = [0; 512];
+        file.read_exact(&mut bytes).unwrap();
+        bytes
     }
 
     fn bytes(&self) -> Vec<u8> {
@@ -104,6 +130,277 @@ fn pattern(seed: u8) -> [u8; 512] {
 fn send_sector(machine: &mut Machine, bytes: &[u8; 512]) {
     for &byte in bytes {
         output(machine, DATA, byte);
+    }
+}
+
+fn read_sector(machine: &mut Machine) -> [u8; 512] {
+    std::array::from_fn(|_| input(machine, DATA))
+}
+
+fn assert_identify_geometry(machine: &mut Machine, expected: [u16; 3]) {
+    output(machine, COMMAND_STATUS, 0xEC);
+    assert_eq!(input(machine, COMMAND_STATUS), 0x48);
+    let identify = read_sector(machine);
+    for (offset, value) in [2, 6, 12].into_iter().zip(expected) {
+        assert_eq!(&identify[offset..offset + 2], &value.to_le_bytes());
+    }
+    assert_eq!(input(machine, COMMAND_STATUS), 0x40);
+    assert_eq!(input(machine, ERROR), 0);
+}
+
+#[test]
+fn autodetected_geometry_controls_identify_and_the_last_sector() {
+    for cylinders in [1u16, 2, 65] {
+        let disk = TestDisk::new();
+        let size = u64::from(cylinders) * 16 * 63 * 512;
+        disk.resize(size);
+        let mut machine = disk.machine();
+        assert_identify_geometry(&mut machine, [cylinders, 16, 63]);
+
+        command(&mut machine, 0xC4, 1, 0, 0, 1);
+        assert_eq!(read_sector(&mut machine), [0xA5; 512]);
+        let bytes = pattern(71);
+        command(&mut machine, 0xC5, 1, cylinders - 1, 15, 63);
+        send_sector(&mut machine, &bytes);
+        assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+        assert_eq!(input(&mut machine, ERROR), 0);
+        drop(machine);
+        assert_eq!(disk.sector(size - 512), bytes);
+        assert_eq!(disk.sector(0), [0xA5; 512]);
+
+        let mut reopened = disk.machine();
+        command(&mut reopened, 0xC4, 1, cylinders - 1, 15, 63);
+        assert_eq!(read_sector(&mut reopened), bytes);
+        assert_eq!(input(&mut reopened, COMMAND_STATUS), 0x40);
+        assert_eq!(
+            fs::metadata(disk.directory.join("hdd.img")).unwrap().len(),
+            size
+        );
+    }
+}
+
+#[test]
+fn explicit_geometry_controls_identify_and_persistent_sector_addresses() {
+    let disk = TestDisk::new();
+    disk.resize(100 * 4 * 25 * 512);
+    let geometry = DiskGeometry {
+        cylinders: 100,
+        heads: 4,
+        sectors_per_track: 25,
+    };
+    let mut machine = disk
+        .load_machine(Some(disk.directory.join("hdd.img")), Some(geometry.clone()))
+        .unwrap();
+    assert_identify_geometry(&mut machine, [100, 4, 25]);
+    let mut expected = disk.bytes();
+
+    // These offsets are fixed independently of the controller's geometry helper.
+    for (cylinder, head, sector, lba, seed) in
+        [(0, 1, 1, 25, 11), (1, 2, 3, 152, 42), (99, 3, 25, 9999, 79)]
+    {
+        let bytes = pattern(seed);
+        command(&mut machine, 0xC5, 1, cylinder, head, sector);
+        send_sector(&mut machine, &bytes);
+        assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+        assert_eq!(input(&mut machine, ERROR), 0);
+        expected[lba * 512..(lba + 1) * 512].copy_from_slice(&bytes);
+    }
+    drop(machine);
+    assert!(
+        disk.bytes() == expected,
+        "explicit CHS wrote to an incorrect offset"
+    );
+
+    let mut reopened = disk
+        .load_machine(Some(disk.directory.join("hdd.img")), Some(geometry))
+        .unwrap();
+    for (cylinder, head, sector, seed) in [(0, 1, 1, 11), (1, 2, 3, 42), (99, 3, 25, 79)] {
+        command(&mut reopened, 0xC4, 1, cylinder, head, sector);
+        assert_eq!(read_sector(&mut reopened), pattern(seed));
+        assert_eq!(input(&mut reopened, COMMAND_STATUS), 0x40);
+    }
+}
+
+#[test]
+fn explicit_geometry_controls_multisector_track_and_cylinder_crossings() {
+    let disk = TestDisk::new();
+    disk.resize(100 * 4 * 25 * 512);
+    let mut machine = disk
+        .load_machine(
+            Some(disk.directory.join("hdd.img")),
+            Some(DiskGeometry {
+                cylinders: 100,
+                heads: 4,
+                sectors_per_track: 25,
+            }),
+        )
+        .unwrap();
+    let mut expected = disk.bytes();
+    for (head, lba) in [(0, 24), (3, 99)] {
+        let sectors = [pattern(31 + head), pattern(61 + head)];
+        command(&mut machine, 0xC5, 2, 0, head, 25);
+        for (index, bytes) in sectors.iter().enumerate() {
+            assert_eq!(input(&mut machine, COMMAND_STATUS), 0x48);
+            send_sector(&mut machine, bytes);
+            let offset = (lba + index) * 512;
+            expected[offset..offset + 512].copy_from_slice(bytes);
+        }
+        assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+        assert!(
+            disk.bytes() == expected,
+            "incorrect crossing from head {head}"
+        );
+        command(&mut machine, 0xC4, 2, 0, head, 25);
+        for bytes in sectors {
+            assert_eq!(input(&mut machine, COMMAND_STATUS), 0x48);
+            assert_eq!(read_sector(&mut machine), bytes);
+        }
+        assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+        assert_eq!(input(&mut machine, ERROR), 0);
+    }
+}
+
+#[test]
+fn explicit_geometry_rejects_out_of_range_chs_for_reads_and_writes() {
+    let disk = TestDisk::new();
+    disk.resize(100 * 4 * 25 * 512);
+    let mut machine = disk
+        .load_machine(
+            Some(disk.directory.join("hdd.img")),
+            Some(DiskGeometry {
+                cylinders: 100,
+                heads: 4,
+                sectors_per_track: 25,
+            }),
+        )
+        .unwrap();
+    let expected = disk.bytes();
+    for opcode in [0xC4, 0xC5] {
+        for (cylinder, head, sector) in [(100, 0, 1), (0, 4, 1), (0, 0, 0), (0, 0, 26)] {
+            command(&mut machine, opcode, 1, cylinder, head, sector);
+            assert_eq!(input(&mut machine, COMMAND_STATUS), 0x41);
+            assert_eq!(input(&mut machine, ERROR), 0x10);
+            send_sector(&mut machine, &pattern(37));
+            assert_eq!(read_sector(&mut machine), [0; 512]);
+        }
+    }
+    assert!(disk.bytes() == expected, "invalid CHS changed the image");
+    command(&mut machine, 0xC4, 1, 0, 0, 1);
+    assert_eq!(read_sector(&mut machine), [0xA5; 512]);
+    assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+    assert_eq!(input(&mut machine, ERROR), 0);
+}
+
+#[test]
+fn autodetection_rejects_empty_partial_and_oversized_images() {
+    let disk = TestDisk::new();
+    let cylinder_bytes = 16 * 63 * 512;
+    for size in [
+        0,
+        1,
+        511,
+        512,
+        cylinder_bytes - 1,
+        cylinder_bytes + 1,
+        cylinder_bytes + 512,
+        16384 * cylinder_bytes,
+    ] {
+        disk.resize(size);
+        assert!(
+            disk.load_machine(Some(disk.directory.join("hdd.img")), None)
+                .is_err(),
+            "accepted invalid image size {size}"
+        );
+        assert_eq!(
+            fs::metadata(disk.directory.join("hdd.img")).unwrap().len(),
+            size
+        );
+    }
+}
+
+#[test]
+fn explicit_geometry_requires_an_exact_image_size() {
+    let disk = TestDisk::new();
+    for size in [0, IMAGE_SIZE - 512, IMAGE_SIZE + 512] {
+        disk.resize(size);
+        let geometry = DiskGeometry {
+            cylinders: 32,
+            heads: 16,
+            sectors_per_track: 63,
+        };
+        assert!(
+            disk.load_machine(Some(disk.directory.join("hdd.img")), Some(geometry))
+                .is_err(),
+            "accepted mismatched image size {size}"
+        );
+        assert_eq!(
+            fs::metadata(disk.directory.join("hdd.img")).unwrap().len(),
+            size
+        );
+    }
+}
+
+#[test]
+fn empty_controller_ignores_geometry_and_disk_commands() {
+    let disk = TestDisk::new();
+    let expected = disk.bytes();
+    for geometry in [
+        None,
+        Some(DiskGeometry {
+            cylinders: 32,
+            heads: 16,
+            sectors_per_track: 63,
+        }),
+    ] {
+        let mut machine = disk.load_machine(None, geometry).unwrap();
+        assert!(machine.xt_cf.is_some());
+        for drive in [0xA0, 0xB0] {
+            output(&mut machine, 0x30C, drive);
+            assert_eq!(input(&mut machine, COMMAND_STATUS), 0);
+            for opcode in [0xEC, 0xC4, 0xC5] {
+                output(&mut machine, COMMAND_STATUS, opcode);
+                send_sector(&mut machine, &pattern(91));
+                assert_eq!(input(&mut machine, COMMAND_STATUS), 0);
+                assert_eq!(read_sector(&mut machine), [0; 512]);
+            }
+        }
+    }
+    assert!(disk.bytes() == expected);
+}
+
+#[test]
+fn large_chs_offsets_read_and_write_above_four_gib_without_wrapping() {
+    for cylinders in [9000u16, 16383] {
+        let disk = TestDisk::new();
+        // set_len creates a sparse image; only a few sectors are read or written.
+        let size = u64::from(cylinders) * 16 * 63 * 512;
+        disk.resize(size);
+        let last_offset = size - 512;
+        assert!(last_offset > u64::from(u32::MAX));
+        let bytes = pattern(113);
+        let mut machine = disk.machine();
+        assert_identify_geometry(&mut machine, [cylinders, 16, 63]);
+        command(&mut machine, 0xC5, 1, cylinders - 1, 15, 63);
+        send_sector(&mut machine, &bytes);
+        assert_eq!(input(&mut machine, COMMAND_STATUS), 0x40);
+        assert_eq!(input(&mut machine, ERROR), 0);
+        drop(machine);
+
+        assert_eq!(disk.sector(last_offset), bytes);
+        assert_eq!(disk.sector(0), [0xA5; 512]);
+        assert_eq!(disk.sector(last_offset - 512), [0; 512]);
+        assert_eq!(disk.sector(last_offset & u64::from(u32::MAX)), [0; 512]);
+        assert_eq!(
+            fs::metadata(disk.directory.join("hdd.img")).unwrap().len(),
+            size
+        );
+
+        let mut reopened = disk.machine();
+        command(&mut reopened, 0xC4, 2, cylinders - 1, 15, 63);
+        assert_eq!(read_sector(&mut reopened), bytes);
+        assert_eq!(input(&mut reopened, COMMAND_STATUS), 0x41);
+        assert_eq!(input(&mut reopened, ERROR), 0x10);
+        assert_eq!(read_sector(&mut reopened), [0; 512]);
     }
 }
 

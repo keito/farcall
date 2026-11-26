@@ -61,7 +61,10 @@ impl Bios {
         };
 
         let geometry = &disk.geometry;
-        let Some(image_offset) = geometry.byte_offset(cylinder, head, sector_num) else {
+        let Some(image_offset) = geometry
+            .byte_offset(cylinder, head, sector_num)
+            .and_then(|offset| usize::try_from(offset).ok())
+        else {
             cpu.set_reg(Reg8::Ah, 0x04);
             cpu.set_flag(Flag::Carry, true);
             return Ok(InterruptResult::ResumeExecution);

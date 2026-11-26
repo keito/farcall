@@ -13,7 +13,7 @@ use crate::registers::Reg8;
 use bios::{Bios, BiosError};
 use bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use cga_video::CgaVideo;
-use disk::{DiskGeometry, FloppyDisk};
+use disk::FloppyDisk;
 use dma::Dma;
 use dos::{Dos, DosError};
 use fdc::{Fdc, FdcDataRequest};
@@ -28,7 +28,7 @@ pub(crate) use cga_video::text_terminal::TextScreen;
 #[cfg(all(test, feature = "terminal"))]
 pub(crate) use cga_video::text_terminal::{TextCell, TextCursor};
 
-pub use disk::{DiskImageConfig, DiskType};
+pub use disk::{DiskGeometry, DiskImageConfig, DiskType, parse_disk_geometry};
 
 mod bios;
 pub mod bios_keyboard;
@@ -178,6 +178,7 @@ impl Machine {
                 drive_a,
                 drive_b,
                 hdd,
+                hdd_geometry,
                 rom,
                 rom_fixed_disk,
             } => {
@@ -193,24 +194,17 @@ impl Machine {
 
                         // Load hard disk image
                         let image = hdd
-                            .map(|hdd| {
+                            .map(|hdd_path| {
                                 let file = OpenOptions::new()
                                     .read(true)
                                     .write(true)
-                                    .open(hdd)
+                                    .open(hdd_path)
                                     .context("Failed to open hard disk image")?;
-                                let len = file.metadata()?.len();
-                                // TODO: Remove hardcoding
-                                if len != 16_515_072 {
-                                    return Err(anyhow::anyhow!(
-                                        "Invalid hard disk image size".to_string()
-                                    ));
-                                }
-                                Ok(file)
+                                Ok::<_, anyhow::Error>(file)
                             })
                             .transpose()?;
 
-                        machine.xt_cf = Some(XtCf::new(image));
+                        machine.xt_cf = Some(XtCf::new(image, hdd_geometry)?);
                     }
                 }
 
@@ -589,6 +583,7 @@ impl Machine {
                     current_head as usize,
                     current_sector as usize,
                 )
+                .and_then(|offset| usize::try_from(offset).ok())
                 .ok_or_else(|| MachineError::DiskError("Invalid disk geometry".to_string()))?;
             floppy_image
                 .bytes
@@ -859,6 +854,7 @@ pub(crate) enum BootMode {
         drive_a: DiskImageConfig,
         drive_b: Option<DiskImageConfig>,
         hdd: Option<PathBuf>,
+        hdd_geometry: Option<DiskGeometry>,
         rom: Option<PathBuf>,
         rom_fixed_disk: Option<PathBuf>,
     },
@@ -876,6 +872,7 @@ impl BootMode {
                 drive_a: _,
                 drive_b: _,
                 hdd: _,
+                hdd_geometry: _,
                 rom,
                 rom_fixed_disk: _,
             } => rom.is_some(),

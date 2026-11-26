@@ -3,6 +3,8 @@ use std::{
     io::{Read, Seek, SeekFrom, Write},
 };
 
+use crate::machine::MachineError;
+
 use super::DiskGeometry;
 
 enum TransferDirection {
@@ -20,7 +22,7 @@ struct Transfer {
 
 pub(super) struct XtCf {
     file: Option<File>,
-    geometry: DiskGeometry,
+    geometry: Option<DiskGeometry>,
     identify: [u8; 512],
     drive_head: u8,
     sector_count: u8,
@@ -32,19 +34,41 @@ pub(super) struct XtCf {
 }
 
 impl XtCf {
-    pub(super) fn new(image: Option<File>) -> Self {
-        let mut identify = [0u8; 512];
-        identify[2..4].copy_from_slice(&32u16.to_le_bytes()); // Word 1: cylinders
-        identify[6..8].copy_from_slice(&16u16.to_le_bytes()); // Word 3: heads
-        identify[12..14].copy_from_slice(&63u16.to_le_bytes()); // Word 6: sectors per track
+    /// Creates a new XtCf adapter, optionally with an image attached.
+    /// Geometry is autodetected if none is provided, and ignored if no image is attached.
+    pub(super) fn new(
+        image: Option<File>,
+        geometry: Option<DiskGeometry>,
+    ) -> Result<Self, MachineError> {
+        let geometry = match (image.as_ref(), geometry) {
+            (Some(_), Some(geometry)) => Some(geometry),
+            (Some(file), None) => Some(Self::detect_geometry(file)?),
+            (None, _) => None,
+        };
 
-        XtCf {
+        let mut identify = [0u8; 512];
+        if let Some(geometry) = geometry.as_ref() {
+            // Validate geometry
+            let expected_len = geometry.cylinders as u64
+                * geometry.heads as u64
+                * geometry.sectors_per_track as u64
+                * 512;
+            if expected_len != image.as_ref().unwrap().metadata()?.len()
+                || !(1..=16383).contains(&geometry.cylinders)
+            {
+                return Err(MachineError::DiskError(
+                    "Invalid disk geometry for the hard disk image.".to_string(),
+                ));
+            }
+
+            identify[2..4].copy_from_slice(&(geometry.cylinders as u16).to_le_bytes()); // Word 1: cylinders
+            identify[6..8].copy_from_slice(&(geometry.heads as u16).to_le_bytes()); // Word 3: heads
+            identify[12..14].copy_from_slice(&(geometry.sectors_per_track as u16).to_le_bytes()); // Word 6: sectors per track
+        }
+
+        Ok(XtCf {
             file: image,
-            geometry: DiskGeometry {
-                cylinders: 32,
-                heads: 16,
-                sectors_per_track: 63,
-            },
+            geometry,
             identify,
             drive_head: 0,
             transfer: None,
@@ -53,7 +77,19 @@ impl XtCf {
             sector_count: 0,
             sector_number: 0,
             error: 0,
-        }
+        })
+    }
+
+    /// Autodetects geometry given the file
+    fn detect_geometry(image: &File) -> Result<DiskGeometry, MachineError> {
+        let image_len = image.metadata()?.len();
+        let bytes_per_cylinder = 16 * 63 * 512;
+        let cylinders = image_len / bytes_per_cylinder;
+        Ok(DiskGeometry {
+            cylinders: cylinders as usize,
+            heads: 16,
+            sectors_per_track: 63,
+        })
     }
 
     fn fill_read_buffer(&mut self) {
@@ -65,7 +101,7 @@ impl XtCf {
             return;
         };
         let result = (|| -> Result<(), std::io::Error> {
-            file.seek(SeekFrom::Start(transfer.next_offset as u64))?;
+            file.seek(SeekFrom::Start(transfer.next_offset))?;
             file.read_exact(&mut transfer.buffer)?;
             Ok(())
         })();
@@ -79,14 +115,13 @@ impl XtCf {
     }
 
     /// Calculate offset to read or write from
-    fn calculate_offset(&mut self) -> Option<usize> {
+    fn calculate_offset(&mut self) -> Option<u64> {
         let cylinder = u16::from_le_bytes([self.cylinder_low, self.cylinder_high]);
         let head = self.drive_head & 0x0F;
         let sector = self.sector_number;
-        let Some(offset) =
-            self.geometry
-                .byte_offset(cylinder as usize, head as usize, sector as usize)
-        else {
+        let Some(offset) = self.geometry.as_ref().and_then(|geometry| {
+            geometry.byte_offset(cylinder as usize, head as usize, sector as usize)
+        }) else {
             self.error = 0x10; // IDNF: Invalid CHS address
             return None;
         };
@@ -178,7 +213,7 @@ impl XtCf {
                             buffer: [0u8; 512],
                             cursor: 0,
                             direction: TransferDirection::Read,
-                            next_offset: offset as u64,
+                            next_offset: offset,
                             sectors_remaining: match self.sector_count {
                                 0 => 256, // 0 means 256
                                 count => u16::from(count),
@@ -197,7 +232,7 @@ impl XtCf {
                             buffer: [0u8; 512],
                             cursor: 0,
                             direction: TransferDirection::Write,
-                            next_offset: offset as u64,
+                            next_offset: offset,
                             sectors_remaining: match self.sector_count {
                                 0 => 256, // 0 means 256
                                 count => u16::from(count),
