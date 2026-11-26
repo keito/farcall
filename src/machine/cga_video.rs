@@ -212,9 +212,11 @@ impl CgaVideo {
 
         // Blank the display if the VIDEO bit is not set
         if !self.is_video() {
-            let color = if is_graphics {
+            let color = if is_graphics && self.mode & 0x10 == 0 {
+                // For medium-resolution graphics
                 self.color_control & 0xF // Overscan color
             } else {
+                // For text mode or high-resolution graphics
                 0
             };
             frame.fill(color);
@@ -222,7 +224,11 @@ impl CgaVideo {
         }
 
         if is_graphics {
-            self.render_graphics_mode(memory, frame);
+            if self.mode & 0x10 != 0 {
+                self.render_high_resolution_graphics(memory, frame);
+            } else {
+                self.render_graphics_mode(memory, frame);
+            }
         } else {
             self.render_text_mode(memory, frame);
         }
@@ -288,6 +294,27 @@ impl CgaVideo {
                 frame[offset] = color;
                 // We render 320x200 into a 640x200 buffer to match text mode
                 frame[offset + 1] = color;
+            }
+        }
+    }
+
+    /// Implements high-resolution graphics mode (640x200)
+    fn render_high_resolution_graphics(&self, memory: &[u8], frame: &mut [u8]) {
+        for x in 0..640 {
+            for y in 0..200 {
+                // Each pixel is 1 bit
+                // Video memory stores odd scanlines at 8 Kib offset.
+                // y=0:    [P0][P1]...[Px]
+                // ...
+                // y=8192: [P0][P1]...[Px]
+                let phys_row = (y % 2) * 8192;
+
+                // Each byte holds 8 pixels. Each row is 640 / 8 = 80 bytes.
+                let byte = memory[VIDEO_ADDR_BASE + phys_row + (y / 2) * 80 + (x / 8)];
+
+                let lit = byte & (0x80u8 >> (x % 8)) != 0;
+                let foreground = self.color_control & 0x0F;
+                frame[y * 640 + x] = if lit { foreground } else { 0 };
             }
         }
     }
