@@ -9,6 +9,7 @@ mod daa;
 mod div;
 mod far_call;
 mod flags;
+mod flags_model;
 mod group1_byte;
 mod group1_word;
 mod indirect_jump;

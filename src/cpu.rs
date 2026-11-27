@@ -87,7 +87,7 @@ pub(crate) enum CpuModel {
 
 impl Cpu {
     pub(crate) fn new(model: CpuModel, verbosity: u8) -> Self {
-        Cpu {
+        let mut cpu = Cpu {
             ax: 0x0,
             bx: 0x0,
             cx: 0x0,
@@ -101,11 +101,13 @@ impl Cpu {
             ds: 0x0,
             es: 0x0,
             ss: 0x0,
-            flags: normalize_flags(0),
+            flags: 0,
             halted: false,
             model,
             verbosity,
-        }
+        };
+        cpu.flags = cpu.normalize_flags(0);
+        cpu
     }
 
     pub(crate) fn set_flag(&mut self, flag: Flag, value: bool) {
@@ -830,7 +832,8 @@ impl Cpu {
             0x9D => {
                 // POPF
                 self.print_instruction(byte, &format_args!("popf"));
-                self.flags = normalize_flags(self.pop_from_stack(memory)?);
+                let flags = self.pop_from_stack(memory)?;
+                self.flags = self.normalize_flags(flags);
             }
             0x9E => {
                 // SAHF
@@ -1280,7 +1283,8 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("iret"));
                 self.ip = self.pop_from_stack(memory)?;
                 self.cs = self.pop_from_stack(memory)?;
-                self.flags = normalize_flags(self.pop_from_stack(memory)?);
+                let flags = self.pop_from_stack(memory)?;
+                self.flags = self.normalize_flags(flags);
             }
             0xD0 | 0xD2 => {
                 // 0xD0: Shift ops with R/M8, 1
@@ -2263,6 +2267,15 @@ impl Cpu {
             );
         }
     }
+
+    /// Normalize bits in flags to avoid writing reserved bits
+    fn normalize_flags(&self, flags: u16) -> u16 {
+        let high_bit_mask = match self.model {
+            CpuModel::I8088 => 0xF002,
+            CpuModel::I80286 => 0x0002,
+        };
+        (flags & 0x0FD5) | high_bit_mask
+    }
 }
 
 impl Debug for Cpu {
@@ -2284,11 +2297,6 @@ impl Debug for Cpu {
             .field("flags", &format_args!("{:09b}", self.flags))
             .finish()
     }
-}
-
-/// Normalize bits in flags to avoid writing reserved bits
-fn normalize_flags(flags: u16) -> u16 {
-    (flags & 0x0FD5) | 0xF002
 }
 
 #[derive(Copy, Clone, PartialEq)]
