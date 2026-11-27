@@ -1345,13 +1345,37 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
                 self.write_operand(memory, &rm, immediate)?;
             }
+            0xC8 if self.model == CpuModel::I80286 => {
+                // ENTER imm16, imm8
+                let dyn_storage_size = self.fetch_next_word_and_advance_ip(memory);
+                let nesting_level = self.fetch_next_byte_and_advance_ip(memory) & 0x1F;
+                self.print_instruction(
+                    byte,
+                    &format_args!("enter {}, {}", dyn_storage_size, nesting_level),
+                );
+
+                self.push_onto_stack(memory, self.bp)?;
+                let frame_ptr = self.sp;
+
+                if nesting_level > 0 {
+                    for _ in 1..nesting_level {
+                        self.bp = self.bp.wrapping_sub(2);
+                        let pointer = read_word(memory, SegmentedAddr::new(self.ss, self.bp))?;
+                        self.push_onto_stack(memory, pointer)?;
+                    }
+                    self.push_onto_stack(memory, frame_ptr)?;
+                }
+
+                self.bp = frame_ptr;
+                self.sp = self.sp.wrapping_sub(dyn_storage_size);
+            }
             0xC9 if self.model == CpuModel::I80286 => {
                 // LEAVE
                 self.print_instruction(byte, &format_args!("leave"));
                 self.sp = self.bp;
                 self.bp = self.pop_from_stack(memory)?;
             }
-            0xCA => {
+            0xC8 | 0xCA if byte == 0xCA || self.model == CpuModel::I8088 => {
                 // Far return (pops IP *and* CS) + immed16
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("retf {:X}h", immediate));

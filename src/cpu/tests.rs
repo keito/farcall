@@ -7,6 +7,7 @@ mod cmp;
 mod cmps;
 mod daa;
 mod div;
+mod enter;
 mod far_call;
 mod flags;
 mod flags_model;
