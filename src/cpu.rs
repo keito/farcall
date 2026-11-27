@@ -568,7 +568,13 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x68 | 0x78 => {
+            0x68 if self.model == CpuModel::I80286 => {
+                // 286: PUSH imm16
+                let operand = self.fetch_next_word_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("push {:X}h", operand));
+                self.push_onto_stack(memory, operand)?;
+            }
+            0x68 | 0x78 if byte == 0x78 || self.model == CpuModel::I8088 => {
                 // JS (jump if sign)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("js {:X}h", operand));
@@ -584,7 +590,13 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x6A | 0x7A => {
+            0x6A if self.model == CpuModel::I80286 => {
+                // 286: PUSH imm8
+                let operand = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("push {:X}h", operand));
+                self.push_onto_stack(memory, (operand as i8) as u16)?;
+            }
+            0x6A | 0x7A if byte == 0x7A || self.model == CpuModel::I8088 => {
                 // JP (jump if parity)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jp {:X}h", operand));
