@@ -16,6 +16,7 @@ mod imul_immediate;
 mod indirect_jump;
 mod interrupts;
 mod lds;
+mod leave;
 mod logic_modrm;
 mod memory_access;
 mod movs;

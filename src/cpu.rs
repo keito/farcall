@@ -1345,6 +1345,12 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", rm, immediate));
                 self.write_operand(memory, &rm, immediate)?;
             }
+            0xC9 if self.model == CpuModel::I80286 => {
+                // LEAVE
+                self.print_instruction(byte, &format_args!("leave"));
+                self.sp = self.bp;
+                self.bp = self.pop_from_stack(memory)?;
+            }
             0xCA => {
                 // Far return (pops IP *and* CS) + immed16
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
@@ -1355,7 +1361,7 @@ impl Cpu {
                 self.cs = cs;
                 self.sp = self.sp.wrapping_add(immediate);
             }
-            0xCB => {
+            0xC9 | 0xCB if byte == 0xCB || self.model == CpuModel::I8088 => {
                 // Far return (pops IP *and* CS)
                 self.print_instruction(byte, &format_args!("retf"));
                 let ip = self.pop_from_stack(memory)?;
