@@ -1176,14 +1176,44 @@ impl Cpu {
                 self.print_instruction(byte, &format_args!("mov {}, {:X}h", reg, immediate));
                 self.set_reg(reg, immediate);
             }
-            0xC2 => {
+            0xC0 if self.model == CpuModel::I80286 => {
+                // 286: Shift/rotate an 8-bit operand by an immediate count
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm_operand::<Reg8>(memory, &parsed, segment_override)?;
+                let op = ShiftOp::try_from(parsed.reg_field)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("{} {}, {}", op, rm, immediate));
+
+                let operand = self.read_operand(memory, &rm)?;
+                let count = self.effective_shift_count(immediate);
+                if count != 0 {
+                    let result = self.shift_op8(op, operand, count);
+                    self.write_operand(memory, &rm, result)?;
+                }
+            }
+            0xC1 if self.model == CpuModel::I80286 => {
+                // 286: Shift/rotate a 16-bit operand by an immediate count
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                let op = ShiftOp::try_from(parsed.reg_field)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                self.print_instruction(byte, &format_args!("{} {}, {}", op, rm, immediate));
+
+                let operand = self.read_operand(memory, &rm)?;
+                let count = self.effective_shift_count(immediate);
+                if count != 0 {
+                    let result = self.shift_op16(op, operand, count);
+                    self.write_operand(memory, &rm, result)?;
+                }
+            }
+            0xC2 | 0xC0 if byte == 0xC2 || self.model == CpuModel::I8088 => {
                 // RET IMMED16 (intrasegment)
                 let immediate = self.fetch_next_word_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("ret {:X}h", immediate));
                 self.ip = self.pop_from_stack(memory)?;
                 self.sp = self.sp.wrapping_add(immediate);
             }
-            0xC3 => {
+            0xC3 | 0xC1 if byte == 0xC3 || self.model == CpuModel::I8088 => {
                 // RET
                 self.print_instruction(byte, &format_args!("ret"));
                 self.ip = self.pop_from_stack(memory)?;

@@ -266,6 +266,7 @@ enum Width {
 enum CountSource {
     Cl,
     One,
+    Immediate(u8),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -388,13 +389,11 @@ fn check_case(
     if matches!(target, Target::EsOverride) {
         instruction.push(0x26);
     }
-    let opcode = 0xD0
-        | if matches!(width, Width::Word) { 1 } else { 0 }
-        | if matches!(source, CountSource::Cl) {
-            2
-        } else {
-            0
-        };
+    let opcode = match source {
+        CountSource::One => 0xD0,
+        CountSource::Cl => 0xD2,
+        CountSource::Immediate(_) => 0xC0,
+    } | if matches!(width, Width::Word) { 1 } else { 0 };
     instruction.push(opcode);
     let mut displacement = Vec::new();
     let (rm, address) = match target {
@@ -419,6 +418,9 @@ fn check_case(
     };
     instruction.push(rm | (operation.extension << 3));
     instruction.extend_from_slice(&displacement);
+    if let CountSource::Immediate(count) = source {
+        instruction.push(count);
+    }
     memory[0x1100..0x1100 + instruction.len()].copy_from_slice(&instruction);
     let mut expected_registers = registers(&cpu);
     if let Target::Register(rm) = target {
@@ -431,7 +433,9 @@ fn check_case(
         let length = if matches!(width, Width::Byte) { 1 } else { 2 };
         memory[address..address + length].copy_from_slice(&input.to_le_bytes()[..length]);
     }
-    assert_eq!(cpu.cx as u8, cl, "instruction must use the original CL");
+    if !matches!(source, CountSource::Immediate(_)) {
+        assert_eq!(cpu.cx as u8, cl, "instruction must use the original CL");
+    }
     let expected_value = packed as u16;
     let mut expected_memory = memory.clone();
     if let Target::Register(rm) = target {
@@ -513,6 +517,57 @@ count_tests!(i8088_rcr_uses_full_cl, i286_rcr_masks_cl, 3);
 count_tests!(i8088_shl_uses_full_cl, i286_shl_masks_cl, 4);
 count_tests!(i8088_shr_uses_full_cl, i286_shr_masks_cl, 5);
 count_tests!(i8088_sar_uses_full_cl, i286_sar_masks_cl, 6);
+
+fn check_immediate_counts(operation_index: usize, width: Width) {
+    let operation = &OPERATIONS[operation_index];
+    let (input, expected) = match width {
+        Width::Byte => (0x0081, &operation.byte),
+        Width::Word => (0x8001, &operation.word),
+    };
+    for (index, immediate) in COUNTS.into_iter().enumerate() {
+        let fixture = I286_INDEXES[index];
+        // A different CL verifies that the immediate supplies the count.
+        for cl in [0, 0xE7] {
+            for (carry, flag_pattern) in [0x0000, 0x0FD5].into_iter().enumerate() {
+                for target in TARGETS.into_iter().chain([Target::Register(1)]) {
+                    check_case(
+                        true,
+                        operation,
+                        width,
+                        CountSource::Immediate(immediate),
+                        cl,
+                        COUNTS[fixture],
+                        target,
+                        input,
+                        expected[fixture][carry],
+                        flag_pattern,
+                    );
+                }
+            }
+        }
+    }
+}
+
+macro_rules! immediate_tests {
+    ($byte_test:ident, $word_test:ident, $index:expr) => {
+        #[test]
+        fn $byte_test() {
+            check_immediate_counts($index, Width::Byte);
+        }
+        #[test]
+        fn $word_test() {
+            check_immediate_counts($index, Width::Word);
+        }
+    };
+}
+
+immediate_tests!(i286_c0_rol_immediate, i286_c1_rol_immediate, 0);
+immediate_tests!(i286_c0_ror_immediate, i286_c1_ror_immediate, 1);
+immediate_tests!(i286_c0_rcl_immediate, i286_c1_rcl_immediate, 2);
+immediate_tests!(i286_c0_rcr_immediate, i286_c1_rcr_immediate, 3);
+immediate_tests!(i286_c0_shl_immediate, i286_c1_shl_immediate, 4);
+immediate_tests!(i286_c0_shr_immediate, i286_c1_shr_immediate, 5);
+immediate_tests!(i286_c0_sar_immediate, i286_c1_sar_immediate, 6);
 
 #[test]
 fn i8088_implicit_one_opcodes_ignore_cl() {

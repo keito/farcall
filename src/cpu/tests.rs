@@ -22,6 +22,7 @@ mod mul;
 mod neg;
 mod push_sp;
 mod rep_lodsb;
+mod return_aliases;
 mod scas;
 mod segment_boundary;
 mod segment_override;
