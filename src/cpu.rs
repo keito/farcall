@@ -472,8 +472,33 @@ impl Cpu {
                 let value = self.pop_from_stack(memory)?;
                 self.set_reg(reg, value);
             }
+            0x60 if self.model == CpuModel::I80286 => {
+                // 286: PUSHA (save all general purpose registers)
+                self.print_instruction(byte, &format_args!("pusha"));
+                let original_sp = self.sp;
+                self.push_onto_stack(memory, self.ax)?;
+                self.push_onto_stack(memory, self.cx)?;
+                self.push_onto_stack(memory, self.dx)?;
+                self.push_onto_stack(memory, self.bx)?;
+                self.push_onto_stack(memory, original_sp)?;
+                self.push_onto_stack(memory, self.bp)?;
+                self.push_onto_stack(memory, self.si)?;
+                self.push_onto_stack(memory, self.di)?;
+            }
+            0x61 if self.model == CpuModel::I80286 => {
+                // 286: POPA (restore all general purpose registers)
+                self.print_instruction(byte, &format_args!("popa"));
+                self.di = self.pop_from_stack(memory)?;
+                self.si = self.pop_from_stack(memory)?;
+                self.bp = self.pop_from_stack(memory)?;
+                self.sp = self.sp.wrapping_add(2);
+                self.bx = self.pop_from_stack(memory)?;
+                self.dx = self.pop_from_stack(memory)?;
+                self.cx = self.pop_from_stack(memory)?;
+                self.ax = self.pop_from_stack(memory)?;
+            }
             // Jumps
-            0x60 | 0x70 => {
+            0x60 | 0x70 if byte == 0x70 || self.model == CpuModel::I8088 => {
                 // Jump if Overflow
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jo {:X}h", operand));
@@ -481,7 +506,7 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x61 | 0x71 => {
+            0x61 | 0x71 if byte == 0x71 || self.model == CpuModel::I8088 => {
                 // Jump if No Overflow
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jno {:X}h", operand));

@@ -21,6 +21,7 @@ mod movs;
 mod mul;
 mod neg;
 mod push_sp;
+mod pusha_popa;
 mod rep_lodsb;
 mod return_aliases;
 mod scas;
