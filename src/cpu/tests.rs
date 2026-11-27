@@ -12,6 +12,7 @@ mod flags;
 mod flags_model;
 mod group1_byte;
 mod group1_word;
+mod imul_immediate;
 mod indirect_jump;
 mod interrupts;
 mod lds;

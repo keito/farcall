@@ -582,7 +582,25 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x69 | 0x79 => {
+            0x69 if self.model == CpuModel::I80286 => {
+                // IMUL r16, r/m16, imm16
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                let immediate = self.fetch_next_word_and_advance_ip(memory);
+                let source = self.read_operand(memory, &rm)?;
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+
+                self.print_instruction(
+                    byte,
+                    &format_args!("imul {}, {}, {}", dest_reg, rm, immediate),
+                );
+                let result = (source as i16 as i32) * (immediate as i16 as i32);
+                self.set_reg16(dest_reg, result as u16);
+                let overflow = !(-32768..=32767).contains(&result);
+                self.set_flag(Flag::Carry, overflow);
+                self.set_flag(Flag::Overflow, overflow);
+            }
+            0x69 | 0x79 if byte == 0x79 || self.model == CpuModel::I8088 => {
                 // JNS (jump if not sign)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jns {:X}h", operand));
@@ -594,7 +612,7 @@ impl Cpu {
                 // 286: PUSH imm8
                 let operand = self.fetch_next_byte_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("push {:X}h", operand));
-                self.push_onto_stack(memory, (operand as i8) as u16)?;
+                self.push_onto_stack(memory, operand as i8 as u16)?;
             }
             0x6A | 0x7A if byte == 0x7A || self.model == CpuModel::I8088 => {
                 // JP (jump if parity)
@@ -604,7 +622,25 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x6B | 0x7B => {
+            0x6B if self.model == CpuModel::I80286 => {
+                // IMUL r16, r/m16, imm8
+                let parsed = parse_mod_rm(self.fetch_next_byte_and_advance_ip(memory));
+                let rm = self.decode_rm_operand::<Reg16>(memory, &parsed, segment_override)?;
+                let immediate = self.fetch_next_byte_and_advance_ip(memory);
+                let source = self.read_operand(memory, &rm)?;
+                let dest_reg = Reg16::try_from(parsed.reg_field)?;
+
+                self.print_instruction(
+                    byte,
+                    &format_args!("imul {}, {}, {}", dest_reg, rm, immediate),
+                );
+                let result = (source as i16 as i32) * (immediate as i8 as i16 as i32);
+                self.set_reg16(dest_reg, result as u16);
+                let overflow = !(-32768..=32767).contains(&result);
+                self.set_flag(Flag::Carry, overflow);
+                self.set_flag(Flag::Overflow, overflow);
+            }
+            0x6B | 0x7B if byte == 0x7B || self.model == CpuModel::I8088 => {
                 // JNP (jump if not parity)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jnp {:X}h", operand));
