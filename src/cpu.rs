@@ -1298,11 +1298,10 @@ impl Cpu {
                 );
 
                 let operand = self.read_operand(memory, &rm)?;
-                let count = if byte == 0xD2 {
-                    self.get_reg(Reg8::Cl)
-                } else {
-                    1
-                };
+                let count = self.effective_shift_count(match byte {
+                    0xD2 => self.get_reg(Reg8::Cl),
+                    _ => 1,
+                });
                 if count != 0 {
                     let result = self.shift_op8(op, operand, count);
                     self.write_operand(memory, &rm, result)?;
@@ -1320,11 +1319,10 @@ impl Cpu {
                 );
 
                 let operand = self.read_operand(memory, &rm)?;
-                let count = if byte == 0xD3 {
-                    self.get_reg(Reg8::Cl)
-                } else {
-                    1
-                };
+                let count = self.effective_shift_count(match byte {
+                    0xD3 => self.get_reg(Reg8::Cl),
+                    _ => 1,
+                });
                 if count != 0 {
                     let result = self.shift_op16(op, operand, count);
                     self.write_operand(memory, &rm, result)?;
@@ -2059,6 +2057,15 @@ impl Cpu {
                 self.update_logic_flags(result);
                 result
             }
+        }
+    }
+
+    fn effective_shift_count(&self, count: u8) -> u8 {
+        if self.model == CpuModel::I8088 {
+            count
+        } else {
+            // Mask to the lowest 5 bits
+            count & 0x1F
         }
     }
 

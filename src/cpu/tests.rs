@@ -25,6 +25,7 @@ mod rep_lodsb;
 mod scas;
 mod segment_boundary;
 mod segment_override;
+mod shift_counts;
 mod shl;
 mod stos;
 
