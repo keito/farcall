@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -26,7 +26,7 @@ fn assert_flags(actual: u16, initial: u16, expected: u16, count: u8) {
 fn check_dh_cases(cases: &[(u8, u8, u8, u16)]) {
     for &(operand, count, result, flags) in cases {
         for initial_flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.dx = (u16::from(operand) << 8) | 0x5A;
             cpu.cx = 0xA500 | u16::from(count);
             cpu.flags = initial_flags;
@@ -93,7 +93,7 @@ fn large_8086_counts_are_not_masked_and_do_not_panic() {
 fn zero_count_preserves_every_register_and_flag() {
     for rm in 0..8 {
         for flags in [0, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             [cpu.ax, cpu.cx, cpu.dx, cpu.bx] = [0xA55A, 0x8100, 0x407F, 0xFF01];
             cpu.flags = flags;
             let original = registers(&cpu);
@@ -113,7 +113,7 @@ fn zero_count_preserves_every_register_and_flag() {
 #[test]
 fn register_destinations_preserve_the_other_byte_and_unrelated_registers() {
     for rm in [0u8, 2, 3, 4, 5, 6, 7] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         [cpu.ax, cpu.cx, cpu.dx, cpu.bx] = [0xA55A, 0xB501, 0xC56A, 0xD57A];
         cpu.flags = 0x0FD7;
         let index = usize::from(rm & 3);
@@ -138,7 +138,7 @@ fn register_destinations_preserve_the_other_byte_and_unrelated_registers() {
 #[test]
 fn shifting_cl_uses_the_original_count_even_though_cl_is_the_destination() {
     for (count, result, flags) in [(1, 2, 0), (2, 8, 0), (3, 24, 4), (8, 0, 0x44)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.cx = 0xA500 | count;
         cpu.flags = 0x0FD7;
         let mut expected = registers(&cpu);
@@ -172,7 +172,7 @@ fn memory_operands_use_the_default_or_overridden_segment_and_write_one_byte() {
         ] {
             // Count zero still consumes the ModR/M displacement and prefix.
             for count in [0, 1] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
                 [cpu.bx, cpu.bp, cpu.si] = [0x0200, 0x0300, 0x0040];
                 cpu.cx = 0xA500 | count;
@@ -207,7 +207,7 @@ fn memory_operands_use_the_default_or_overridden_segment_and_write_one_byte() {
 #[test]
 fn instruction_fetch_wraps_ip_between_prefix_opcode_and_mod_rm() {
     for (ip, next) in [(0xFFFDu16, 0), (0xFFFE, 1), (0xFFFF, 2)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.cs = 0x1000;
         cpu.ip = ip;
         cpu.dx = 0x805A;
@@ -232,7 +232,7 @@ fn instruction_fetch_wraps_ip_between_prefix_opcode_and_mod_rm() {
 
 #[test]
 fn memory_operand_wraps_at_the_twenty_bit_bus_boundary() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ds = 0xFFFF;
     cpu.bx = 0x0020;
     cpu.cx = 1;
@@ -255,7 +255,7 @@ fn memory_operand_wraps_at_the_twenty_bit_bus_boundary() {
 
 #[test]
 fn missing_memory_operand_reports_an_error_without_changing_flags_or_registers() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ds = 0x1000;
     cpu.cx = 1;
     cpu.flags = 0x0FD7;

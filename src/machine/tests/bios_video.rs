@@ -4,7 +4,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::machine::{BootMode, Machine, MachineStepResult};
+use crate::machine::{BootMode, Machine, MachineConfig, MachineStepResult};
 
 const VIDEO_BASE: usize = 0xB8000;
 const VIDEO_END: usize = VIDEO_BASE + 0x4000;
@@ -24,6 +24,7 @@ fn machine_for_program(program: &[u8]) -> Machine {
     file.write_all(program).unwrap();
     drop(file);
     let machine = Machine::new(
+        MachineConfig::default(),
         BootMode::Com {
             program: path.clone(),
         },

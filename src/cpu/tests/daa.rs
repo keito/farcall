@@ -1,8 +1,8 @@
-use super::{Cpu, CpuStepResult};
+use super::{Cpu, CpuModel, CpuStepResult};
 
 #[test]
 fn daa_sets_decimal_carry_when_addition_did_not_set_binary_carry() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0xA599; // AH sentinel; AL holds packed BCD 99.
     cpu.flags = 0xF702; // Set TF/IF/DF to check their preservation.
     [cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di] =

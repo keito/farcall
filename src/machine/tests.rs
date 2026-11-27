@@ -1,3 +1,4 @@
+use crate::cpu::CpuModel;
 use crate::machine::bios::Bios;
 use crate::machine::bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use crate::machine::dos::Dos;
@@ -25,7 +26,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
             ] {
                 let mut machine = Machine {
                     bios: Some(Bios::new()),
-                    cpu: Cpu::new(0),
+                    cpu: Cpu::new(CpuModel::I8088, 0),
                     memory: vec![0xCC; 0x50000],
                     dma: Dma::new(),
                     dos: Some(Dos::new()),
@@ -149,7 +150,7 @@ fn divide_errors_enter_vector_zero_and_iret_resumes_after_div_on_8086() {
 fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segment() {
     let mut machine = Machine {
         bios: Some(Bios::new()),
-        cpu: Cpu::new(0),
+        cpu: Cpu::new(CpuModel::I8088, 0),
         memory: vec![0xCC; 0x40000],
         dma: Dma::new(),
         dos: Some(Dos::new()),
@@ -238,7 +239,7 @@ fn int60_runs_a_guest_handler_and_iret_resumes_the_caller_in_its_original_segmen
 fn write_service_clears_only_carry() {
     let mut machine = Machine {
         bios: Some(Bios::new()),
-        cpu: Cpu::new(0),
+        cpu: Cpu::new(CpuModel::I8088, 0),
         dma: Dma::new(),
         memory: vec![0; 16],
         dos: Some(Dos::new()),
@@ -286,7 +287,7 @@ fn dos_termination_returns_al_as_exit_code() {
         let mut machine = Machine {
             bios: Some(Bios::new()),
             bios_keyboard: BiosKeyboard::new(),
-            cpu: Cpu::new(0),
+            cpu: Cpu::new(CpuModel::I8088, 0),
             dma: Dma::new(),
             memory: vec![],
             dos: Some(Dos::new()),
@@ -323,7 +324,7 @@ fn machine_for_pending_read(max_bytes: u16) -> Machine {
     let mut machine = Machine {
         bios: Some(Bios::new()),
         bios_keyboard: BiosKeyboard::new(),
-        cpu: Cpu::new(0),
+        cpu: Cpu::new(CpuModel::I8088, 0),
         dma: Dma::new(),
         memory: vec![0xCC; 0x100000],
         dos: Some(Dos::new()),

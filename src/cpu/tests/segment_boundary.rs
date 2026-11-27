@@ -1,4 +1,4 @@
-use super::{Cpu, CpuStepResult};
+use super::{Cpu, CpuModel, CpuStepResult};
 
 // 8088 word accesses wrap the OFFSET, independently of the 20-bit bus wrap.
 // Hardware traces: https://martypc.blogspot.com/2025/06/exploring-16-bit-bus-access-on-pcat.html
@@ -6,7 +6,7 @@ use super::{Cpu, CpuStepResult};
 // test to construct inputs or expectations. CC at the unwrapped address is a
 // deliberately different high byte. Each test executes a bounded single step.
 fn setup(instruction: &[u8]) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [cpu.cs, cpu.ds, cpu.es, cpu.ss] = [0x1000, 0x2000, 0x4000, 0x6000];
     cpu.ip = 0x0100;
     cpu.sp = 0x0800;

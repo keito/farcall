@@ -1,4 +1,4 @@
-use super::{Cpu, InterruptResult, Machine, MachineStepResult};
+use super::{Cpu, CpuModel, InterruptResult, Machine, MachineStepResult};
 use crate::machine::bios::{Bios, BiosError};
 use crate::machine::disk::{DiskGeometry, DiskType, FloppyDisk};
 use crate::machine::{
@@ -52,7 +52,7 @@ fn disk_snapshot(machine: &Machine) -> [Option<(Vec<u8>, [usize; 3])>; 2] {
 }
 
 fn machine_with_image(image: Option<Vec<u8>>) -> Machine {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0x0201; // Read one sector.
     cpu.cx = 0x0002; // Cylinder 0, sector 2.
     cpu.dx = 0x0000; // Head 0, drive 0.

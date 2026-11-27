@@ -1,4 +1,4 @@
-use super::{Cpu, CpuStepResult};
+use super::{Cpu, CpuModel, CpuStepResult};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -18,7 +18,7 @@ fn rep_stosw_stores_separate_words_and_moves_di_by_two_in_both_directions() {
         for zf in [0, 0x0040] {
             // Segment overrides must not redirect the ES destination, in either order.
             for instruction in [&[0xF3, 0xAB][..], &[0x2E, 0xF3, 0xAB], &[0xF3, 0x3E, 0xAB]] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 cpu.ax = 0x1234;
                 cpu.cx = 2;
                 cpu.di = offsets[0];
@@ -58,7 +58,7 @@ fn rep_stosw_stores_separate_words_and_moves_di_by_two_in_both_directions() {
 fn stosw_without_rep_stores_once_and_preserves_cx() {
     for (flags, next_di) in [(0x0BD7, 0x2002), (0x0FD7, 0x1FFE)] {
         for count in [0, 3] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0x1234;
             cpu.cx = count;
             cpu.es = 0x1000;
@@ -87,7 +87,7 @@ fn stosw_without_rep_stores_once_and_preserves_cx() {
 #[test]
 fn rep_stosw_with_zero_cx_skips_the_write_and_preserves_state() {
     for flags in [0, 0x0FD7] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0x1234;
         cpu.es = 0x4000;
         cpu.di = 0xFFFF;

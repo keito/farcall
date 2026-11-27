@@ -1,4 +1,4 @@
-use super::{Cpu, CpuStepResult};
+use super::{Cpu, CpuModel, CpuStepResult};
 
 fn other_registers(cpu: &Cpu) -> [u16; 11] {
     [
@@ -7,7 +7,7 @@ fn other_registers(cpu: &Cpu) -> [u16; 11] {
 }
 
 fn setup(instruction: &[u8], sp: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di] =
         [0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A];
     [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];

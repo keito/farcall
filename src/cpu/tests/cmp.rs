@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -16,7 +16,7 @@ fn check_register_pairs(opcode: u8, cases: &[(u16, u16, u16)]) {
         for source in 0..8 {
             for &(lhs, rhs, arithmetic) in cases {
                 for initial_flags in [0xF002, 0xFFD7] {
-                    let mut cpu = Cpu::new(0);
+                    let mut cpu = Cpu::new(CpuModel::I8088, 0);
                     if opcode == 0x38 {
                         // ModR/M byte-register order: AL, CL, DL, BL, AH, CH, DH, BH.
                         // Initialize directly, independently of the decoder/getters.
@@ -124,7 +124,7 @@ fn cmp_38_and_39_read_memory_minus_register_with_addressing_and_segment_override
                 (Some(0x36), 0x30000),
                 (Some(0x3E), 0x20000),
             ] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
                 [cpu.bx, cpu.si, cpu.bp, cpu.di] = [0x0100, 0x0020, 0x0300, 0x0040];
                 cpu.ip = 0x0800;
@@ -166,7 +166,7 @@ fn cmp_38_and_39_read_memory_minus_register_with_addressing_and_segment_override
 fn cmp_38_and_39_fetch_prefix_modrm_and_displacement_across_ip_wrap() {
     for opcode in [0x38, 0x39] {
         for start_ip in [0xFFFBu16, 0xFFFC, 0xFFFD, 0xFFFE, 0xFFFF] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cs = 0x1000;
             cpu.es = 0x2000;
             cpu.ip = start_ip;
@@ -197,7 +197,7 @@ fn cmp_38_and_39_read_operands_at_segment_and_physical_address_boundaries() {
             (0xFFFF, 0x000F, 0xFFFFF, 0x00000),
             (0xFFFF, 0x0020, 0x00010, 0x00011),
         ] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cs = 0x1000;
             cpu.ds = segment;
             cpu.ax = 1;
@@ -230,7 +230,7 @@ fn cmp_38_and_39_read_exact_operand_width_and_leave_state_intact_on_missing_byte
         (0x39, 0x01FF, false), // Low byte exists, high byte does not.
         (0x39, 0x0200, false),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = if opcode == 0x38 { 0xA5CC } else { 0xCCCC };
         cpu.flags = 0xFFD7;
         let mut memory = vec![0xCC; 0x0200];

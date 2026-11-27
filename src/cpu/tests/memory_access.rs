@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult};
 use crate::memory::{MemoryError, SegmentedAddr};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
@@ -9,7 +9,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn cpu_for_memory_access() -> Cpu {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0xA55A;
     cpu.cx = 0x1234;
     cpu.dx = 0x5678;

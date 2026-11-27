@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -24,7 +24,7 @@ fn div_word_uses_the_full_unsigned_dividend_and_returns_quotient_and_remainder()
         (0x0000, 0xFFFF, 0x8000, 0x0001, 0x7FFF),
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.dx = dx;
             cpu.ax = ax;
             cpu.bx = divisor;
@@ -63,7 +63,7 @@ fn div_word_register_sources_include_ax_and_preserve_unrelated_registers() {
         (6, 11, 1),
         (7, 10, 0),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         [
             cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
         ] = [100, 3, 0, 6, 7, 8, 9, 10];
@@ -97,7 +97,7 @@ fn div_word_zero_divisor_and_oversized_quotient_report_interrupt_zero() {
         (0xFFFF, 0xFFFF, 0xFFFF),
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = ax;
             cpu.dx = dx;
             cpu.bx = divisor;
@@ -131,7 +131,7 @@ fn div_word_zero_divisor_and_oversized_quotient_report_interrupt_zero() {
 #[test]
 fn div_dx_reports_zero_divisor_or_overflow_instead_of_using_a_modified_dx() {
     for dx in [0, 1, 0x8000, 0xFFFF] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.dx = dx;
         cpu.ax = 0x1234;
         let mut memory = [0xF7, 0xF2]; // DIV DX.
@@ -156,7 +156,7 @@ fn div_word_reads_segmented_memory_with_displacements_and_bus_wrapping() {
         (&[0xF7, 0x36, 0x20, 0x00][..], 0xFFFF, 0x00010, 0x00011),
         (&[0xF7, 0x36, 0x0F, 0x00][..], 0xFFFF, 0xFFFFF, 0x00000),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0x0203;
         cpu.dx = 1;
         cpu.si = 0x0800;
@@ -190,7 +190,7 @@ fn div_word_reads_segmented_memory_with_displacements_and_bus_wrapping() {
 fn div_word_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
     let instruction = [0xF7, 0x36, 0x34, 0x12];
     for (ip, next_ip) in [(0xFFFC, 0), (0xFFFD, 1), (0xFFFE, 2), (0xFFFF, 3)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.cs = 0x3000;
         cpu.ds = 0x1000;
         cpu.ip = ip;
@@ -222,7 +222,7 @@ fn div_word_fetches_mod_rm_and_displacement_across_ip_wrap_using_cs() {
 #[test]
 fn div_word_missing_memory_is_a_memory_error_not_a_divide_error() {
     for offset in [0x01FFu16, 0x0200] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0x1234;
         cpu.dx = 0x5678;
         cpu.flags = 0x0FD7;
@@ -262,7 +262,7 @@ fn idiv_byte_signed_quotients_remainders_and_8086_boundaries() {
         (0xC001, 0x80, 0x7F, 0x81),
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = ax;
             cpu.bx = 0x5500 | divisor;
             cpu.dx = 0xBEEF;
@@ -304,7 +304,7 @@ fn idiv_word_signed_quotients_remainders_and_8086_boundaries() {
         (0xC000, 0x0001, 0x8000, 0x7FFF, 0x8001),
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.dx = dx;
             cpu.ax = ax;
             cpu.bx = divisor;
@@ -354,7 +354,7 @@ fn idiv_zero_divisors_and_signed_overflow_report_interrupt_zero_without_panickin
         (0xF7, 0x7FFF, 0xFFFF, 0x0001),
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.dx = dx;
             cpu.ax = ax;
             cpu.bx = divisor;
@@ -389,7 +389,7 @@ fn idiv_reads_overlapping_source_registers_before_writing_results() {
         (0xF7, 0xF8, 0xFFF9, 0xFFFF, 0x0001, 0x0000), // -7 / AX (-7).
         (0xF7, 0xFA, 0xFFF9, 0xFFFF, 0x0007, 0x0000), // -7 / DX (-1).
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = ax;
         cpu.dx = dx;
         cpu.flags = 0x0FD7;
@@ -420,7 +420,7 @@ fn idiv_memory_operands_use_the_right_width_segment_and_wrapping() {
             (vec![opcode, 0xBC, 0x00, 0xF8], 0x1000, 0x10000), // SI+F800 wraps.
             (vec![opcode, 0x3E, 0x0F, 0x00], 0xFFFF, 0xFFFFF), // Bus boundary.
         ] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xFFF9; // -7.
             cpu.dx = if opcode == 0xF6 { 0xBEEF } else { 0xFFFF };
             cpu.ds = ds;

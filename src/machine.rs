@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuError, CpuStepResult, Flag};
+use crate::cpu::{Cpu, CpuError, CpuModel, CpuStepResult, Flag};
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, read_buffer, validate_buffer, write_buffer, write_byte,
     write_word,
@@ -28,11 +28,13 @@ pub(crate) use cga_video::text_terminal::TextScreen;
 #[cfg(all(test, feature = "terminal"))]
 pub(crate) use cga_video::text_terminal::{TextCell, TextCursor};
 
+pub(crate) use config::{MachineConfig, MachineModel};
 pub use disk::{DiskGeometry, DiskImageConfig, DiskType, parse_disk_geometry};
 
 mod bios;
 pub mod bios_keyboard;
 mod cga_video;
+mod config;
 mod disk;
 mod dma;
 mod dos;
@@ -127,7 +129,12 @@ enum FloppyOperation {
 const APPROXIMATE_CYCLES_PER_STEP: u32 = 4;
 
 impl Machine {
-    pub fn new(boot_mode: BootMode, verbosity: u8) -> anyhow::Result<Self> {
+    pub fn new(config: MachineConfig, boot_mode: BootMode, verbosity: u8) -> anyhow::Result<Self> {
+        let cpu_model = match config.model {
+            MachineModel::IbmPc => CpuModel::I8088,
+            MachineModel::IbmAt => CpuModel::I80286,
+        };
+
         let memory_size = 0x100_000; // Physical memory: 1 MiB
 
         let load_mode = if boot_mode.is_rom() {
@@ -142,7 +149,7 @@ impl Machine {
             bios: (!boot_mode.is_rom()).then(|| Bios::new()),
             bios_keyboard: BiosKeyboard::new(),
             cga_video: CgaVideo::new(),
-            cpu: Cpu::new(verbosity),
+            cpu: Cpu::new(cpu_model, verbosity),
             dma: Dma::new(),
             dos: boot_mode.is_com().then(|| Dos::new()),
             fdc: Fdc::new(),

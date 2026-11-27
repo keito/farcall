@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 // Expected flags are literal x86 flag bits, not computed by CPU helpers.
 // (initial operand, immediate, result, CF/PF/AF/ZF/SF/OF)
@@ -29,7 +29,7 @@ fn check_cases(extension: u8, cases: &[Case]) {
 fn check_cases_with_initial_flags(extension: u8, cases: &[Case], initial_flags: &[u16]) {
     for &(lhs, rhs, result, flags) in cases {
         for &initial_flags in initial_flags {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xA500 | u16::from(lhs);
             cpu.flags = initial_flags;
             let mut expected_registers = registers(&cpu);
@@ -151,7 +151,7 @@ const OPERATIONS: [(u8, u8, u16); 6] = [
 fn every_implemented_operation_handles_all_eight_byte_registers() {
     for (extension, expected, flags) in OPERATIONS {
         for rm in 0u8..8 {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             [cpu.ax, cpu.cx, cpu.dx, cpu.bx] = [0xA1B1, 0xA2B2, 0xA3B3, 0xA4B4];
             let mut words = [cpu.ax, cpu.cx, cpu.dx, cpu.bx];
             let index = usize::from(rm & 3);
@@ -191,7 +191,7 @@ fn immediate_follows_displacement_and_memory_uses_segments_and_wrapping() {
             (&[0x84, 0x00, 0xF9][..], 0x1000, 0x10100), // [SI+F900h], offset wraps.
             (&[0x06, 0xFF, 0x00][..], 0xFFFF, 0x000EF), // Direct DS address, bus wraps.
         ] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ip = 0x0100;
             cpu.si = 0x0800;
             cpu.bp = 1;
@@ -226,7 +226,7 @@ fn immediate_follows_displacement_and_memory_uses_segments_and_wrapping() {
 #[test]
 fn group1_byte_fetches_immediate_across_ip_wrap_using_cs() {
     for (extension, expected, flags) in OPERATIONS {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.cs = 0x1000;
         cpu.ip = 0xFFFE;
         cpu.ax = 0xA512;
@@ -253,7 +253,7 @@ fn group1_byte_fetches_immediate_across_ip_wrap_using_cs() {
 #[test]
 fn invalid_memory_operand_returns_error_without_changing_data_or_flags() {
     for (extension, _, _) in OPERATIONS {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0xA512;
         cpu.flags = 0x0FD7;
         let original_registers = registers(&cpu);
@@ -357,7 +357,7 @@ fn check_carry_destinations(extension: u8) {
             (&[0x84, 0x00, 0xF9][..], 0x1000, Some(0x10100)), // disp16 wraps
             (&[0x06, 0xFF, 0x00][..], 0xFFFF, Some(0x000EF)), // 20-bit wrap
         ] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             [cpu.ax, cpu.cx, cpu.dx, cpu.bx] = [0xA1B1, 0xA2B2, 0xA3B3, 0xA4B4];
             cpu.ip = 0x0100;
             cpu.si = 0x0800;
@@ -414,7 +414,7 @@ fn sbb_handles_all_byte_registers_and_segmented_memory_with_both_borrow_inputs()
 
 #[test]
 fn adc_propagates_carry_from_low_byte_into_high_byte() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0x00FF;
     cpu.flags = 0x0FD7;
     let mut expected_registers = registers(&cpu);
@@ -436,7 +436,7 @@ fn adc_propagates_carry_from_low_byte_into_high_byte() {
 
 #[test]
 fn sbb_propagates_borrow_from_low_byte_into_high_byte() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0x0100;
     cpu.flags = 0x0FD7;
     let mut expected_registers = registers(&cpu);

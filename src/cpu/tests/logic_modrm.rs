@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 #[derive(Clone, Copy, Debug)]
 enum Width {
@@ -89,7 +89,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup() -> Cpu {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     // All halves differ; byte register codes 4..7 must select AH..BH, not SP..DI.
     [
         cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,

@@ -9,8 +9,9 @@ use std::time::Duration;
 use crate::frontend::terminal;
 #[cfg(feature = "window")]
 use crate::frontend::window;
+use crate::machine::MachineConfig;
 use crate::machine::{
-    BootMode, DiskGeometry, DiskImageConfig, DiskType, Machine, parse_disk_geometry,
+    BootMode, DiskGeometry, DiskImageConfig, DiskType, Machine, MachineModel, parse_disk_geometry,
 };
 
 mod cpu;
@@ -72,6 +73,10 @@ struct Cli {
     #[arg(long, requires = "hdd", value_name = "C,H,S", value_parser = parse_disk_geometry)]
     hdd_geometry: Option<DiskGeometry>,
 
+    /// Machine hardware profile
+    #[arg(long, value_enum, default_value_t)]
+    machine: MachineModel,
+
     /// Load a BIOS ROM image; turns off BIOS emulation. Requires --floppy-a
     #[arg(long, requires = "floppy_a", conflicts_with = "com")]
     rom: Option<PathBuf>,
@@ -127,7 +132,8 @@ fn main() -> anyhow::Result<process::ExitCode> {
     #[cfg(feature = "terminal")]
     let idle_timeout = cli.idle_timeout.map(|s| Duration::from_secs(s));
 
-    let mut machine = Machine::new(boot_mode, cli.verbose)?;
+    let config = MachineConfig { model: cli.machine };
+    let mut machine = Machine::new(config, boot_mode, cli.verbose)?;
 
     let result = match &cli.frontend {
         #[cfg(feature = "terminal")]

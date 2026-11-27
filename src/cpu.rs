@@ -31,6 +31,7 @@ pub(crate) struct Cpu {
     pub(crate) ss: u16,
     pub(crate) flags: u16,
     pub(crate) halted: bool,
+    pub(crate) model: CpuModel,
     pub(crate) verbosity: u8,
 }
 
@@ -78,8 +79,14 @@ pub(crate) enum Flag {
     Trap = 8,            // TF
 }
 
+#[derive(PartialEq, Eq)]
+pub(crate) enum CpuModel {
+    I8088,
+    I80286,
+}
+
 impl Cpu {
-    pub(crate) fn new(verbosity: u8) -> Self {
+    pub(crate) fn new(model: CpuModel, verbosity: u8) -> Self {
         Cpu {
             ax: 0x0,
             bx: 0x0,
@@ -96,6 +103,7 @@ impl Cpu {
             ss: 0x0,
             flags: normalize_flags(0),
             halted: false,
+            model,
             verbosity,
         }
     }
@@ -448,7 +456,7 @@ impl Cpu {
             0x50..=0x57 => {
                 let reg = Reg16::try_from(byte & 7)?;
                 self.print_instruction(byte, &format_args!("push {}", reg));
-                let value = if reg == Reg16::Sp {
+                let value = if self.model == CpuModel::I8088 && reg == Reg16::Sp {
                     // 8086/8088 hardware quirk
                     self.sp.wrapping_sub(2)
                 } else {
@@ -1810,7 +1818,9 @@ impl Cpu {
                         // PUSH r/m16
                         self.print_instruction(byte, &format_args!("push {}", rm));
                         let value = match rm {
-                            RegisterOrMemoryOperand::Register(Reg16::Sp) => {
+                            RegisterOrMemoryOperand::Register(Reg16::Sp)
+                                if self.model == CpuModel::I8088 =>
+                            {
                                 // 8086/8088 hardware quirk for PUSH SP
                                 self.sp.wrapping_sub(2)
                             }

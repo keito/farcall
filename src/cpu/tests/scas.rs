@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8], ip: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [
         cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
     ] = [0xA510, 3, 0x1234, 0x5678, 0x0800, 0x0900, 0x2000, 0x3000];
@@ -281,7 +281,7 @@ fn zero_count_repeated_scas_skips_memory_access_and_preserves_all_flags() {
     for opcode in [0xAE, 0xAF] {
         for prefix in [0xF2, 0xF3] {
             for flags in [0xF002, 0xFFD7] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 cpu.ax = 0x1234;
                 cpu.es = 0xFFFF;
                 cpu.di = 0xFFFF;
@@ -378,7 +378,7 @@ fn scas_reads_across_the_twenty_bit_physical_address_boundary() {
 fn scas_reports_missing_operands_without_changing_flags_or_registers() {
     for (opcode, di) in [(0xAE, 0x0200), (0xAF, 0x01FF), (0xAF, 0x0200)] {
         for prefix in [None, Some(0xF2), Some(0xF3)] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xCC;
             cpu.di = di;
             cpu.cx = 3;

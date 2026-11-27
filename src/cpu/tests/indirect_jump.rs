@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn registers(cpu: &Cpu) -> [u16; 12] {
     [
@@ -8,7 +8,7 @@ fn registers(cpu: &Cpu) -> [u16; 12] {
 }
 
 fn setup(instruction: &[u8], ip: u16) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [
         cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
     ] = [
@@ -133,7 +133,7 @@ fn far_indirect_jump_reads_offset_then_segment_using_normal_addressing_rules() {
 
 #[test]
 fn near_indirect_jump_needs_only_two_source_bytes_and_does_not_read_the_target_yet() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.sp = 0xFFFF;
     cpu.flags = 0x0FD7;
     let original = registers(&cpu);
@@ -204,7 +204,7 @@ fn far_indirect_jump_rejects_register_operands_without_changing_state() {
 fn indirect_jumps_reject_truncated_operands_without_loading_a_partial_target() {
     for (mod_rm, required) in [(0x26, 2), (0x2E, 4)] {
         for available in 0..required {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.sp = 0x0080;
             cpu.flags = 0x0FD7;
             let original = registers(&cpu);

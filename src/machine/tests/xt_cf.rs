@@ -7,7 +7,7 @@ use std::{
 
 use super::Machine;
 use crate::machine::{
-    BootMode, DiskGeometry,
+    BootMode, DiskGeometry, MachineConfig,
     disk::{DiskImageConfig, DiskType},
 };
 
@@ -55,6 +55,7 @@ impl TestDisk {
         geometry: Option<DiskGeometry>,
     ) -> anyhow::Result<Machine> {
         Machine::new(
+            MachineConfig::default(),
             BootMode::Floppy {
                 drive_a: DiskImageConfig {
                     path: self.directory.join("floppy.img"),

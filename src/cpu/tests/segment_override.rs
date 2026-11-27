@@ -1,7 +1,7 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 fn setup(instruction: &[u8]) -> (Cpu, Vec<u8>) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.cs = 0x1000;
     cpu.ds = 0x2000;
     cpu.ss = 0x3000;
@@ -221,7 +221,7 @@ fn prefix_on_register_only_instruction_does_not_leak_into_next_memory_access() {
 
 #[test]
 fn lea_still_returns_only_the_offset_without_reading_memory() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.flags = 0x0FD7;
     cpu.ds = 0x2000;
     let mut memory = [0x2E, 0x8D, 0x06, 0xFF, 0xFF]; // LEA AX, [FFFFh]
@@ -287,7 +287,7 @@ fn instruction_fetch_wraps_ip_between_prefix_opcode_and_offset_bytes() {
 
 #[test]
 fn cs_word_store_wraps_at_the_twenty_bit_bus_boundary() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.cs = 0xFFFF;
     cpu.ip = 0x0100;
     cpu.ds = 0x2000;

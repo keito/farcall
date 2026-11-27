@@ -1,4 +1,4 @@
-use super::{Cpu, CpuError, CpuStepResult, MemoryError};
+use super::{Cpu, CpuError, CpuModel, CpuStepResult, MemoryError};
 
 // INT saves FLAGS, CS, IP; IRET restores IP, CS, FLAGS. These tests cover
 // software interrupt mechanics, not delivery of hardware IRQs or debug traps.
@@ -12,7 +12,7 @@ fn other_registers(cpu: &Cpu) -> [u16; 10] {
 }
 
 fn cpu_with_distinct_registers() -> Cpu {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.bp, cpu.si, cpu.di] =
         [0x1111, 0x2222, 0x3333, 0x4444, 0x5555, 0x6666, 0x7777];
     cpu.cs = 0x1000;
@@ -272,7 +272,7 @@ fn interrupt_entry_reports_missing_stack_or_vector_bytes_as_memory_errors() {
         (0x182, 0x0100), // Missing vector CS word.
         (0x183, 0x0100), // Only half of vector CS exists.
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.sp = sp;
         cpu.flags = 0xF002;
         let mut memory = vec![0xCC; memory_len];
@@ -287,7 +287,7 @@ fn interrupt_entry_reports_missing_stack_or_vector_bytes_as_memory_errors() {
 #[test]
 fn iret_reports_a_truncated_frame_as_a_memory_error_without_writing_memory() {
     for frame_bytes in 0..6 {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.sp = 0x0100;
         let mut memory = vec![0xCC; 0x0100 + frame_bytes];
         memory[0] = 0xCF;

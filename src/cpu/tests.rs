@@ -1,5 +1,5 @@
 use super::{Cpu, CpuError, CpuStepResult};
-use crate::memory::MemoryError;
+use crate::{cpu::CpuModel, memory::MemoryError};
 
 mod adc;
 mod addressing;
@@ -19,6 +19,7 @@ mod memory_access;
 mod movs;
 mod mul;
 mod neg;
+mod push_sp;
 mod rep_lodsb;
 mod scas;
 mod segment_boundary;
@@ -31,7 +32,7 @@ fn cbw_sign_extends_every_al_value_preserving_flags_and_other_registers() {
     for al in 0..=255u16 {
         for old_ah in [0x00, 0x5A, 0xFF] {
             for flags in [0x0000, 0x0FD7] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 cpu.ax = (old_ah << 8) | al;
                 [cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di] =
                     [0x1234, 0x5678, 0x9ABC, 0x0200, 0x0300, 0x0400, 0x0500];
@@ -67,7 +68,7 @@ fn cbw_sign_extends_every_al_value_preserving_flags_and_other_registers() {
 
 #[test]
 fn cbw_fetches_from_cs_and_wraps_ip() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.cs = 0x1000;
     cpu.ip = 0xFFFF;
     cpu.ax = 0x0080;
@@ -98,7 +99,7 @@ fn lea_direct_address_covers_all_destinations_without_reading_memory() {
     for destination in 0..8 {
         for offset in [0x0000u16, 0x00FF, 0x0137, 0xFF00, 0x8000, 0xFFFF] {
             for initial_flags in [0x0000, 0x0FD7] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 [
                     cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
                 ] = initial_registers;
@@ -145,7 +146,7 @@ fn lea_direct_address_wraps_ip_during_instruction_fetch() {
         (0xFFFE, 0x0002),
         (0xFFFF, 0x0003),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ip = start;
         cpu.dx = 0xA55A;
         cpu.flags = 0x0FD7;
@@ -175,7 +176,7 @@ fn lea_rejects_register_sources_without_changing_registers_flags_or_memory() {
     ];
     for destination in 0u8..8 {
         for source in 0u8..8 {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             [
                 cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
             ] = initial_registers;
@@ -214,7 +215,7 @@ fn mov_to_segment_register_covers_es_ss_ds_and_all_source_registers() {
     for destination in [0usize, 2, 3] {
         for (source, &value) in initial_registers.iter().enumerate() {
             for initial_flags in [0x0000, 0x0FD7] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 [
                     cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
                 ] = initial_registers;
@@ -256,7 +257,7 @@ fn mov_to_segment_register_covers_es_ss_ds_and_all_source_registers() {
 #[test]
 fn mov_ds_ax_copies_the_full_word_without_dereferencing_it() {
     for value in [0x0000, 0x00FF, 0xFF00, 0x8000, 0xFFFF] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = value;
         cpu.ds = 0xA55A;
         cpu.flags = 0x0FD7;
@@ -281,7 +282,7 @@ fn mov_ds_ax_copies_the_full_word_without_dereferencing_it() {
 #[test]
 fn mov_to_segment_register_wraps_ip_at_instruction_boundaries() {
     for (start, next) in [(0xFFFEu16, 0x0000), (0xFFFF, 0x0001)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ip = start;
         cpu.di = 0xBEEF;
         cpu.ds = 0x1234;
@@ -315,7 +316,7 @@ fn mov_from_segment_register_covers_all_register_encodings() {
     for (segment_field, &value) in segment_values.iter().enumerate() {
         for destination in 0..8 {
             for initial_flags in [0x0000, 0x0FD7] {
-                let mut cpu = Cpu::new(0);
+                let mut cpu = Cpu::new(CpuModel::I8088, 0);
                 [
                     cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.sp, cpu.bp, cpu.si, cpu.di,
                 ] = initial_registers;
@@ -365,7 +366,7 @@ fn mov_ax_cs_copies_the_full_word_without_dereferencing_it() {
         (0x8000, 0x80000),
         (0xFFFF, 0xFFFF0),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0xA55A;
         cpu.cs = value;
         cpu.flags = 0x0FD7;
@@ -394,7 +395,7 @@ fn mov_ax_cs_copies_the_full_word_without_dereferencing_it() {
 
 #[test]
 fn mov_from_segment_register_wraps_ip_when_fetching_mod_rm() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0xFFFF;
     cpu.ds = 0xBEEF;
     cpu.di = 0x1234;
@@ -430,7 +431,7 @@ fn cmp_al_updates_arithmetic_flags_without_changing_registers_or_memory() {
     ] {
         // Exercise setting flags and clearing stale ones; preserve control flags.
         for initial_flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xAB00 | al as u16;
             cpu.ip = 0x0100;
             cpu.flags = initial_flags;
@@ -468,21 +469,21 @@ fn cmp_ax_immediate16_updates_flags_without_storing_the_result() {
     let arithmetic_flags = 0x08D5;
     for (ax, immediate, expected_flags) in [
         (0x0200u16, 0x0200u16, 0x0044), // MORE's version comparison: equal.
-        (0x1234, 0x0234, 0x0004), // Result 1000: parity is for low byte 00 only.
-        (0x0000, 0x0001, 0x0095), // Result FFFF: unsigned and nibble borrow.
-        (0x8000, 0x0001, 0x0814), // -32768 - 1 overflows to +32767.
-        (0x7FFF, 0xFFFF, 0x0885), // +32767 - (-1) overflows to -32768.
-        (0x0080, 0x0000, 0x0000), // Bit 7 does not make a word negative.
-        (0x8000, 0x0000, 0x0084), // Bit 15 does; low byte still has even parity.
-        (0x0080, 0x0001, 0x0010), // +128 - 1 is not signed word overflow.
-        (0x0010, 0x0001, 0x0014), // Nibble borrow without unsigned borrow.
-        (0xFFFF, 0x0000, 0x0084), // Negative result without borrow or overflow.
-        (0x0000, 0xFFFF, 0x0011), // Unsigned borrow without signed overflow.
+        (0x1234, 0x0234, 0x0004),       // Result 1000: parity is for low byte 00 only.
+        (0x0000, 0x0001, 0x0095),       // Result FFFF: unsigned and nibble borrow.
+        (0x8000, 0x0001, 0x0814),       // -32768 - 1 overflows to +32767.
+        (0x7FFF, 0xFFFF, 0x0885),       // +32767 - (-1) overflows to -32768.
+        (0x0080, 0x0000, 0x0000),       // Bit 7 does not make a word negative.
+        (0x8000, 0x0000, 0x0084),       // Bit 15 does; low byte still has even parity.
+        (0x0080, 0x0001, 0x0010),       // +128 - 1 is not signed word overflow.
+        (0x0010, 0x0001, 0x0014),       // Nibble borrow without unsigned borrow.
+        (0xFFFF, 0x0000, 0x0084),       // Negative result without borrow or overflow.
+        (0x0000, 0xFFFF, 0x0011),       // Unsigned borrow without signed overflow.
     ] {
         // Check both setting flags and clearing stale flags, while preserving
         // control flags and unrelated bits.
         for initial_flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = ax;
             cpu.ip = 0x0100;
             cpu.flags = initial_flags;
@@ -490,8 +491,8 @@ fn cmp_ax_immediate16_updates_flags_without_storing_the_result() {
                 [0x1234, 0x5678, 0x9ABC, 0xDEF0, 0x1357, 0x2468, 0xABCD];
             [cpu.ds, cpu.es, cpu.ss] = [0x1111, 0x2222, 0x3333];
             let registers = (
-                cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
-                cpu.cs, cpu.ds, cpu.es, cpu.ss,
+                cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp, cpu.cs, cpu.ds,
+                cpu.es, cpu.ss,
             );
             let [low, high] = immediate.to_le_bytes();
             let mut memory = vec![0xCC; 0x0200];
@@ -501,11 +502,14 @@ fn cmp_ax_immediate16_updates_flags_without_storing_the_result() {
             let result = cpu.step(&mut memory).expect("CMP AX, imm16 should succeed");
 
             assert!(matches!(result, CpuStepResult::Continue));
-            assert_eq!(cpu.ip, 0x0103, "consume opcode and little-endian immediate word");
+            assert_eq!(
+                cpu.ip, 0x0103,
+                "consume opcode and little-endian immediate word"
+            );
             assert_eq!(
                 (
-                    cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
-                    cpu.cs, cpu.ds, cpu.es, cpu.ss,
+                    cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp, cpu.cs, cpu.ds,
+                    cpu.es, cpu.ss,
                 ),
                 registers,
                 "CMP must preserve AX and all other registers except IP"
@@ -593,7 +597,7 @@ fn cmp_then_je_jl_or_jg_handles_guesses_and_signed_overflow() {
         (0xFF, 0x00, [false, true, false]), // -1 < 0; differs from unsigned comparison.
     ] {
         for (opcode, taken) in [0x74, 0x7C, 0x7F].into_iter().zip(expected_taken) {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xAB00 | al as u16;
             cpu.flags = 0x0FD7;
             let mut memory = [0x3C, immediate, opcode, 0x05];
@@ -692,7 +696,7 @@ fn jb_and_ja_wrap_targets_and_instruction_fetch_at_16_bits() {
 }
 
 fn assert_conditional_jump(opcode: u8, flags: u16, start: u16, displacement: u8, expected_ip: u16) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     [
         cpu.ax, cpu.bx, cpu.cx, cpu.dx, cpu.si, cpu.di, cpu.sp, cpu.bp,
     ] = [
@@ -738,7 +742,7 @@ fn cmp_then_jb_or_ja_handles_ascii_boundaries_and_unsigned_bytes() {
         (0xFF, b'a', 0x72, 0x0104), // FF is large unsigned, not negative.
         (0xFF, b'z', 0x77, 0x0107),
     ] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0xAB00 | al as u16;
         cpu.ip = 0x0100;
         cpu.flags = 0x0FD7;
@@ -771,7 +775,7 @@ fn call_uses_displacement_from_next_ip_and_saves_return_address() {
         (0x0000, 0xFFFC, 0xFFFF), // Target wraps below zero.
     ] {
         for flags in [0, 0x0FD5] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ip = start_ip;
             cpu.sp = 0x9000;
             cpu.flags = flags;
@@ -809,7 +813,7 @@ fn call_uses_displacement_from_next_ip_and_saves_return_address() {
 
 #[test]
 fn call_at_end_of_address_space_saves_wrapped_return_address() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0xFFFD;
     cpu.sp = 0x9000;
     let mut memory = vec![0xCC; 0x10000];
@@ -828,7 +832,7 @@ fn call_at_end_of_address_space_saves_wrapped_return_address() {
 
 #[test]
 fn call_and_ret_wrap_the_stack_pointer() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0x0100;
     cpu.sp = 0;
     cpu.flags = 0x0FD5;
@@ -854,7 +858,7 @@ fn call_and_ret_wrap_the_stack_pointer() {
 fn ret_loads_an_absolute_address_and_preserves_registers_flags_and_memory() {
     for target in [0x0000u16, 0x1234, 0xFFFF] {
         for flags in [0, 0x0FD5] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ip = 0x0100;
             cpu.sp = 0x01FE;
             cpu.flags = flags;
@@ -881,7 +885,7 @@ fn ret_loads_an_absolute_address_and_preserves_registers_flags_and_memory() {
 
 #[test]
 fn nested_calls_return_in_reverse_order() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0x0100;
     cpu.sp = 0x0200;
     let mut memory = vec![0xCC; 0x0200];
@@ -909,7 +913,7 @@ fn nested_calls_return_in_reverse_order() {
 #[test]
 fn call_returns_a_stack_bounds_error_without_partially_writing_memory() {
     for initial_sp in [0x0201, 0x0202, 0x0000] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ip = 0x0100;
         cpu.sp = initial_sp;
         cpu.flags = 0x0FD5;
@@ -932,7 +936,7 @@ fn call_returns_a_stack_bounds_error_without_partially_writing_memory() {
 #[test]
 fn ret_returns_a_stack_bounds_error_without_consuming_a_word() {
     for initial_sp in [0x01FF, 0x0200, 0xFFFE] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ip = 0x0100;
         cpu.sp = initial_sp;
         cpu.flags = 0x0FD5;
@@ -956,7 +960,7 @@ fn ret_returns_a_stack_bounds_error_without_consuming_a_word() {
 fn pop_ax_reads_little_endian_and_preserves_other_registers_flags_and_memory() {
     for initial_sp in [0x0180, 0x01FE] {
         for initial_flags in [0x0000, 0x0FD5] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xFFFF;
             cpu.sp = initial_sp;
             cpu.ip = 0x0100;
@@ -989,7 +993,7 @@ fn pop_ax_reads_little_endian_and_preserves_other_registers_flags_and_memory() {
 
 #[test]
 fn pop_ax_wraps_sp_from_fffe_to_zero() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0xFFFF;
     cpu.sp = 0xFFFE;
     cpu.ip = 0x0100;
@@ -1013,7 +1017,7 @@ fn pop_ax_wraps_sp_from_fffe_to_zero() {
 fn pop_ax_returns_a_bounds_error_without_changing_ax_or_sp() {
     // One byte available, no bytes available, and an address well beyond RAM.
     for initial_sp in [0x01FF, 0x0200, 0xFFFE] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0x1234;
         cpu.sp = initial_sp;
         cpu.ip = 0x0100;
@@ -1041,7 +1045,7 @@ fn pop_ax_returns_a_bounds_error_without_changing_ax_or_sp() {
 
 #[test]
 fn pop_ax_restores_pushed_values_in_reverse_order() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.sp = 0x0200;
     cpu.ip = 0x0100;
     let mut memory = vec![0; 0x0200];
@@ -1070,7 +1074,7 @@ fn push_ax_stores_a_little_endian_word_and_preserves_registers_and_flags() {
     // Exercise both an interior address and a word ending at the memory boundary.
     for initial_sp in [0x0180, 0x0200] {
         for initial_flags in [0x0000, 0x0FD5] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.ax = 0xAB34;
             cpu.sp = initial_sp;
             cpu.ip = 0x0100;
@@ -1110,7 +1114,7 @@ fn push_sp_modrm_wraps_sp_from_zero_to_fffe() {
 
 fn assert_push_sp_modrm(initial_sp: u16, expected_sp: u16, stack_bytes: [u8; 2]) {
     for initial_flags in [0x0000, 0x0FD7] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         [cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di] =
             [0x1234, 0x2345, 0x3456, 0x4567, 0x5678, 0x6789, 0x789A];
         [cpu.cs, cpu.ds, cpu.ss, cpu.es] = [0x1000, 0x2000, 0x3000, 0x4000];
@@ -1118,8 +1122,7 @@ fn assert_push_sp_modrm(initial_sp: u16, expected_sp: u16, stack_bytes: [u8; 2])
         cpu.ip = 0x0100;
         cpu.flags = initial_flags;
         let other_registers = [
-            cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss,
-            cpu.es,
+            cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss, cpu.es,
         ];
         let mut memory = vec![0xCC; 0x50000];
         memory[0x10100..0x10102].copy_from_slice(&[0xFF, 0xF4]); // PUSH SP via FF /6.
@@ -1135,8 +1138,8 @@ fn assert_push_sp_modrm(initial_sp: u16, expected_sp: u16, stack_bytes: [u8; 2])
         assert_eq!(cpu.flags, initial_flags, "PUSH preserves every flag");
         assert_eq!(
             [
-                cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds,
-                cpu.ss, cpu.es,
+                cpu.ax, cpu.cx, cpu.dx, cpu.bx, cpu.bp, cpu.si, cpu.di, cpu.cs, cpu.ds, cpu.ss,
+                cpu.es,
             ],
             other_registers
         );
@@ -1149,7 +1152,7 @@ fn assert_push_sp_modrm(initial_sp: u16, expected_sp: u16, stack_bytes: [u8; 2])
 
 #[test]
 fn consecutive_pushes_grow_downward_without_overwriting_previous_words() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.sp = 0x0200;
     cpu.ip = 0x0100;
     let mut memory = vec![0xCC; 0x0200];
@@ -1172,7 +1175,7 @@ fn consecutive_pushes_grow_downward_without_overwriting_previous_words() {
 
 #[test]
 fn push_ax_wraps_sp_from_zero_to_fffe() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0x5678;
     cpu.sp = 0;
     cpu.ip = 0x0100;
@@ -1196,7 +1199,7 @@ fn push_ax_wraps_sp_from_zero_to_fffe() {
 fn push_ax_returns_a_bounds_error_without_partially_writing_memory() {
     // Only one byte available, neither byte available, and a wrapped SP outside RAM.
     for initial_sp in [0x0201, 0x0202, 0x0000] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0x1234;
         cpu.sp = initial_sp;
         cpu.ip = 0x0100;
@@ -1256,7 +1259,7 @@ fn mov_from_si_disp8_wraps_the_effective_address() {
 }
 
 fn assert_si_disp8_load(base: u16, displacement: u8, expected_address: u16) {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0xABCD;
     cpu.si = base;
     cpu.ip = 0x0100;
@@ -1282,7 +1285,7 @@ fn assert_si_disp8_load(base: u16, displacement: u8, expected_address: u16) {
 
 #[test]
 fn mov_to_si_disp8_writes_at_a_negative_offset() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ax = 0xA534;
     cpu.si = 0x0180;
     cpu.ip = 0x0100;
@@ -1311,7 +1314,7 @@ fn dec_cx_updates_auxiliary_carry_on_low_nibble_borrow() {
     {
         // Start AF both clear and set to catch stale flag values.
         for initial_flags in [0x0000, 0x0010] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cx = starting_cx;
             cpu.flags = initial_flags;
             let mut memory = [0x49];
@@ -1338,7 +1341,7 @@ fn dec_cx_computes_parity_from_only_the_low_byte() {
         [(0x0101, 0x0100, 0x0004), (0x0102, 0x0101, 0x0000)]
     {
         for initial_flags in [0x0000, 0x0004] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cx = starting_cx;
             cpu.flags = initial_flags;
             let mut memory = [0x49];
@@ -1369,7 +1372,7 @@ fn dec_cx_updates_sign_and_overflow() {
     for (starting_cx, expected_cx, expected_sf, expected_of) in cases {
         // Exercise both setting flags and clearing stale flags.
         for initial_flags in [0x0000, 0x08C1] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cx = starting_cx;
             cpu.flags = initial_flags;
             let mut memory = [0x49];
@@ -1397,7 +1400,7 @@ fn dec_cx_updates_sign_and_overflow() {
 
 #[test]
 fn dec_cx_clears_overflow_on_the_next_decrement() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.cx = 0x8000;
     let mut memory = [0x49, 0x49];
 
@@ -1421,7 +1424,7 @@ fn dec_cx_clears_overflow_on_the_next_decrement() {
 // These tests expect normal completion: a host arithmetic panic is a failure.
 #[test]
 fn dec_cx_wraps_zero_to_ffff() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.cx = 0;
     cpu.flags = 0x0041; // Start with zero and carry set.
     let mut memory = [0x49];
@@ -1450,7 +1453,7 @@ fn loop_uses_signed_displacement_and_preserves_flags() {
         (0xFFFF, 0x80, 1, 0, 0x0001),    // Fetch wraps even when branch is not taken.
     ] {
         for flags in [0x0000, 0x0FD7] {
-            let mut cpu = Cpu::new(0);
+            let mut cpu = Cpu::new(CpuModel::I8088, 0);
             cpu.cs = 0x1000;
             cpu.ip = start_ip;
             cpu.cx = initial_cx;
@@ -1494,7 +1497,7 @@ fn loop_uses_signed_displacement_and_preserves_flags() {
 
 #[test]
 fn jnz_forward_crosses_signed_16_bit_boundary() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0x7FFD;
     cpu.flags = 0; // JNZ is taken.
     let mut memory = vec![0; 0x10000];
@@ -1511,7 +1514,7 @@ fn jnz_forward_crosses_signed_16_bit_boundary() {
 
 #[test]
 fn jnz_backward_crosses_signed_16_bit_boundary() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 0x7FFE;
     cpu.flags = 0;
     let mut memory = vec![0; 0x10000];
@@ -1529,7 +1532,7 @@ fn jnz_backward_crosses_signed_16_bit_boundary() {
 fn jnz_target_wraps_at_16_bit_address_limits() {
     // Neither instruction fetch crosses 0xFFFF; these isolate target arithmetic.
     for (start_ip, displacement, expected_ip) in [(0xFFFC, 0x02, 0x0000), (0x0000, 0xFD, 0xFFFF)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ip = start_ip;
         cpu.flags = 0;
         let mut memory = vec![0; 0x10000];
@@ -1547,7 +1550,7 @@ fn jnz_target_wraps_at_16_bit_address_limits() {
 #[test]
 fn mov_al_preserves_ah() {
     for (immediate, expected_ax) in [(0x00, 0xAB00), (0x56, 0xAB56), (0xFF, 0xABFF)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0xABCD;
         cpu.ip = 2;
         let mut memory = [0, 0, 0xB0, immediate];
@@ -1563,7 +1566,7 @@ fn mov_al_preserves_ah() {
 #[test]
 fn mov_ah_preserves_al() {
     for (immediate, expected_ax) in [(0x00, 0x00CD), (0x56, 0x56CD), (0xFF, 0xFFCD)] {
-        let mut cpu = Cpu::new(0);
+        let mut cpu = Cpu::new(CpuModel::I8088, 0);
         cpu.ax = 0xABCD;
         cpu.ip = 2;
         let mut memory = [0, 0, 0xB4, immediate];
@@ -1578,7 +1581,7 @@ fn mov_ah_preserves_al() {
 
 #[test]
 fn fetch_word_reads_little_endian_and_advances_ip() {
-    let mut cpu = Cpu::new(0);
+    let mut cpu = Cpu::new(CpuModel::I8088, 0);
     cpu.ip = 2;
     let memory = [0xAA, 0xBB, 0x34, 0x12, 0xCC];
 
