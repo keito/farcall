@@ -694,7 +694,37 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x6E | 0x7E => {
+            0x6E if self.model == CpuModel::I80286 => {
+                // OUTSB
+                self.print_instruction(byte, &format_args!("outsb"));
+
+                // We go back through step() for each REP repetition
+                if rep_prefix.is_some() && self.cx == 0 {
+                    return Ok(CpuStepResult::Continue);
+                }
+
+                let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                let value = read_byte(memory, PhysAddr::new(self.get_segment_reg(seg), self.si))?;
+                if self.get_flag(Flag::Direction) {
+                    self.si = self.si.wrapping_sub(1);
+                } else {
+                    self.si = self.si.wrapping_add(1);
+                }
+
+                // Go back for another repetition, since cx wasn't 0
+                if rep_prefix.is_some() {
+                    self.cx = self.cx.wrapping_sub(1);
+                    if self.cx > 0 {
+                        self.ip = instruction_ip;
+                    }
+                }
+
+                return Ok(CpuStepResult::PortWrite8 {
+                    port: self.dx as u16,
+                    value,
+                });
+            }
+            0x6E | 0x7E if byte == 0x7E || self.model == CpuModel::I8088 => {
                 // JLE/JNG
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jle {:X}h", operand));

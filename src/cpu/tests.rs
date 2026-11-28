@@ -24,6 +24,7 @@ mod memory_access;
 mod movs;
 mod mul;
 mod neg;
+mod outsb;
 mod push_immediate;
 mod push_sp;
 mod pusha_popa;
