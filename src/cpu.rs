@@ -241,6 +241,7 @@ impl Cpu {
             return Ok(CpuStepResult::Continue);
         }
 
+        let instruction_ip = self.ip;
         let mut byte;
         let mut segment_override = None;
         let mut rep_prefix = None;
@@ -514,7 +515,34 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x62 | 0x72 => {
+            0x62 if self.model == CpuModel::I80286 => {
+                // BOUND /r
+                let (reg, rm) = self.fetch_reg_rm::<Reg16>(memory, segment_override)?;
+                self.print_instruction(byte, &format_args!("bound {}, {}", reg, rm));
+
+                // The second operand must be a memory operand
+                let RegisterOrMemoryOperand::Memory(segment, offset) = rm else {
+                    self.ip = instruction_ip;
+                    return Ok(CpuStepResult::Interrupt(6)); // #UD in protected mode
+                };
+
+                // All two words must fit be below 0FFDh in real mode
+                if offset >= 0xFFFD {
+                    self.ip = instruction_ip;
+                    return Ok(CpuStepResult::Interrupt(13));
+                }
+
+                let address = SegmentedAddr::new(self.get_segment_reg(segment), offset);
+                let lower_word = read_word(memory, address)? as i16;
+                let upper_word = read_word(memory, address.wrapping_add(2))? as i16;
+                let index = self.get_reg16(reg) as i16;
+
+                if index < lower_word || index > upper_word {
+                    self.ip = instruction_ip;
+                    return Ok(CpuStepResult::Interrupt(5));
+                }
+            }
+            0x62 | 0x72 if byte == 0x72 || self.model == CpuModel::I8088 => {
                 // Jump if Below
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jb {:X}h", operand));

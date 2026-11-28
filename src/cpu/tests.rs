@@ -3,6 +3,7 @@ use crate::{cpu::CpuModel, memory::MemoryError};
 
 mod adc;
 mod addressing;
+mod bound;
 mod cmp;
 mod cmps;
 mod daa;
