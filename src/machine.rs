@@ -4,12 +4,12 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuError, CpuModel, CpuStepResult, Flag, PortReadDest8};
+use crate::cpu::{Cpu, CpuError, CpuModel, CpuStepResult, Flag, PortReadDest8, PortReadDest16};
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, read_buffer, validate_buffer, write_buffer, write_byte,
     write_word,
 };
-use crate::registers::Reg8;
+use crate::registers::{Reg8, Reg16};
 use bios::{Bios, BiosError};
 use bios_keyboard::{BiosKeyStroke, BiosKeyboard};
 use cga_video::CgaVideo;
@@ -408,9 +408,12 @@ impl Machine {
                 }
                 Ok(MachineStepResult::Continue)
             }
-            CpuStepResult::PortRead16 { .. } => {
-                // TODO
-                self.cpu.ax = 0xFFFF;
+            CpuStepResult::PortRead16 { port, dest } => {
+                let value = self.read_port16(port)?;
+                match dest {
+                    PortReadDest16::Ax => self.cpu.set_reg(Reg16::Ax, value),
+                    PortReadDest16::Memory(addr) => write_word(&mut self.memory, addr, value)?,
+                }
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortWrite8 { port, value } => {
@@ -442,6 +445,12 @@ impl Machine {
             0x300 | 0x302 | 0x30E if let Some(xt_cf) = self.xt_cf.as_mut() => Ok(xt_cf.read(port)),
             _ => Ok(0xFF),
         }
+    }
+
+    fn read_port16(&mut self, port: u16) -> Result<u16, MachineError> {
+        let low = self.read_port8(port)?;
+        let high = self.read_port8(port.wrapping_add(1))?;
+        Ok(u16::from_le_bytes([low, high]))
     }
 
     fn write_port8(&mut self, port: u16, value: u8) -> Result<(), MachineError> {

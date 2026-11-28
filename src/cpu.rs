@@ -60,13 +60,18 @@ pub(crate) enum PortReadDest8 {
     Memory(PhysAddr),
 }
 
+pub(crate) enum PortReadDest16 {
+    Ax,
+    Memory(SegmentedAddr),
+}
+
 #[allow(dead_code)]
 pub(crate) enum CpuStepResult {
     Continue,
     Interrupt(u8),
     PortRead8 { port: u16, dest: PortReadDest8 },
     PortWrite8 { port: u16, value: u8 },
-    PortRead16 { port: u16 },
+    PortRead16 { port: u16, dest: PortReadDest16 },
     PortWrite16 { port: u16, value: u16 },
 }
 
@@ -720,7 +725,43 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x6D | 0x7D => {
+            0x6D if self.model == CpuModel::I80286 => {
+                // 286: INSW
+                self.print_instruction(byte, &format_args!("insw"));
+
+                // We go back through step() for each REP repetition
+                if rep_prefix.is_some() && self.cx == 0 {
+                    return Ok(CpuStepResult::Continue);
+                }
+
+                if self.di == 0xFFFF {
+                    // Cannot supply a complete word
+                    self.ip = instruction_ip;
+                    return Ok(CpuStepResult::Interrupt(13));
+                }
+
+                let original_di = self.di;
+
+                if self.get_flag(Flag::Direction) {
+                    self.di = self.di.wrapping_sub(2);
+                } else {
+                    self.di = self.di.wrapping_add(2);
+                }
+
+                // Go back for another repetition, since cx wasn't 0
+                if rep_prefix.is_some() {
+                    self.cx = self.cx.wrapping_sub(1);
+                    if self.cx > 0 {
+                        self.ip = instruction_ip;
+                    }
+                }
+
+                return Ok(CpuStepResult::PortRead16 {
+                    port: self.dx,
+                    dest: PortReadDest16::Memory(SegmentedAddr::new(self.es, original_di)),
+                });
+            }
+            0x6D | 0x7D if byte == 0x7D || self.model == CpuModel::I8088 => {
                 // JNL/JGE (jump if not signed less-than)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jnl {:X}h", operand));
@@ -1682,7 +1723,10 @@ impl Cpu {
                 // IN AX, imm8
                 let port = self.fetch_next_byte_and_advance_ip(memory);
                 self.print_instruction(byte, &format_args!("in ax, {:X}h", port));
-                return Ok(CpuStepResult::PortRead16 { port: port as u16 });
+                return Ok(CpuStepResult::PortRead16 {
+                    port: port as u16,
+                    dest: PortReadDest16::Ax,
+                });
             }
             0xE6 => {
                 // OUT imm8, AL
@@ -1746,7 +1790,10 @@ impl Cpu {
                 // IN AX, DX
                 self.print_instruction(byte, &format_args!("in ax, dx"));
                 let port = self.dx;
-                return Ok(CpuStepResult::PortRead16 { port: port });
+                return Ok(CpuStepResult::PortRead16 {
+                    port: port,
+                    dest: PortReadDest16::Ax,
+                });
             }
             0xEE => {
                 // OUT DX, AL
