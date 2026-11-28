@@ -4,7 +4,7 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-use crate::cpu::{Cpu, CpuError, CpuModel, CpuStepResult, Flag};
+use crate::cpu::{Cpu, CpuError, CpuModel, CpuStepResult, Flag, PortReadDest8};
 use crate::memory::{
     MemoryError, PhysAddr, SegmentedAddr, read_buffer, validate_buffer, write_buffer, write_byte,
     write_word,
@@ -400,8 +400,12 @@ impl Machine {
                     InterruptResult::Exit(code) => Ok(MachineStepResult::Exit(code)),
                 }
             }
-            CpuStepResult::PortRead8 { port } => {
-                self.read_port8(port)?;
+            CpuStepResult::PortRead8 { port, dest } => {
+                let value = self.read_port8(port)?;
+                match dest {
+                    PortReadDest8::Al => self.cpu.set_reg(Reg8::Al, value),
+                    PortReadDest8::Memory(addr) => write_byte(&mut self.memory, addr, value)?,
+                }
                 Ok(MachineStepResult::Continue)
             }
             CpuStepResult::PortRead16 { .. } => {
@@ -423,43 +427,21 @@ impl Machine {
         outcome
     }
 
-    fn read_port8(&mut self, port: u16) -> Result<(), MachineError> {
+    fn read_port8(&mut self, port: u16) -> Result<u8, MachineError> {
         match port {
-            0x20 | 0x21 => {
-                let result = self.pic.read(port);
-                self.cpu.set_reg(Reg8::Al, result);
-            }
-            0x40..=0x43 => {
-                let result = self.pit.read(port);
-                self.cpu.set_reg(Reg8::Al, result);
-            }
-            0x3DA => {
-                // Video Service
-                self.cpu.set_reg(Reg8::Al, self.cga_video.read_status());
-            }
+            0x20 | 0x21 => Ok(self.pic.read(port)),
+            0x40..=0x43 => Ok(self.pit.read(port)),
+            0x3DA => Ok(self.cga_video.read_status()),
             0x3F4 | 0x3F5 => {
                 let result = self.fdc.read(port);
-                self.cpu.set_reg(Reg8::Al, result);
                 // Synchronize the PIC
                 self.pic.set_irq_line(6, self.fdc.irq_output());
+                Ok(result)
             }
-            0x60..=0x63 => {
-                let result = self.ppi.read(port);
-                self.cpu.set_reg(Reg8::Al, result);
-            }
-            0x300 | 0x302 | 0x30E => {
-                if let Some(xt_cf) = self.xt_cf.as_mut() {
-                    let result = xt_cf.read(port);
-                    self.cpu.set_reg(Reg8::Al, result);
-                } else {
-                    self.cpu.set_reg(Reg8::Al, 0xFF);
-                }
-            }
-            _ => {
-                self.cpu.set_reg(Reg8::Al, 0xFF);
-            }
-        };
-        Ok(())
+            0x60..=0x63 => Ok(self.ppi.read(port)),
+            0x300 | 0x302 | 0x30E if let Some(xt_cf) = self.xt_cf.as_mut() => Ok(xt_cf.read(port)),
+            _ => Ok(0xFF),
+        }
     }
 
     fn write_port8(&mut self, port: u16, value: u8) -> Result<(), MachineError> {

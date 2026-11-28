@@ -103,8 +103,7 @@ impl Drop for TestDisk {
 }
 
 fn input(machine: &mut Machine, port: u16) -> u8 {
-    machine.read_port8(port).unwrap();
-    machine.cpu.ax as u8
+    machine.read_port8(port).unwrap()
 }
 
 fn output(machine: &mut Machine, port: u16, value: u8) {

@@ -8,6 +8,7 @@ use super::{CgaVideo, Cpu, InterruptResult, LoadMode, Machine, MachineStepResult
 
 mod bios_video;
 mod disk;
+mod insb;
 mod xt_cf;
 
 #[test]
