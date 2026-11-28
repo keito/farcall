@@ -735,7 +735,46 @@ impl Cpu {
                     self.ip = self.ip.wrapping_add_signed(operand as i16);
                 }
             }
-            0x6F | 0x7F => {
+            0x6F if self.model == CpuModel::I80286 => {
+                // OUTSW
+                self.print_instruction(byte, &format_args!("outsw"));
+
+                // We go back through step() for each REP repetition
+                if rep_prefix.is_some() && self.cx == 0 {
+                    return Ok(CpuStepResult::Continue);
+                }
+
+                if self.si == 0xFFFF {
+                    // Cannot supply a complete word
+                    self.ip = instruction_ip;
+                    return Ok(CpuStepResult::Interrupt(13));
+                }
+
+                let seg = segment_override.unwrap_or(SegmentReg::Ds);
+                let value = read_word(
+                    memory,
+                    SegmentedAddr::new(self.get_segment_reg(seg), self.si),
+                )?;
+                if self.get_flag(Flag::Direction) {
+                    self.si = self.si.wrapping_sub(2);
+                } else {
+                    self.si = self.si.wrapping_add(2);
+                }
+
+                // Go back for another repetition, since cx wasn't 0
+                if rep_prefix.is_some() {
+                    self.cx = self.cx.wrapping_sub(1);
+                    if self.cx > 0 {
+                        self.ip = instruction_ip;
+                    }
+                }
+
+                return Ok(CpuStepResult::PortWrite16 {
+                    port: self.dx as u16,
+                    value,
+                });
+            }
+            0x6F | 0x7F if byte == 0x7F || self.model == CpuModel::I8088 => {
                 // JNLE/JG (jump if not less than or equal)
                 let operand = self.fetch_next_byte_and_advance_ip(memory) as i8;
                 self.print_instruction(byte, &format_args!("jg {:X}h", operand));

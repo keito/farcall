@@ -25,6 +25,7 @@ mod movs;
 mod mul;
 mod neg;
 mod outsb;
+mod outsw;
 mod push_immediate;
 mod push_sp;
 mod pusha_popa;
